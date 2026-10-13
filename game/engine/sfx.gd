@@ -12,6 +12,13 @@ const LOOP_UNIT_SIZE := 30.0
 const MUSIC_FADE_DB := -40.0
 ## Searched in order; the last entry resolves stems that name their folder ("sim/impacts2", ES2 data).
 const SOUND_DIRS := ["audio/sfx/sim", "audio/sfx/shell", "audio/voice", "audio/sfx"]
+## Voice lines that can overlap (Battledrome's SoundManager plays every sound in one of 20 slots, 0x2828c).
+const VOICE_PLAYERS := 4
+## Every sound but a ducking voice plays on this bus (sent to Master).
+const DUCKED_BUS := "Ducked"
+const MASTER_BUS := "Master"
+## Battledrome 0x2821c: while a message voice plays, every other sound (music included) is at half volume.
+const DUCK_DB := -6.0206
 
 ## logical name -> file stem (unknown names are silently ignored).
 ## Weapon sounds are provisional until WEAPONS.DAT sound ids are wired in.
@@ -25,9 +32,14 @@ var aliases := {
 }
 ## Emitted when a non-looping music stream reaches its end (key = track key or file path).
 signal music_finished(key: String)
+## Emitted when a voice line starts (play_voice; name as asked for).
+signal voice_started(name: String)
 
 var music_player: AudioStreamPlayer
 var ui_player: AudioStreamPlayer
+## Non-positional voice lines (announcer, cockpit warnings); owned by this autoload so a line outlives the scene.
+var _voice_players: Array[AudioStreamPlayer] = []
+var _ducking := {}                   # voice player -> true while its ducking line plays
 ## Music level (dB) for the current settings (AudioSettings.apply_saved sets it).
 var music_volume_db := -6.0
 var _cache := {}
@@ -38,11 +50,20 @@ var _music_tween: Tween
 
 
 func _ready() -> void:
+	_make_ducked_bus()
 	music_player = AudioStreamPlayer.new()
+	music_player.bus = DUCKED_BUS
 	add_child(music_player)
 	music_player.finished.connect(_on_music_finished)
 	ui_player = AudioStreamPlayer.new()
+	ui_player.bus = DUCKED_BUS
 	add_child(ui_player)
+	for i in VOICE_PLAYERS:
+		var v := AudioStreamPlayer.new()
+		v.bus = DUCKED_BUS
+		v.finished.connect(_end_duck.bind(v))
+		add_child(v)
+		_voice_players.append(v)
 	AudioSettings.apply_saved()
 
 
@@ -76,6 +97,7 @@ func attach_loop(name: String, node: Node3D, volume_db := -8.0) -> AudioStreamPl
 		s = w
 	var p := AudioStreamPlayer3D.new()
 	p.stream = s
+	p.bus = DUCKED_BUS
 	p.volume_db = volume_db
 	p.unit_size = LOOP_UNIT_SIZE
 	node.add_child(p)
@@ -115,6 +137,7 @@ func _free_positional_player() -> AudioStreamPlayer3D:
 	if _pool.size() >= MAX_POSITIONAL_PLAYERS:
 		return null
 	var p := AudioStreamPlayer3D.new()
+	p.bus = DUCKED_BUS
 	p.unit_size = ONE_SHOT_UNIT_SIZE
 	p.max_distance = ONE_SHOT_MAX_DISTANCE
 	add_child(p)
@@ -228,3 +251,59 @@ func play_ui(name: String) -> void:
 	if s:
 		ui_player.stream = s
 		ui_player.play()
+
+
+## A voice line heard at the listener (not positional): `name` as for stream(). Lines may overlap.
+## A `duck` line (Battledrome's cockpit messages) halves every other sound while it plays.
+func play_voice(name: String, duck := false) -> void:
+	var s := stream(name)
+	if s == null:
+		return
+	var p := _free_voice_player()
+	_end_duck(p)
+	p.stream = s
+	p.bus = MASTER_BUS if duck else DUCKED_BUS
+	if duck:
+		_ducking[p] = true
+		_apply_duck()
+	p.play()
+	voice_started.emit(name)
+
+
+## True while a ducking voice line plays.
+func is_ducked() -> bool:
+	return not _ducking.is_empty()
+
+
+func _end_duck(p: AudioStreamPlayer) -> void:
+	if _ducking.erase(p):
+		_apply_duck()
+
+
+func _apply_duck() -> void:
+	AudioServer.set_bus_volume_db(AudioServer.get_bus_index(DUCKED_BUS), DUCK_DB if is_ducked() else 0.0)
+
+
+func _make_ducked_bus() -> void:
+	if AudioServer.get_bus_index(DUCKED_BUS) >= 0:
+		return
+	AudioServer.add_bus()
+	var i := AudioServer.bus_count - 1
+	AudioServer.set_bus_name(i, DUCKED_BUS)
+	AudioServer.set_bus_send(i, MASTER_BUS)
+
+
+## An idle voice player, else the first one (its line is cut).
+func _free_voice_player() -> AudioStreamPlayer:
+	for v in _voice_players:
+		if not v.playing:
+			return v
+	return _voice_players[0]
+
+
+## play_voice after `seconds` (timed by the scene tree, so it survives scene changes).
+func play_voice_after(name: String, seconds: float) -> void:
+	if seconds <= 0.0:
+		play_voice(name)
+		return
+	get_tree().create_timer(seconds).timeout.connect(play_voice.bind(name))

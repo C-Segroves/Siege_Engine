@@ -10,6 +10,9 @@ const TALK_BASE_SECONDS := 0.6      # silent talk length: base + per character
 const TALK_SECONDS_PER_CHAR := 0.06
 const TALK_TAIL := 0.6              # seconds the head keeps still after the speech
 const MOUTH_CLOSED := 1             # SYNC tag of the resting mouth
+const PACK := "es1"
+## The shell speeches' folder in the pack's voice clips (audio/voice/shell).
+const VOICE_DIR := "shell"
 
 var scene: TTMScene
 var voice: AudioStreamPlayer
@@ -57,12 +60,11 @@ static func _load_mouth_frames(speech: String) -> Array:
 	return sj.get("frames", []) if sj is Dictionary else []
 
 
-## Starts the voice clip if it exists; returns the talk length (the clip's, else `silent_length`).
+## Starts the voice clip if it exists; returns the talk length (the clip's, else `silent_length`). The clip is named
+## and loaded like every radio voice (RadioLine, Sfx: es1 audio/voice/shell/<speech>.wav).
 func _start_voice(speech: String, silent_length: float) -> float:
-	var wav := Assets.path("audio/voice/shell/%s.wav" % speech, "es1")
-	if speech == "" or not FileAccess.file_exists(wav):
-		return silent_length
-	voice.stream = AudioStreamWAV.load_from_file(wav)
+	var clip := RadioLine.make_voice_name(PACK, "%s/%s" % [VOICE_DIR, speech]) if speech != "" else ""
+	voice.stream = Sfx.stream(clip) if clip != "" else null
 	if voice.stream == null:
 		return silent_length
 	voice.play()

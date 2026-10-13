@@ -14,6 +14,10 @@ bundle: writes third-party-sources-<v>.zip, the Corresponding Source of every co
 <ffmpeg-build> is the out dir of tools/ffmpeg/build_ffmpeg.sh. Downloaded sdists are cached in <ffmpeg-build>/../pypi.
 
 notice: writes SOURCE-CODE.txt, the note shipped inside the release zip saying where that source is.
+
+    python tools/third_party_sources.py zip --src <folder> --out <zip>
+
+zip: zips a folder with standard '/' entry names (tools/package_release.ps1 uses it for the app zip).
 """
 import argparse
 import hashlib
@@ -186,6 +190,21 @@ def bundle(args):
     print('third-party sources: %s (%.1f MB)' % (args.out, os.path.getsize(args.out) / 1e6))
 
 
+def zip_folder(args):
+    """Zips the contents of --src. Unlike Windows PowerShell 5's Compress-Archive, which stores entry names with
+    backslashes (unzip on Linux / macOS then makes files named 'licenses\\x.txt'), names use '/' as the zip
+    format requires."""
+    src = os.path.abspath(args.src)
+    if os.path.exists(args.out):
+        os.remove(args.out)
+    with zipfile.ZipFile(args.out, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+        for folder, _dirs, files in os.walk(src):
+            for f in sorted(files):
+                path = os.path.join(folder, f)
+                z.write(path, os.path.relpath(path, src).replace(os.sep, '/'))
+    print('zip: %s (%.1f MB)' % (args.out, os.path.getsize(args.out) / 1e6))
+
+
 def notice(args):
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     with open(args.out, 'w', encoding='utf-8', newline='\r\n') as fh:
@@ -202,8 +221,11 @@ def main(argv=None):
         p.add_argument('--version', required=True)
         p.add_argument('--out', required=True)
         p.add_argument('--url', default='')
+    zp = sub.add_parser('zip')
+    zp.add_argument('--src', required=True)
+    zp.add_argument('--out', required=True)
     args = ap.parse_args(argv)
-    (bundle if args.cmd == 'bundle' else notice)(args)
+    {'bundle': bundle, 'notice': notice, 'zip': zip_folder}[args.cmd](args)
 
 
 if __name__ == '__main__':

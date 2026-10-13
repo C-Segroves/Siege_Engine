@@ -313,15 +313,18 @@ graphs, which the remake doesn't load):
   and lobbing shells; pick the weapon with the most damage per second in range with rounds or energy; throw a
   grenade at 12-40 m. Hurt below 40 %: a crude cover spot the enemy can't see. Below 50 % health, or out of
   ammunition: walk onto the nearest usable inventory (refit, heal) or ammo station.
-- **Terrain.** Along a walkable path to the goal (`InfantryBotRoute` over `BattleNavigation`, engine/navigation:
-  a navigation mesh baked asynchronously, in 96 m tiles where paths are asked for, from the battlefield's static
-  colliders - terrain, interiors, buildings - for a soldier 0.6 m wide who gets up 3 m ledges (a jump and a short
-  jet) and 60-degree slopes). Into and out of bases this way; past the path's end, or while its tiles are still
-  baking, straight at the goal. Between the points it still jumps and jets over a knee-high obstacle ahead, up to
-  goals above and when stuck, keeping an energy reserve. Why not the originals' data: Tribes 2's AI graphs (.nav /
-  .spn) cover 28 of its 52 missions in an undocumented format; Tribes 1 has none (its bots follow mission path
-  markers); the baked mesh fits every map and agrees with the physics. Test: `tests/bot_path_check.tscn` (a goal
-  inside a base on Katabatic and Raindance, from 70 m outside).
+- **Terrain.** In the open straight at the goal, running, skiing and jetting as the Tribes bots did. Where a
+  building stands in the way (the line ahead meets an interior or structure, not the terrain) or the goal is under
+  a roof, along a walkable path (`InfantryBotRoute` over `BattleNavigation`, engine/navigation: a navigation mesh
+  baked asynchronously from the battlefield's static colliders, in 96 m tiles where paths are asked for and round
+  the stations as soon as a match has bots, for a soldier 0.6 m wide who gets up 8 m ledges - a jetpack climb, as
+  the originals' bots took their graphs' jet edges; Tribes 1 bases open inner rooms only to jet shafts - and
+  60-degree slopes). A path that stops shortening the way left for 6 s is given up for 5 s (straight again). Between
+  points it still jumps and jets over a knee-high obstacle ahead, up to goals above and when stuck, keeping an energy
+  reserve. Why not the originals' data: Tribes 2's AI graphs (.nav / .spn) cover 28 of its 52 missions in an
+  undocumented format; Tribes 1 has none (its bots follow mission path markers); the baked mesh fits every map and
+  agrees with the physics. Test: `tests/bot_path_check.tscn` (from 70 m outside to a station's side inside the base
+  on Katabatic and Raindance).
 - **Vehicles.** A light bot with no enemy within 120 m walks to an EMPTY, armed, sound vehicle of its own team within
   150 m whose pilot seat it may take (BoardingRules: the hatch for non-Tribes vehicles, touch for Tribes ones). The
   vehicle then gets the existing AI pilot (AIPilot with the SEARCH order, or the flyer's FlyerAI) until the bot

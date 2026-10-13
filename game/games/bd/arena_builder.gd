@@ -74,19 +74,24 @@ static func _build_environment(parent: Node3D, light: String, light_k: float) ->
 
 
 ## Start pads, obstacles (up to the obstacle density, in the chosen style) and turrets (up to the
-## turret density). Returns the start pads' spawn transforms. ctx: {pal, scale}.
+## turret density). Returns the start pads' spawn transforms, the two sides' pads alternating (side 0, side 1, side 0
+## ...): the original collects the pads per side and starts each side on one of its own (SIM 0x2AC74, battledrome.md
+## section 6), so the first two pilots - a duel's opponents - start on opposite sides. ctx: {pal, scale}.
 static func _place_objects(parent: Node3D, a: Dictionary, settings: Dictionary, ctx: Dictionary) -> Array[Transform3D]:
 	var obst_level: int = DENSITY.get(settings.get("obstacles", "SEVERAL"), 2)
 	var turret_level: int = DENSITY.get(settings.get("turrets", "FEW"), 1)
 	var style := int(settings.get("style", randi() % STYLES))
-	var spawns: Array[Transform3D] = []
+	var pads_by_side := {}
 	for o in a.get("objects", []):
 		var r: Array = o.get("rot", [0, 0, 0])
 		var xf := _object_transform(o, ctx.scale)
 		var lvl := int(o.get("level", 0))
 		match String(o.type):
 			"start_pad":
-				spawns.append(Transform3D(Basis(Vector3.UP, -float(r[2]) / ANGLE_UNITS * TAU), xf.origin))
+				var side := int(o.get("side", 0))
+				if not pads_by_side.has(side):
+					pads_by_side[side] = []
+				pads_by_side[side].append(Transform3D(Basis(Vector3.UP, -float(r[2]) / ANGLE_UNITS * TAU), xf.origin))
 				WorldBuilder.place_static(parent, "%s:PAD" % PACK, xf, ctx.pal)
 			"obstacle":
 				if lvl <= obst_level:
@@ -96,7 +101,9 @@ static func _place_objects(parent: Node3D, a: Dictionary, settings: Dictionary, 
 					var turret_shape := "%s:%s" % [PACK, a.get("turret_shapes", {}).get("normal", "TURRET")]
 					var t := ArenaTurret.create(parent, turret_shape, xf, ctx.pal, ctx.scale)
 					t.side = int(o.get("side", 0))
-	return spawns
+					var wreck = a.get("turret_shapes", {}).get("destroyed")
+					t.wreck_shape_id = "%s:%s" % [PACK, wreck] if wreck is String and wreck != "" else ""
+	return interleave_sides(pads_by_side)
 
 
 static func _object_transform(o: Dictionary, scale: float) -> Transform3D:
@@ -114,6 +121,21 @@ static func _obstacle_shape(a: Dictionary, si: int, style: int) -> String:
 	if si < variants.size() and variants[si].size() > style:
 		return variants[si][style]
 	return String(shapes[si]).get_basename().to_upper()
+
+
+## The pads of every side taken in turn (side order 0, 1, ...): pad 0 of each side, then pad 1 of each side ...
+static func interleave_sides(pads_by_side: Dictionary) -> Array[Transform3D]:
+	var out: Array[Transform3D] = []
+	var sides := pads_by_side.keys()
+	sides.sort()
+	var most := 0
+	for side in sides:
+		most = maxi(most, (pads_by_side[side] as Array).size())
+	for k in most:
+		for side in sides:
+			if k < (pads_by_side[side] as Array).size():
+				out.append(pads_by_side[side][k])
+	return out
 
 
 static func _ring_spawns(radius: float) -> Array[Transform3D]:

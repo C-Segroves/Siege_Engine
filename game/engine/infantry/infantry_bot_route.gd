@@ -4,8 +4,8 @@ extends RefCounted
 ## the goal, running, skiing and jetting over the terrain. Where a building stands in his way (the straight line
 ## ahead hits an interior or structure, not the terrain) he follows a walkable path (BattleNavigation) into or out
 ## of the base instead. Past the path's end (a goal on a roof, a ledge the walkable surface doesn't reach), while
-## its tiles are still baking, or when the path brings him no nearer to the goal (STUCK_SECONDS: a ledge too
-## high, a jet that falls short) he goes straight again for a while, as before navigation existed.
+## its tiles are still baking, or when following the path stops shortening the way left (STUCK_SECONDS: a ledge
+## too high, a jet that falls short) he goes straight again for a while, as before navigation existed.
 
 ## A new path is asked for when the goal moved this far, or this often.
 const REPATH_DISTANCE := 4.0
@@ -20,8 +20,8 @@ const DIRECT_DISTANCE := 8.0
 ## The look ahead for a building in the way: this far along the straight line, at chest height.
 const LOOK_AHEAD := 40.0
 const CHEST := 1.2
-## No nearer to the goal by STUCK_PROGRESS metres in STUCK_SECONDS along the path: straight (and jetting up to
-## the goal) for GIVE_UP_SECONDS.
+## The way left along the path shortened by less than STUCK_PROGRESS metres in STUCK_SECONDS: straight (and
+## jetting up to the goal) for GIVE_UP_SECONDS.
 const STUCK_SECONDS := 6.0
 const STUCK_PROGRESS := 1.0
 const GIVE_UP_SECONDS := 5.0
@@ -53,7 +53,7 @@ func make_next_point(battle: Node3D, at: Vector3, goal: Vector3, delta: float) -
 		_index += 1
 	if _index >= _path.size():
 		return goal
-	_apply_stuck_watch(at, goal, delta)
+	_apply_stuck_watch(make_remaining_length(at), delta)
 	return _path[_index] if _straight_left <= 0.0 else goal
 
 
@@ -96,12 +96,21 @@ static func _goal_inside(battle: Node3D, goal: Vector3) -> bool:
 	return not hit.is_empty() and not (hit.collider as Node).is_in_group("terrain")
 
 
-## Gives the path up for GIVE_UP_SECONDS when following it brings the bot no nearer to `p` (the goal: a path
-## that circles a ledge it cannot climb, re-planned the same way every few seconds).
-func _apply_stuck_watch(at: Vector3, p: Vector3, delta: float) -> void:
-	var d := at.distance_to(p)
-	if d < _watch_best - STUCK_PROGRESS:
-		_watch_best = d
+## The way left along the path from `at`: to the current point, then point to point to its end.
+func make_remaining_length(at: Vector3) -> float:
+	if _index >= _path.size():
+		return 0.0
+	var total := at.distance_to(_path[_index])
+	for i in range(_index, _path.size() - 1):
+		total += _path[i].distance_to(_path[i + 1])
+	return total
+
+
+## Gives the path up for GIVE_UP_SECONDS when following it does not shorten the way left (`remaining`, metres):
+## a path that circles a ledge he cannot climb. A way round (out of the door first) shortens it all along.
+func _apply_stuck_watch(remaining: float, delta: float) -> void:
+	if remaining < _watch_best - STUCK_PROGRESS:
+		_watch_best = remaining
 		_watch_t = 0.0
 		return
 	_watch_t += delta

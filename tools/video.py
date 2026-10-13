@@ -18,12 +18,12 @@ import os
 import struct
 import subprocess
 import sys
-import wave
 
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import siege_paths as P  # noqa: E402
+import wav_pcm  # noqa: E402
 ROOT = P.WORK        # source tree (original/, extracted/); see tools/siege_paths.py
 RATE = 11025
 DEFAULT_MS_PER_FRAME = 83  # ESCD.EXE: "playflic.exe flic\\intro3.dfl -S83"
@@ -314,11 +314,7 @@ def ffmpeg_exe():
 
 
 def write_wav(path, pcm_u8, rate=RATE):
-    with wave.open(path, 'wb') as w:
-        w.setnchannels(1)
-        w.setsampwidth(1)
-        w.setframerate(rate)
-        w.writeframes(pcm_u8)
+    wav_pcm.write_pcm_wav(path, bytes(pcm_u8), 1, 1, rate)
 
 
 def convert_dfl(path, outdir, png=False, ogv=True, ms_per_frame=DEFAULT_MS_PER_FRAME):

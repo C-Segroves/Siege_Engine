@@ -26,12 +26,13 @@ the instruction bytes listed in EVIDENCE are checked when the exe is present):
   per-frame quantities without scaling (rocket lifetime 0x40a5d7, capacitor +20 0x40e0cc/0x40f00c, ELF ticks)
             use the nominal 125 ms frame.
 """
-import json, os, re, shutil, struct, sys
+import json, os, re, struct, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import siege_paths as P  # noqa: E402
+import wav_pcm  # noqa: E402
 SRC = P.work('es2', 'extracted')
 SIM = os.path.join(SRC, 'SIMVOL0')
 EXE = P.work('es2', 'original', 'DBSIM.EXE')
@@ -498,7 +499,7 @@ def export_sounds():
                 b = open(src, 'rb').read()
                 fmt = struct.unpack_from('<HHIIHH', b, 20)
                 assert b[:4] == b'RIFF' and b[8:12] == b'WAVE' and fmt[0] == 1, (src, fmt)   # plain PCM
-                shutil.copyfile(src, os.path.join(d, stem + '.wav'))
+                wav_pcm.copy_as_pcm(src, os.path.join(d, stem + '.wav'))
                 n += 1
                 break
     return n

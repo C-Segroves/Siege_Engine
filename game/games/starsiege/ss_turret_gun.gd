@@ -79,9 +79,7 @@ func is_in_arc(head_basis: Basis, aim_dir: Vector3) -> bool:
 
 ## Fires one shot from `from` along `dir` at `target`; `shooter` is the turret (damage attacker).
 func fire(shooter: SSTurret, from: Vector3, dir: Vector3, target: Node3D) -> void:
-	weapon.cooldown = weapon.refire
-	if weapon.ammo > 0:
-		weapon.ammo -= 1
+	weapon.spend_shot()
 	var shot := {"shooter": shooter, "def": weapon.def, "from": from, "dir": dir, "target": target}
 	if weapon.fires_beam():
 		WeaponShot.fire_beam(shot)

@@ -24,6 +24,9 @@ var _cool := 0.0
 var shape: ShapeInstance
 ## "bd:<shape>": its destruction plays the Battledrome turret death (DeathFx, SIM turret.cpp 0x1537e).
 var shape_id := ""
+## The wreck that replaces it (arena turret_shapes "destroyed": TURHLK, battledrome.md section 6); "" hides it.
+var wreck_shape_id := ""
+var _pal := ""
 
 
 static func create(parent: Node3D, shape_id: String, xf: Transform3D, pal: String, metres_per_unit: float) -> ArenaTurret:
@@ -35,6 +38,7 @@ static func create(parent: Node3D, shape_id: String, xf: Transform3D, pal: Strin
 	t.shape = ShapeInstance.new()
 	t.add_child(t.shape)
 	t.shape.build(Assets.shape(shape_id), 0, pal)
+	t._pal = pal
 	var col := CollisionShape3D.new()
 	var sph := SphereShape3D.new()
 	sph.radius = BODY_RADIUS
@@ -61,7 +65,10 @@ func apply_hit(_s: float, armor: float, _attacker: Node = null, _p := Vector3.ZE
 func apply_destroyed() -> void:
 	alive = false
 	DeathFx.play(get_parent(), DeathFx.make_body(self, shape_id, DeathFx.KIND_TURRET, Vector2(BODY_RADIUS, BODY_HEIGHT)))
-	shape.visible = false
+	if wreck_shape_id != "" and not Assets.shape(wreck_shape_id).is_empty():
+		shape.build(Assets.shape(wreck_shape_id), 0, _pal)
+	else:
+		shape.visible = false
 
 
 func _physics_process(delta: float) -> void:

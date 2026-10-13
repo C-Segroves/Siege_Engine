@@ -14,7 +14,7 @@ signal damaged(herc: Herc, attacker: Node)
 const TorsoRig := preload("res://engine/torso_rig.gd")
 const NODE_TORSO := TorsoRig.DEFAULT_TORSO_NODE
 const NODE_COCKPIT := HercModel.NODE_COCKPIT
-const GRAVITY := 9.8
+const GRAVITY := WorldPhysics.DEFAULT_GRAVITY
 ## Ground-hugging push while on the floor.
 const FLOOR_SNAP_SPEED := -0.5
 ## A dead Herc's slide comes to rest at this deceleration (m/s^2).
@@ -80,6 +80,8 @@ var shield_rear := 1750.0
 var shield_recharge := 4.0 * Packs.TICK_HZ   # per second
 ## Seconds both shield banks stay off after an EMP hit (EsDamageModel; no recharge meanwhile).
 var shields_down_s := 0.0
+## Its game's gravity (WorldPhysics; Tribes vehicles fall at 20 m/s^2).
+var gravity := GRAVITY
 ## How this vehicle's game lands weapon hits (DamageModel.for_vehicle).
 var damage_model := DamageModel.new()
 var components: Array = []    # [{name, hp, max, fatal, parent}]
@@ -184,6 +186,7 @@ func _apply_vehicle_stats() -> void:
 	shield_recharge = def.get("shield_recharge", shield_recharge)
 	capacitor_rate = def.get("capacitor_rate", capacitor_rate)
 	damage_model = DamageModel.for_vehicle(def)
+	gravity = WorldPhysics.gravity_of(def)
 
 
 ## Equips weapons from a list of weapon ids (one per hardpoint). A fixed-loadout vehicle (Tribes) always
@@ -388,7 +391,7 @@ static func make_torso_yaw_step(current: float, wanted: float, limit: float, ste
 
 func _death_slide(delta: float) -> void:
 	_death_anim(delta)
-	velocity.y -= GRAVITY * delta
+	velocity.y -= gravity * delta
 	velocity.x = move_toward(velocity.x, 0, DEATH_SLIDE_DECEL * delta)
 	velocity.z = move_toward(velocity.z, 0, DEATH_SLIDE_DECEL * delta)
 	move_and_slide()
@@ -414,7 +417,7 @@ func _drive(delta: float) -> void:
 	if is_on_floor():
 		velocity.y = FLOOR_SNAP_SPEED
 	else:
-		velocity.y -= GRAVITY * delta
+		velocity.y -= gravity * delta
 	var moved_at := velocity
 	move_and_slide()
 	CollisionDamage.apply_contacts(self, moved_at)
@@ -557,15 +560,22 @@ func _show_component_damaged(comp: Dictionary) -> void:
 				shape.set_cell_state(ci, HercDamage.DAMAGED_CELL_STATE)
 
 
-## Host: a collision of `amount` (CollisionDamage, Earthsiege's ramming rule 0x13a7c): it bypasses the shields;
-## each component is hit at RAM_COMPONENT_CHANCE and takes RAM_COMPONENT_SHARE of it. `attacker` is credited.
-func apply_collision_damage(amount: float, attacker: Node) -> void:
+## Host: a collision of `amount` at `contact` (CollisionDamage, Earthsiege's ramming rule 0x13a7c): it bypasses the
+## shields; each component is hit at RAM_COMPONENT_CHANCE and takes the amount falling off with its sphere's
+## distance from the contact over RAM_REACH_UNITS (Blast); a unit without positioned components takes the
+## falloff's mean on each. `attacker` is credited.
+func apply_collision_damage(amount: float, attacker: Node, contact := Vector3.INF) -> void:
 	if not alive or is_puppet or is_spawn_protected():
 		return
 	_big_blast_played = false
-	for i in components.size():
-		if randf() < CollisionDamage.RAM_COMPONENT_CHANCE:
-			wound_component(i, amount * CollisionDamage.RAM_COMPONENT_SHARE)
+	if contact == Vector3.INF or (def.get("component_points", []) as Array).is_empty():
+		for i in components.size():
+			if randf() < CollisionDamage.RAM_COMPONENT_CHANCE:
+				wound_component(i, amount * CollisionDamage.RAM_COMPONENT_SHARE)
+	else:
+		for hit in Blast.make_component_hits(self, contact, {"amount": amount, "chance": CollisionDamage.RAM_COMPONENT_CHANCE,
+				"radius": CollisionDamage.RAM_REACH_UNITS * Assets.UNIT}):
+			wound_component(int(hit[0]), float(hit[1]))
 	KillText.apply_cause(self, KillText.CAUSE_COLLISION)   # the kill message says how (KillText)
 	_apply_damage_result(attacker)
 	KillText.apply_cause(self, "")

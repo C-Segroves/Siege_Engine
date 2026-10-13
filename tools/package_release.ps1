@@ -144,8 +144,9 @@ Write-Host ("Release folder: {0} ({1:N0} MB)" -f $Out, ($size / 1MB))
 if ($Zip) {
     $z = Join-Path $Dist ("SiegeEngine-{0}-win64.zip" -f $Version)
     if (Test-Path $z) { Remove-Item $z }
-    Compress-Archive -Path (Join-Path $Out "*") -DestinationPath $z
-    Write-Host "Zip: $z"
+    # not Compress-Archive: Windows PowerShell 5 writes '\' into the entry names, which breaks unzip elsewhere
+    & $Python (Join-Path $PSScriptRoot "third_party_sources.py") zip --src $Out --out $z
+    if ($LASTEXITCODE -ne 0) { Write-Error "zipping $Out failed"; exit 1 }
     # the Corresponding Source of the GPL / LGPL parts: attach it to the same release as the zip above
     $src = Join-Path $Dist ("third-party-sources-{0}.zip" -f $Version)
     & $Python (Join-Path $PSScriptRoot "third_party_sources.py") bundle --version $Version @urlArgs `

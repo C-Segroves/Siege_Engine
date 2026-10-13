@@ -37,8 +37,12 @@ func _run() -> void:
 	_check_mission_end()
 	_check_rules_clock()
 	_check_bd_turret_sides()
+	_check_bd_turret_wreck()
+	_check_bd_pad_sides()
+	_check_world_gravity()
 	_check_ai_detour()
 	_check_dynamic_lights()
+	_check_palette_lights()
 	_check_mission_outcome()
 	await _check_objective_lines()
 	await _check_area_rules()
@@ -586,6 +590,7 @@ func _check_damage_models() -> void:
 	_check_es_splash(es1)
 	_check_blast(battle, es1)
 	_check_turret_targeting(battle, es1)
+	_check_ram_falloff(es1)
 	_check_es_emp(es1, "es1:EMP", 2.344)
 	_check_es_emp(es2, "es2:EMP", 2.93)
 	if Assets.has_pack("bd"):
@@ -743,3 +748,71 @@ func _check_briefing_presentation() -> void:
 		for i in 10:
 			await get_tree().process_frame
 		holder.queue_free()
+
+
+# ------------------------------------------------------------------ palette point lights
+
+## A 3Space explosion light (fx light block with full_range) joins the palette shaders' point lights; its I and
+## cutoff follow its energy curve (weapon_fx.md 2.1).
+func _check_palette_lights() -> void:
+	print("Palette point lights:")
+	var l := DynamicLights.make_transient({"color": Color.WHITE, "range": 31.0, "energy": PaletteLights.ENERGY_AT_PEAK * 0.5})
+	PaletteLights.adopt(l, {"full_range": 7.78, "cutoff": 197.6})
+	add_child(l)
+	var row := PaletteLights.make_light_row(l)
+	_expect(l.is_in_group(PaletteLights.GROUP) and is_equal_approx(float(row[2]), 0.5) and is_equal_approx(float(row[1]), 98.8)
+		and is_equal_approx(float(row[3]), 7.78), "an explosion light at half I: cutoff halved, full range kept (%s)" % [row])
+	var plain := DynamicLights.make_transient({"color": Color.RED, "range": 5.0, "energy": 1.0})
+	PaletteLights.adopt(plain, {"color": [1, 0, 0]})
+	_expect(not plain.is_in_group(PaletteLights.GROUP), "a lit-material light (no 3Space block) stays out of the palette shaders")
+	l.queue_free()
+	plain.free()
+
+
+## A destroyed Battledrome turret leaves its wreck (arena turret_shapes "destroyed", TURHLK), not nothing.
+func _check_bd_turret_wreck() -> void:
+	if not Assets.has_pack("bd") or Assets.shape("bd:TURHLK").is_empty():
+		return
+	var holder := Node3D.new()
+	add_child(holder)
+	var t := ArenaTurret.create(holder, "bd:TURRET", Transform3D(), Packs.default_palette("bd"), 1.0)
+	t.wreck_shape_id = "bd:TURHLK"
+	t.apply_destroyed()
+	_expect(not t.alive and t.shape.visible and t.shape.shape == Assets.shape("bd:TURHLK"), "BD: a destroyed turret shows its TURHLK wreck")
+	holder.queue_free()
+
+
+## Battledrome start pads alternate sides, so the first two pilots start on opposite sides.
+func _check_bd_pad_sides() -> void:
+	var a := Transform3D(Basis(), Vector3(1, 0, 0))
+	var b := Transform3D(Basis(), Vector3(2, 0, 0))
+	var c := Transform3D(Basis(), Vector3(3, 0, 0))
+	var out := ArenaBuilder.interleave_sides({1: [b], 0: [a, c]})
+	_expect(Array(out) == [a, b, c], "BD: start pads alternate side 0, side 1, side 0")
+
+
+## Each game's bodies fall with the gravity its units.json names (Tribes 20 m/s^2), else the Earth value.
+func _check_world_gravity() -> void:
+	if Assets.has_pack("tribes"):
+		_expect(WorldPhysics.gravity_of_pack("tribes") == 20.0, "Tribes vehicles fall at 20 m/s^2 (contGravity)")
+	if Assets.has_pack("es1"):
+		_expect(WorldPhysics.gravity_of_pack("es1") == WorldPhysics.DEFAULT_GRAVITY, "Earthsiege falls at the Earth value")
+
+
+## A ram (0x13a7c over 1200 units) hurts the components near the contact point, none beyond the reach.
+func _check_ram_falloff(h: Herc) -> void:
+	_reset_herc(h)
+	var reach := CollisionDamage.RAM_REACH_UNITS * Assets.UNIT
+	var contact := h.make_component_position(_first_hittable(h))
+	h.apply_collision_damage(500.0, null, contact)
+	var far_hurt := 0
+	var near_hurt := 0
+	for i in h.components.size():
+		var c: Dictionary = h.components[i]
+		if float(c.hp) < float(c.max):
+			if contact.distance_to(h.make_component_position(i)) >= reach:
+				far_hurt += 1
+			else:
+				near_hurt += 1
+	_expect(far_hurt == 0 and near_hurt > 0, "Ramming: components near the contact take it, none beyond %.1f m (%d near)" % [reach, near_hurt])
+	_reset_herc(h)

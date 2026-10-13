@@ -286,6 +286,7 @@ func _play_light(parent: Node, block: Dictionary, at: Vector3) -> void:
 		"range": float(block.get("range", 10.0)), "energy": LIGHT_ENERGY})
 	if l == null:
 		return
+	PaletteLights.adopt(l, block)
 	parent.add_child(l)
 	l.global_position = at
 	_live_lights += 1

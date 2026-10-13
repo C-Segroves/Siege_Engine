@@ -27,7 +27,9 @@ Headerless **unsigned 8-bit mono PCM, 11025 Hz** [C].
 Locations: `SIMSOUND/HMI/*.SFX` (sim effects), `SIMVOICE/SIMVOICE/Pn_mmvvv.SFX` (wingman radio),
 `SPEECH/SNC/*.RAW` (shell briefing speech), `SHELL0/RES32/*.SFX|*.RAW` (shell UI sounds:
 menu door open/close, hammer/ratchet = mech lab, vehicles), `original/SSET/SOUNDSET.RAW` (sound
-test). 378 files → WAV; durations 0.06–8.2 s.
+test). 378 files → WAV; durations 0.06–8.2 s. The WAV writer (`tools/wav_pcm.py write_pcm_wav`, also
+used for copied originals) adds the RIFF pad byte after odd-length data, which Python's wave module leaves out
+(Godot's loader then read past the end of the file).
 
 ### Sim sound table `SIMVOL0/STR/SOUNDS.STR` [C structure, M field names]
 Generic Dynamix STR: `u32 dataSize, u16 count, count × {u16 len, char str[len], u8 n, u8 extra[n]}`.
@@ -143,7 +145,12 @@ tick 0/1. Battledrome songs have no branch table (10-21 zero bytes) and no loop 
 the loaded drivers (`0xA000` also matches 0xA001/0xA008, `0xA002` also matches 0xA009 = OPL3); first match wins,
 an unmatched track is silent. The games load the configured MIDI driver plus **0xA005** (digital MIDI, `0x4f2c4`),
 so `0xA005` tracks play DRUM32.DIG samples on the Sound Blaster DSP; with an AdLib (no DSP) they are silent.
-`0xA000` = Sound Master II, `0xA003` = callback track (no notes). Events of one timer tick (header `0x38` = ticks
+`0xA000` = Sound Master II, `0xA003` = HMI's callback driver. **Callback tracks are never heard** [C]: Earthsiege's
+BATTLE1A-3B, INTRO1/2 and SHELLA/B/C carry one `0xA003`-only track (no notes, a program change every bar, 158-160
+ticks), but no executable initialises a callback driver -- DBSIM inits only the configured MIDI driver (`0x4f06f`) and
+`0xA005` (`0x4f2c4`), GO.EXE `0xA005` at `0x4276d`, Battledrome SIM `0x4eb84` / SHELL `0x3f888` likewise; nothing
+pushes `0xA003` -- so the tracks are unmatched and silent and no game event is synchronised to the music. Battledrome's
+songs have no `0xA003` track and no HMI controller above 102. Events of one timer tick (header `0x38` = ticks
 per second: Earthsiege 120, Battledrome 60) are sent in track order, then file order. Channel remapping is off
 (`0x7225a(0)`). **cc7 is scaled** by song x master volume (`0x7163f`, both 0x7f).
 
@@ -189,6 +196,16 @@ HMI controllers 102-119 removed, loop points as `FF 06 "loopStart"/"loopEnd"` ma
 `0xffff8000` (+0x24): note-offs and re-triggers are ignored, samples always play out. **cc7 sets one volume for
 the whole driver**; cc10 one pan. No pitch. DIG file: `HMIDIGIP`, a 0x28-byte header, then per sample a 0x74-byte
 SOS start-sample image (+0x08 length, +0x18 note, +0x24 flags) and u8 PCM at 11025 Hz. Emulation: `tools/hmi_digi.py`.
+
+**Battledrome's bank** [C]: SIM.EXE (`"drum32.dig"` at `0x8785a`, loaded at `0x4f15c`) and SHELL.EXE load
+`SOUND\DRUM32.DIG`; `DRUM.DIG` is referenced by no executable and holds the same 30 samples byte for byte (only the
+runtime fields of the 0x74-byte headers differ). The kit is not only drums: from spectrograms (no playback), notes
+**30, 33, 48 are speech** (chopped vocal stabs, 1.1-1.2 s, syllables with moving formants), 31 / 32 falling-pitch
+vocal or synth stabs, 62 an echoing burst, 29 a 1.45 s noise swell (crowd roar or reversed cymbal), 56 / 40 crashes,
+the rest drums. They are the "voices over the music": TECHNO1 plays stab 48 at 0, 3.5, 28, 32, 58, 62 s and 33 from
+44 s; TECHNO2 stab 30 every ~7 s (14 hits) and 62 at the start; TECHNO3 stab 31 (8 hits); TITLE swell 29 at 8.3 and
+37.8 s. They are part of the Sound Blaster renders (the solo digital track projected on the shipped OGG gives 0.54-0.55
+= the master gain; `tools/tests/test_render_music.py`); an AdLib has no DSP and never played them.
 
 ### Rendering (`tools/render_music.py all es1|bd`)
 One pyopl (DOSBox OPL) chip per song, shared by all channels. Variants: **sb** (OPL3 in OPL2 mode, 16-bit, plus the

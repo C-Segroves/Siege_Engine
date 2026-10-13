@@ -7,8 +7,8 @@ extends RefCounted
 ## gameplay.md mass field 0x4c): momentum p = mass * v / 1024 (fixmul 0x5e818), impact = 300 * (p_self - p_other
 ## along self's motion) / 1024; above 200 both bodies take `impact` (0x13a7c, called for each of the pair): each of
 ## the 28 damage components, at a 50% chance (rand & 0xfff < 0x802), takes impact * (1 - d / 1200 units) by its
-## distance d from the contact point. The remake's components carry no positions, so each one hit takes the
-## falloff's mean (RAM_COMPONENT_SHARE). The original compares the forward speeds; the remake uses the velocities
+## distance d from the contact point (Blast.make_component_hits: each component's COL sphere, the unit centre for
+## one without; a vehicle without positioned components takes the falloff's mean, RAM_COMPONENT_SHARE). The original compares the forward speeds; the remake uses the velocities
 ## along the line between the two bodies (the same for a Herc walking into something). A structure is at rest.
 ## Masses and speeds are converted to Earthsiege units (MASS_TO_ES1, ES1_MPS_PER_SPEED_UNIT), so every game's
 ## vehicles ram by one rule.
@@ -28,6 +28,8 @@ const RAM_SCALE := 300.0
 const RAM_THRESHOLD := 200.0
 const FIXED_ONE := 1024.0
 const RAM_COMPONENT_CHANCE := 0.5
+## The ram's component reach (0x13a7c called with 1200 units).
+const RAM_REACH_UNITS := 1200.0
 ## Mean of the linear falloff (1 - d / reach) over the reach.
 const RAM_COMPONENT_SHARE := 0.5
 ## Earthsiege speed unit in code metres per second (units.json run_mps_per_speed_unit: 256 units = 30.48 m/s).
@@ -51,15 +53,16 @@ static func apply_contacts(mover: Herc, moved_at: Vector3) -> void:
 	if mover is Infantry or mover.is_puppet or not mover.alive or not mover.multiplayer.is_server():
 		return   # a soldier running into things takes his own falling damage (InfantryMotion)
 	for i in mover.get_slide_collision_count():
-		var other := mover.get_slide_collision(i).get_collider()
+		var hit := mover.get_slide_collision(i)
+		var other := hit.get_collider()
 		if other == null or other == mover or not _is_due(mover, other):
 			continue
 		if other is Infantry:
 			_apply_run_over(mover, other as Infantry, moved_at)
 		elif other is Herc:
-			_apply_ram(mover, other as Herc, moved_at)
+			_apply_ram(mover, other as Herc, moved_at, hit.get_position())
 		elif other is Structure:
-			_apply_ram_structure(mover, other as Structure, moved_at)
+			_apply_ram_structure(mover, other as Structure, moved_at, hit.get_position())
 
 
 ## True (and the pair's time recorded) when `mover` may damage `other` again.
@@ -75,21 +78,21 @@ static func _is_due(mover: Herc, other: Object) -> bool:
 	return true
 
 
-static func _apply_ram(mover: Herc, other: Herc, moved_at: Vector3) -> void:
+static func _apply_ram(mover: Herc, other: Herc, moved_at: Vector3, contact: Vector3) -> void:
 	var n := _make_contact_direction(mover.global_position, other.global_position)
 	var impact := make_ram_impact(make_es1_mass(mover), moved_at.dot(n), make_es1_mass(other), other.velocity.dot(n))
 	if impact <= RAM_THRESHOLD or not other.alive:
 		return
-	mover.apply_collision_damage(impact, other)
-	other.apply_collision_damage(impact, mover)
+	mover.apply_collision_damage(impact, other, contact)
+	other.apply_collision_damage(impact, mover, contact)
 
 
-static func _apply_ram_structure(mover: Herc, st: Structure, moved_at: Vector3) -> void:
+static func _apply_ram_structure(mover: Herc, st: Structure, moved_at: Vector3, contact: Vector3) -> void:
 	var n := _make_contact_direction(mover.global_position, st.global_position)
 	var impact := make_ram_impact(make_es1_mass(mover), moved_at.dot(n), 0.0, 0.0)
 	if impact <= RAM_THRESHOLD or not st.alive:
 		return
-	mover.apply_collision_damage(impact, st)
+	mover.apply_collision_damage(impact, st, contact)
 	st.apply_hit(0.0, impact, mover, mover.global_position)
 
 

@@ -45,3 +45,11 @@ sun_dir={
 "type": "vec3",
 "value": Vector3(-0.5364, -0.694, 0.4802)
 }
+palette_lights={
+"type": "sampler2D",
+"value": ""
+}
+palette_light_count={
+"type": "int",
+"value": 0
+}

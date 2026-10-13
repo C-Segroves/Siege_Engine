@@ -60,6 +60,8 @@ var bounds: BattleBounds
 var _fx: BattleFx
 var _rules: BattleRules
 var _music := BattleMusic.new()
+## A Battledrome Herc's cockpit warnings (text + voice) for the local pilot.
+var _cockpit_messages: BdCockpitMessages
 var _exit: BattleExit
 var _over := false
 var _finished := false
@@ -105,6 +107,8 @@ func _ready() -> void:
 	CommandProviders.build_for(self)
 	_add_map_pickups()
 	_build_ui()
+	_cockpit_messages = BdCockpitMessages.new(func(text: String) -> void:
+		overlay.show_message(text, BdCockpitMessages.TEXT_SECONDS))
 	if ExtractionRules.is_extraction(config):
 		extraction = ExtractionDirector.new(self, built)
 		add_child(extraction)
@@ -304,6 +308,7 @@ func _process(delta: float) -> void:
 	if overlay.scoreboard.visible:
 		overlay.update_scoreboard(vehicles)
 	_music.update(player, delta)
+	_cockpit_messages.update(player, delta, not _over)
 
 
 func _physics_process(delta: float) -> void:
@@ -359,6 +364,8 @@ func end_match(text: String, p_result := {}, winner := "") -> void:
 		return
 	_mark_over(text, p_result, {"winner": winner})
 	fx("message", [text, END_MESSAGE_SECONDS], true)
+	if ArenaAnnouncer.is_arena(config):
+		fx("arena_end", [winner], true)
 	var timer := Timer.new()
 	timer.one_shot = true
 	timer.wait_time = RETURN_DELAY

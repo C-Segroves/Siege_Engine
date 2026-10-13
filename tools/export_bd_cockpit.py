@@ -15,6 +15,8 @@ Output:
                           json also carries the strokes ({code: [[x0,y0,x1,y1]..]}, y up from the baseline)
   dba/WINNER/<i>.png + dba/WINNER.json    end-of-match banners ({count, sizes, scale})
   strings.json            MSGTEXT.BIN messages + their attributes (0x76830) + the HUD string tables
+  voices.json             in-sim voices (tools/bd_voices.py): sound table, message voices and repeat timers,
+                          the end-of-round announcer sequence, the shield-warning thresholds
 --mockup renders hud.json with the exported font onto a grey 320x200 canvas (x3) with sample values.
 """
 import json
@@ -25,6 +27,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import bd_hud  # noqa: E402
+import bd_voices  # noqa: E402
 import gfx  # noqa: E402
 import shell  # noqa: E402
 import siege_paths as P  # noqa: E402
@@ -129,6 +132,7 @@ def export(out):
     sizes = export_winner(out)
     export_font(out, img)
     export_strings(out, img)
+    write_json(os.path.join(out, 'voices.json'), bd_voices.make_voices(img), 1)
     hud = bd_hud.make_hud(img, layout, sizes)
     write_json(os.path.join(out, 'hud.json'), hud, 1)
     shown = sum(1 for m in hud['meters'] if m['visible'])

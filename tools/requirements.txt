@@ -2,7 +2,7 @@
 pycdlib          # ISO 9660 / Joliet disc images
 numpy
 pillow
-imageio-ffmpeg   # bundled ffmpeg: cinematics -> .ogv, music -> .ogg
+imageio-ffmpeg   # developer checkouts only: an ffmpeg for running the converters from source (releases bundle tools/ffmpeg/build_ffmpeg.sh)
 pyopl            # DOSBox OPL2 emulator: renders Earthsiege's FM music (optional; music is skipped without it)
 # build only
 pyinstaller      # tools/build_importer.ps1 -> dist/siege-importer/siege-importer.exe

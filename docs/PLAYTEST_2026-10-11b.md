@@ -51,6 +51,13 @@ Each item has an owner agent. Mark items FIXED with the test that covers them.
   - Shared code: MissionOutcome, DynamicLights, ShapeCycles.find_named, integer ES2 terrain light levels, and a comm-window transmit lamp that follows the speaker.
   - Tests: standardization_check, es1_mission_end_check, fix_b_check, test_ss_campaign_features, video_director_check (it now knows the "duel" shot kind).
   - Mission runtimes split: `MissionRuntimeBase` (engine) holds the shared Battle/launch/rules contract. Starsiege and Tribes no longer carry Earthsiege mission state. Tests: compile_all, standardization_check, es1_mission_end_check, es2_mission_check, test_starsiege_mission, test_ss_campaign_features, tribes_training_check, tribes_base_check, radio_check, campaign_failure_check, hangar_check, game_modes_check, infantry_check.
+  Round 3 (large items, each green before the next):
+  - Damage models per game (ES: COL-sphere pick, in-unit splash, EMP shields-off, fixing the ES2 EMP control freeze; BD: shield rules by weapon class).
+  - Shared Blast and TurretTargeting.
+  - Briefing movies (ES2 AVI, VSHELL clip table; Starsiege SMK converted) and the ES1 talking heads in the launcher.
+  - Palette point lights.
+  - Smaller items: BD turret wreck (TURHLK), BD start pads alternating by side, Weapon.spend_shot, per-pack gravity (WorldPhysics: Tribes vehicles fall at 20 m/s2), ramming with the real 0x13a7c falloff.
+  - Tests: standardization_check, ttk_check, fix_a/b, spider, tribes_vehicle, flight, infantry2, shell_check, saga/save_load, weapon_fx, death_fx, hangar. Windowed: cockpit_es2, target_view, damage_look.
 
 ## M. Menus (owner D)
 - M1 Check what the main menu and every menu UI do, especially where Back goes. **FIXED**: docs/MENU_MAP.md lists every screen with its buttons and where Back, Esc and pad B go. There is one navigation stack per router (`ScreenRouter.go / back / replace / go_root`), so Back always returns to the screen you came from, and every "main menu" action goes to the library (`Launcher.go_main_menu`). Test: `ui_nav_check` `_check_back_paths`, which covers every path in MENU_MAP.md.

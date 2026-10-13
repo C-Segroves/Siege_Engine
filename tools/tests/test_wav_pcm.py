@@ -46,3 +46,34 @@ def test_every_exported_sound_is_pcm():
         if struct.unpack_from('<H', fmt, 0)[0] != wav_pcm.WAVE_FORMAT_PCM:
             bad.append(path)
     assert not bad, bad
+
+
+def _riff_sizes(path):
+    data = open(path, 'rb').read()
+    return len(data), struct.unpack_from('<I', data, 4)[0]
+
+
+def test_odd_length_data_gets_the_riff_pad_byte(tmp_path):
+    path = str(tmp_path / 'odd.wav')
+    wav_pcm.write_pcm_wav(path, bytes([128, 129, 130]), 1, 1, 11025)
+    length, riff = _riff_sizes(path)
+    assert length % 2 == 0 and riff == length - 8
+    with wave.open(path, 'rb') as w:
+        assert w.readframes(10) == bytes([128, 129, 130])     # the data chunk keeps its true size
+
+
+def test_a_copied_original_without_the_pad_byte_is_padded(tmp_path):
+    src, dst = str(tmp_path / 'a.wav'), str(tmp_path / 'b.wav')
+    with wave.open(src, 'wb') as w:                         # Python's wave leaves the pad byte out
+        w.setnchannels(1)
+        w.setsampwidth(1)
+        w.setframerate(22050)
+        w.writeframes(bytes([1, 2, 3]))
+    wav_pcm.copy_as_pcm(src, dst)
+    length, riff = _riff_sizes(dst)
+    assert length % 2 == 0 and riff == length - 8
+
+
+def test_every_exported_sound_is_padded():
+    odd = [p for p in glob.glob(os.path.join(P.pack('*'), 'audio', '**', '*.wav'), recursive=True) if os.path.getsize(p) % 2]
+    assert not odd, odd

@@ -8,6 +8,7 @@ extends RefCounted
 ##   message [text, seconds?]        radio [speaker, text, voice?] (Battle.radio)        turret_down [node path]   structure_down [structure index]
 ##   nav_index [index]   (the host's mission reached a nav point: every peer's compass and objectives follow)
 ##   objectives [lines]  (the host's mission objectives, [{text, done}]: every client's ObjectivesPanel shows them)
+##   arena_end [winner]  (a Battledrome arena match ended: every peer's announcer, for its own pilot: ArenaAnnouncer)
 
 const DEFAULT_MESSAGE_SECONDS := 4.0
 const SPARK_VOLUME_DB := -4.0
@@ -42,6 +43,8 @@ func play(kind: String, a: Array) -> void:
 		"objectives":
 			if not _is_host() and battle.overlay.objectives != null:
 				battle.overlay.objectives.apply_host_lines(a[0])
+		"arena_end":
+			ArenaAnnouncer.play_end_of_round(ArenaAnnouncer.is_local_winner(battle, String(a[0])))
 
 
 func _is_host() -> bool:

@@ -28,10 +28,10 @@ top of the Earthsiege 1 code, not separate engines.
 |---|---|---|---|---|
 | W1 | Instant beam (ray, fx, damage) x4: `weapon.gd:235`, `ss_turret_gun.gd:93`, `tribes_turret_gun.gd:80`, `arena_turret.gd:97` | `engine/weapons/weapon_shot.gd` `WeaponShot.fire_beam(shot)`: typed hit (Starsiege turret beams now typed too) and the impact surface always (Tribes turret beams had none) | L / S | DONE (the BD no-catalog fallback beam keeps its data-less path) |
 | W2 | Projectile spawn + fx message x5 | `WeaponShot.launch_projectile(shot)`; the client copy (`battle_fx.gd:83`) still has no shooter | L / S | DONE |
-| W3 | Turret brain x3 (`ss_turret.gd:103`, `tribes_turret.gd:254`, `arena_turret.gd:57`) | `engine/weapons/turret_brain.gd` + per-game `TurretProfile` | M / M | OPEN (B owns structures) |
-| W4 | Splash/blast x4 (`projectile.gd:202`, `thrown_item.gd:135`, `self_destruct_charge.gd:88`, `tribes1_mission_runtime.gd:197`) | `engine/weapons/blast.gd` + per-game `BlastRule` | M / M | HOT (A) |
-| W5 | Damage receivers x7 (`herc.gd:428`, `infantry.gd:412`, `structure.gd:97`, `tribes_base_object.gd:182`, `ss_structure.gd:89`, `arena_turret.gd:41`, `mine_body.gd:26`) and the static `DamageTypes.current` side channel | `Hit` value + per-pack `DamageModel` (`Es1DamageModel`, `BdDamageModel`, `TribesScaleModel`); also the place to fix the fidelity gaps above | H / L | HOT (A, B) |
-| W6 | Ammo / energy / rearm x4 | `WeaponMagazine` | L / S | HOT (A) |
+| W3 | Turret brain x3 (`ss_turret.gd`, `tribes_turret.gd`, `arena_turret.gd`) | `engine/weapons/turret_targeting.gd` `TurretTargeting.find_nearest` / `is_targetable`; each turret plugs in its hostility, aim point and arc / sight tests. Head turning stays per game | M / M | DONE (targeting) |
+| W4 | Splash/blast x4 | `engine/weapons/blast.gd` `Blast` (unit radius damage with Tribes push; Earthsiege 0x13a7c component hits): projectile splash, ThrownItem, EsDamageModel, SelfDestructCharge, ramming | M / M | DONE |
+| W5 | Damage receivers and the per-game hit rules | `engine/weapons/damage_model.gd` `DamageModel` + `EsDamageModel` (COL-sphere pick, in-unit splash, EMP shields off for the shield-down time) + `BdDamageModel` (class shield rules); weapon hits carry their weapon (`Herc.apply_weapon_hit`). Open: AI difficulty scaling, system overflow, weapon knock-out, Tribes vehicle damage scales | H / L | DONE (main) |
+| W6 | Ammo / energy / rearm x4 | `Weapon.spend_shot` shared by vehicle weapons and Starsiege turret guns; Tribes energy and infantry stations keep their own | L / S | DONE (shots) |
 | W7 | Temporary `Weapon` built only to read a colour (`weapon.gd:302`, `tribes_turret_gun.gd:86`); two fallback speeds (400 for the lead calculation, 300 for the flight) | static `Weapon.make_color(def)`; `DEFAULT_PROJECTILE_SPEED` for both | L / S | DONE |
 | W8 | `Weapon`/`Projectile` lived in `games/es1` but serve every game | moved to `engine/weapons/` (class names and uids kept) | L / S | DONE |
 
@@ -47,7 +47,7 @@ top of the Earthsiege 1 code, not separate engines.
 | # | Duplication | Proposed | Risk / size | Status |
 |---|---|---|---|---|
 | O1 | Trimesh collision from a shape x4, AABB x3, body construction x3 (`structure.gd:34-60,141`, `ss_structure.gd:34-86,122`, `tribes_base_object.gd:56-124`, `world_builder.gd:196`) | `engine/world/shape_body.gd` static helpers | L / S | HOT (B) |
-| O2 | Wreck handling per game; destroyed structures kept full-height collision (`structure.gd:122`), Tribes repair reset only the look | `Structure.build_collision` / `make_shape_collision` (one trimesh builder for Structure, SSStructure, TribesBaseObject, TribesMover), `apply_ruined_look` / `apply_intact_look` rebuild the collision with the look. Open: BD turret wreck shape TURHLK, `WreckPolicy` | L / S | DONE (collision) |
+| O2 | Wreck handling per game | `Structure.build_collision` (ruins collide flattened); BD turret shows its TURHLK wreck (arena turret_shapes "destroyed"); BD start pads alternate sides (SIM 0x2AC74) | L / S | DONE |
 
 ## 3. Physics
 
@@ -61,8 +61,8 @@ top of the Earthsiege 1 code, not separate engines.
 
 | # | Duplication | Proposed | Risk / size | Status |
 |---|---|---|---|---|
-| P1 | Ground plane x4, ground height x3, gravity constants x5, death fall x3 | `engine/physics/world_physics.gd` (`gravity_for(battle)`: map, units.json, pack default) | M / M | HOT (B, C) |
-| P2 | Impact damage x3 (`CollisionDamage`, `InfantryMotion.apply_fall_damage`, `Flyer._apply_hard_landing`) | `ImpactRules` with per-pack strategies | M / M | HOT (B, C) |
+| P1 | Ground plane x4, ground height x3, gravity constants x5, death fall x3 | `engine/physics/world_physics.gd` `WorldPhysics.gravity_of_pack` from each pack's units.json (Tribes vehicles now fall at 20 m/s2, the rest 9.8); ground and death-fall copies still open | M / M | PART |
+| P2 | Impact damage x3 | ramming uses the real 0x13a7c falloff over 1200 units from the contact point (Blast; the mean only for units without component positions); fall / hard-landing rules unchanged | M / M | PART |
 | P3 | One `_drive` for every game | `GroundLocomotion` profile per game | H / L | OPEN |
 
 ## 4. Lighting
@@ -80,7 +80,7 @@ top of the Earthsiege 1 code, not separate engines.
 | L1 | Environment built in 6 game places + ~12 tests/tools; LINEAR vs FILMIC tonemaps | `engine/lighting/scene_lighting.gd` taking a per-game lighting spec (`spec_from_wld`, `spec_from_arena`, `MapEnvironment.spec_from_map`) | M / M | OPEN |
 | L2 | Global `sun_dir` written in 5 places; 3Space sun conversion copied (`world_builder.gd:44`, `world_builder_es2.gd:47`); the ES1/ES2 environments built twice | `engine/lighting/scene_lighting.gd` `SceneLighting.apply_sun_direction`, `make_3space_sun`, `build_palette_environment(spec)`; used by both world builders, the arena and MapEnvironment (hangar_bay.gd still sets its own; it was being edited) | L / S | DONE |
 | L3 | Two dynamic-light builders, different energies, one cap | `engine/lighting/dynamic_lights.gd` `DynamicLights.make_light` / `make_transient` (one budget, MAX_TRANSIENT) for FxPlayer, FxProjectileLook and TribesBaseLights | L / S | DONE |
-| L4 | Palette shaders ignore point lights and light level | global point-light array + `light_scale` uniform | M / M | OPEN |
+| L4 | Palette shaders ignore point lights | `engine/lighting/palette_lights.gd` `PaletteLights` + `palette_point_lights.gdshaderinc`: 3Space explosion lights raise I by I x min(1, full / d) within their cutoff (weapon_fx.md 2.1) in the indexed and shaded shaders | M / M | DONE |
 
 ## 5. Wingmen, AI animation and radio
 
@@ -124,7 +124,7 @@ tables unused.
 | B2 | Killed prompts per game in a shared screen (`killed_screen.gd:8`), one victory / defeat text for every game (`match_flow.gd:288`, wrong for the Starsiege Cybrid side) | `engine/campaign_presentation.gd` `CampaignPresentation.of(campaign)`: providers answer `make_presentation()` {killed_prompt, victory_text, defeat_text}; Starsiege by side. Next: briefing voice / talking head / video descriptors in the same contract (B5) | L / S | DONE |
 | B3 | Lost-campaign Replay never shown: `debrief_screen.gd:24` passed only `text`, dropping `next.replay` | pass `replay` to the end screen | L / S | DONE (agent D) |
 | B4 | Mission result recorded twice: `mission_launch.gd:83` (shell) and `Session.finish_mission` | shell delegates to Session | M / S | OPEN |
-| B5 | Talking head and video only in the ES1 shell | presentation player (MoviePlayer + talking-head widget) | H / L | OPEN |
+| B5 | Talking head and video only in the ES1 shell | `tools/export_movies.py` (ES2 AVI + VSHELL clip table, Starsiege SMK -> .ogv); `CampaignPresentation.make_movies` / `make_talks`; ES2 briefing / debriefing / death / victory clips; ES1 commander and debriefing-officer heads in the launcher (`TalkingHead` shared with the shell, `ShellTalkPanel`). Open: Starsiege movie moments not decoded | H / L | DONE |
 
 ## 7. Mission success and failure
 
@@ -153,7 +153,7 @@ ignores "enemy knows" (mission.md:275); ES2 failure always 6, es2.md:454 says 10
 
 ## 8. Order of work
 
-Done: B1, B2, B3, M1a, M1b, M2, M3, M4, L2, L3, O2 (collision), R1, R2, R4 (lookup), W1, W2, W7, W8.
+Done: B1, B2, B3, B5, L4, M1a, M1b, M2, M3, M4, W3, W4, W5, W6, P1 (gravity), P2 (ramming), L2, L3, O2 (collision), R1, R2, R4 (lookup), W1, W2, W7, W8.
 Next, small: R4 sequence lookup, W6 magazine, O1 ShapeBody (after B), L3 dynamic lights (after H).
 Then medium: M1b MissionOutcome, W3 turret brain, W4 blast, P1 world physics, L1 scene lighting for the Darkstar maps and tests, R2 registry, R3 voice player.
 Large: W5 damage models (with the section 1 fidelity gaps), M4 ES1 runtime split, P3 locomotion, L4 palette point lights, B5 talking heads / video.

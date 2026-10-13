@@ -163,7 +163,7 @@ func _apply_hard_landing() -> void:
 
 ## Shot down: falls spinning and explodes on the ground.
 func _crash(delta: float) -> void:
-	velocity.y -= GRAVITY * delta
+	velocity.y -= gravity * delta
 	rotate_z(delta * CRASH_SPIN)
 	move_and_slide()
 	if (is_on_floor() or make_altitude() <= 0.0) and visible:

@@ -54,6 +54,7 @@ func _add_audio_section() -> void:
 	content.add_child(_volume_row("Music volume", AudioSettings.MUSIC_KEY))
 	content.add_child(_music_device_row())
 	content.add_child(_arena_music_row())
+	content.add_child(_voices_row())
 
 
 func _volume_row(text: String, key: String) -> OptionRow:
@@ -76,6 +77,13 @@ func _arena_music_row() -> OptionRow:
 	var o := Widgets.option_button(labels, MusicLibrary.ARENA_SETS.find(MusicLibrary.arena_set()))
 	o.item_selected.connect(func(i: int) -> void: MusicLibrary.set_arena_set(MusicLibrary.ARENA_SETS[i]))
 	return OptionRow.new("Battledrome arena music", o)
+
+
+## Battledrome's announcer and Herc warning voice, the original's Preferences VOICES (default on).
+func _voices_row() -> OptionRow:
+	var c := Widgets.check_box("Arena announcer and the Herc's warning voice", AudioSettings.voices_on())
+	c.toggled.connect(AudioSettings.apply_voices)
+	return OptionRow.new("Battledrome voices", c)
 
 
 # ------------------------------------------------------------------ display

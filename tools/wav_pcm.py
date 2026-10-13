@@ -1,6 +1,6 @@
 """Copies a WAV into a pack as plain PCM (the engine's WAV loader plays PCM only).
 
-PCM files are copied byte for byte. IMA ADPCM (WAVE_FORMAT_IMA_ADPCM, 0x0011: Tribes 2 thrust.wav) is decoded to
+PCM files are copied byte for byte (plus the RIFF pad byte some originals leave off after odd-length data). IMA ADPCM (WAVE_FORMAT_IMA_ADPCM, 0x0011: Tribes 2 thrust.wav) is decoded to
 16-bit PCM: each block starts with one header per channel (s16 predictor, u8 step index, u8 reserved), then 4-byte
 words of eight 4-bit samples per channel, low nibble first (the Microsoft / IMA multimedia recommendation).
 Any other codec fails loudly so a new one is noticed at import.
@@ -20,6 +20,32 @@ IMA_STEP_TABLE = (
     5358, 5894, 6484, 7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899, 15289, 16818, 18500, 20350, 22385,
     24623, 27086, 29794, 32767)
 NIBBLES_PER_WORD = 8
+RIFF_SIZE_OFFSET = 4
+
+
+def write_pcm_wav(path, frames, channels, sample_width, rate):
+    """A PCM WAV file; odd-length data gets the RIFF pad byte (the RIFF size counts it, the data chunk size does not),
+    which Python's wave module leaves out and Godot's loader then reads past the end of the file for."""
+    with wave.open(path, 'wb') as w:
+        w.setnchannels(channels)
+        w.setsampwidth(sample_width)
+        w.setframerate(rate)
+        w.writeframes(frames)
+    if len(frames) % 2:
+        pad_riff(path)
+
+
+def pad_riff(path):
+    """Appends the pad byte to a RIFF file of odd length and counts it in the RIFF size."""
+    with open(path, 'r+b') as f:
+        f.seek(0, 2)
+        if f.tell() % 2 == 0:
+            return
+        f.write(b'\0')
+        f.seek(RIFF_SIZE_OFFSET)
+        size, = struct.unpack('<I', f.read(4))
+        f.seek(RIFF_SIZE_OFFSET)
+        f.write(struct.pack('<I', size + 1))
 
 
 def read_chunks(data):
@@ -42,6 +68,7 @@ def copy_as_pcm(src, dst):
     tag, channels, rate, _, block_align, bits = struct.unpack_from('<HHIIHH', chunks[b'fmt '], 0)
     if tag == WAVE_FORMAT_PCM:
         shutil.copyfile(src, dst)
+        pad_riff(dst)
     elif tag == WAVE_FORMAT_IMA_ADPCM:
         if bits != 4:
             raise ValueError('%s: IMA ADPCM with %d bits per sample' % (src, bits))
@@ -98,8 +125,4 @@ def _step(state, nibble):
 
 
 def _write_pcm16(path, samples, channels, rate):
-    with wave.open(path, 'wb') as w:
-        w.setnchannels(channels)
-        w.setsampwidth(2)
-        w.setframerate(rate)
-        w.writeframes(struct.pack('<%dh' % len(samples), *samples))
+    write_pcm_wav(path, struct.pack('<%dh' % len(samples), *samples), channels, 2, rate)

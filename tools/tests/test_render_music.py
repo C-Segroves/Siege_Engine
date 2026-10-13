@@ -182,3 +182,82 @@ def test_battledrome_song_plays_once_with_its_bend_range():
     assert {e[4] for e in sent} == {2, 12}               # cc102 reaches the FM driver
     mono, meta = _render(BD_SONG, 'bd', 'sb')
     assert not meta['loop'] and len(mono) > 0
+
+
+# ------------------------------------------------------------------ digital samples, callback tracks, voices
+
+BD_SOUND = P.work('bd', 'installed', 'SOUND')
+BD_TECHNO2 = os.path.join(BD_SOUND, 'TECHNO2.HMP')
+BD_TECHNO2_OGG = P.pack('bd', 'audio', 'music', 'sb', 'techno2.ogg')
+ES1_SONGS = [P.work('extracted', 'SIMSOUND', 'HMI', 'BATTLE1A.HMP'), P.work('extracted', 'SHELL0', 'RES32', 'SHELLA.HMP')]
+DEVICE_CALLBACK = 0xA003
+VOCAL_STABS = (30, 33, 48)                 # DRUM32.DIG samples that are speech (spectrogram analysis)
+SAMPLE_GAIN_TOLERANCE = 0.03
+
+
+@needs_bd
+def test_battledrome_loads_drum32_dig_and_drum_dig_holds_the_same_samples():
+    for exe in ('SIM.EXE', 'SHELL.EXE'):
+        data = open(P.work('bd', 'installed', exe), 'rb').read()
+        assert b'drum32.dig' in data and b'drum.dig' not in data
+    a = hmi_digi.DigKit(os.path.join(BD_SOUND, 'DRUM.DIG'))
+    b = hmi_digi.DigKit(os.path.join(BD_SOUND, 'DRUM32.DIG'))
+    assert sorted(a.samples) == sorted(b.samples) and all(np.array_equal(a.samples[n], b.samples[n]) for n in a.samples)
+    assert set(VOCAL_STABS) <= set(b.samples)
+
+
+@needs_bd
+def test_no_battledrome_song_has_a_callback_track():
+    import glob
+    for path in glob.glob(os.path.join(BD_SOUND, '*.HMP')):
+        assert all(DEVICE_CALLBACK not in t.devices for t in hmi_song.HmpSong(path).tracks), path
+
+
+@needs_es1
+def test_earthsiege_callback_tracks_reach_no_driver():
+    """The games load only the MIDI driver and 0xA005 (DBSIM 0x4f06f / 0x4f2c4): 0xA003 tracks stay silent."""
+    import render_music
+    for path in ES1_SONGS:
+        song = hmi_song.HmpSong(path)
+        callback = [t for t in song.tracks if DEVICE_CALLBACK in t.devices]
+        assert callback and all(song.driver_for(t, render_music.VARIANTS['sb']['drivers']) is None for t in callback)
+
+
+@pytest.mark.skipif(not (os.path.exists(BD_TECHNO2) and os.path.exists(BD_TECHNO2_OGG)), reason='Battledrome music not rendered')
+def test_sound_blaster_render_carries_the_vocal_stabs_at_full_level():
+    """TECHNO2's 0xA005 track (vocal stab 30 every ~7 s) projected on the shipped render: the master gain."""
+    import music_games
+    import render_music as R
+    game = music_games.GAMES['bd']
+    kit = hmi_digi.DigKit(os.path.join(BD_SOUND, 'DRUM32.DIG'))
+    song = hmi_song.HmpSong(BD_TECHNO2)
+    events, jumps = R.schedule(song, game.policy('techno2', False))
+    timeline = R.Timeline(song.ticks_per_second, jumps)
+    routes = {t.index: song.driver_for(t, R.VARIANTS['sb']['drivers']) for t in song.tracks}
+    digi = hmi_digi.DigiDriver(kit, R.RATE)
+    stabs = 0
+    for tick, track, status, d1, d2 in events:
+        if routes.get(track) != hmi_digi.DEVICE_DIGI:
+            continue
+        if status & 0xf0 == 0xb0 and d1 == hmi_song.CC_VOLUME:
+            d2 = hmi_song.scale_volume(d2)
+        stabs += status & 0xf0 == 0x90 and d2 > 0 and d1 in VOCAL_STABS
+        digi.send(timeline.sample(tick), status, d1, d2)
+    shipped = R.decode(BD_TECHNO2_OGG)
+    solo = R.highpass1(digi.render(len(shipped)), R.DC_BLOCK_HZ / (R.RATE / 2))
+    gain = float(np.dot(shipped, solo) / np.dot(solo, solo))
+    assert stabs >= 10
+    assert abs(gain - R.MASTER_GAIN) < SAMPLE_GAIN_TOLERANCE
+
+
+@needs_bd
+def test_end_of_round_announcer_and_shield_warning_are_decoded():
+    import bd_hud
+    import bd_voices
+    v = bd_voices.make_voices(bd_hud.load_image())
+    e = v['end_of_round']
+    assert e['voices'] == ['endrnd1', 'arean01'] and (e['winner_voice'], e['loser_voice']) == ('arean11', 'arean12')
+    assert e['delays_s'] == [2.048, 2.048, 3.072]
+    assert v['shield_warning']['depleted_max'] == 25 and v['shield_warning']['low_max'] == 63
+    assert v['message_spacing_s'] == 2.048
+    assert [m['voice'] for m in v['messages'][:3]] == ['sher05', 'sher04', 'sher03']

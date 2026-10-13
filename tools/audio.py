@@ -18,10 +18,10 @@ import json
 import os
 import struct
 import sys
-import wave
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import siege_paths as P  # noqa: E402
+import wav_pcm  # noqa: E402
 ROOT = P.WORK        # source tree (original/, extracted/); see tools/siege_paths.py
 RATE = 11025          # DBSIM default driver rate (dword @VA 0x959f0), GO.EXE & PLAYFLIC use 11025 too
 SNC_TICK = 1.0 / 60   # SNC durations: 1/60 s (183.75 samples @11025)
@@ -31,11 +31,7 @@ SNC_TICK = 1.0 / 60   # SNC durations: 1/60 s (183.75 samples @11025)
 
 def pcm_to_wav(src, dst, rate=RATE):
     data = open(src, 'rb').read()
-    with wave.open(dst, 'wb') as w:
-        w.setnchannels(1)
-        w.setsampwidth(1)      # WAV 8-bit is unsigned, same as the game data
-        w.setframerate(rate)
-        w.writeframes(data)
+    wav_pcm.write_pcm_wav(dst, data, 1, 1, rate)      # WAV 8-bit is unsigned, same as the game data
     return len(data) / rate
 
 

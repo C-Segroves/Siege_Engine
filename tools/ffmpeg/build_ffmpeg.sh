@@ -74,22 +74,24 @@ autotools_lib() {   # autotools_lib <dir> [extra configure args...]
 echo "building libogg, libvorbis, libtheora ..."
 autotools_lib libogg
 autotools_lib libvorbis --disable-docs --disable-examples --disable-oggtest
-autotools_lib libtheora --disable-doc --disable-spec --disable-examples --disable-oggtest --disable-vorbistest
+# --disable-asm: libtheora 1.2.0's x86 assembly produces corrupt Theora streams in this MinGW-w64 x86_64 build
+# (FFmpeg's decoder reports "error in unpack_block_qpis" on every file); the C code path encodes correctly.
+autotools_lib libtheora --disable-asm --disable-doc --disable-spec --disable-examples --disable-oggtest --disable-vorbistest
 
 # ------------------------------------------------------------------ FFmpeg
 DECODERS=rawvideo,anm,flic,smacker,smackaud,msvideo1,msrle,aasc,cinepak,indeo2,indeo3,indeo4,indeo5,theora
 DECODERS+=,pcm_u8,pcm_s8,pcm_s16le,pcm_s16be,pcm_s24le,pcm_s24be,pcm_s32le,pcm_f32le,pcm_alaw,pcm_mulaw
 DECODERS+=,adpcm_ima_wav,adpcm_ms,mp1float,mp2float,mp3float,flac,vorbis,opus,aac,alac,wmav1,wmav2,wmapro,wmalossless
-ENCODERS=libtheora,libvorbis,pcm_s16le,pcm_u8
+ENCODERS=libtheora,libvorbis,pcm_s16le,pcm_u8,wrapped_avframe   # wrapped_avframe: `-f null` decode checks
 DEMUXERS=avi,smacker,anm,flic,rawvideo,wav,aiff,mp3,flac,ogg,mov,asf,pcm_s16le
-MUXERS=ogg,wav,pcm_s16le,null
+MUXERS=ogg,wav,pcm_s16le,null,framemd5
 PARSERS=mpegaudio,flac,vorbis,opus,aac
 FILTERS=scale,format,aformat,aresample,fps,tpad,trim,atrim,setpts,asetpts,null,anull,copy,acopy,pad,crop
 PROTOCOLS=file,pipe
 
 CONFIGURE=(
-    --prefix="$PREFIX" --arch=x86_64 --target-os=mingw32 --cross-prefix=$HOST- --pkg-config=pkg-config
-    --pkg-config-flags=--static --extra-cflags="-I$PREFIX/include" --extra-ldflags="-L$PREFIX/lib -static"
+    --arch=x86_64 --target-os=mingw32 --cross-prefix=$HOST- --pkg-config=pkg-config --pkg-config-flags=--static
+    --extra-ldflags=-static
     --enable-static --disable-shared --disable-autodetect --enable-w32threads
     --disable-everything --disable-network --disable-doc --disable-debug --disable-ffplay --disable-ffprobe
     --disable-avdevice
@@ -98,6 +100,10 @@ CONFIGURE=(
     --enable-parser=$PARSERS --enable-filter=$FILTERS --enable-protocol=$PROTOCOLS
 )
 echo "configuring FFmpeg ..."
+# the libraries are found through these variables (FFmpeg's configure reads CFLAGS / LDFLAGS from the environment)
+# rather than --extra-cflags / --extra-ldflags paths, so the configuration string that ffmpeg.exe prints
+# (`ffmpeg -version`) holds no machine-specific folders
+export CFLAGS="-O2 -I$PREFIX/include" LDFLAGS="-L$PREFIX/lib -static"
 (cd "$WORK/ffmpeg" && ./configure "${CONFIGURE[@]}" >"$WORK/ffmpeg-configure.log") || {
     tail -30 "$WORK/ffmpeg/ffbuild/config.log" >&2; exit 1; }
 for flag in GPL VERSION3 NONFREE; do
@@ -114,7 +120,8 @@ for lib in libogg libvorbis libtheora; do cp "$WORK/$lib/COPYING" "$DEST/license
 for doc in /usr/share/doc/mingw-w64-common/copyright /usr/share/doc/mingw-w64-x86-64-dev/copyright; do
     if [[ -f "$doc" ]]; then cp "$doc" "$DEST/licenses/MinGW-w64-runtime-copyright.txt"; break; fi
 done
-configuration="$(sed -n 's/^#define FFMPEG_CONFIGURATION "\(.*\)"$/\1/p' "$WORK/ffmpeg/config.h")"
+# the build folder is written as <out> so the record carries no machine-specific paths
+configuration="$(sed -n 's/^#define FFMPEG_CONFIGURATION "\(.*\)"$/\1/p' "$WORK/ffmpeg/config.h" | sed "s|$OUT|<out>|g")"
 {
     echo "ffmpeg.exe for Siege Engine's disc importer"
     echo "Built by tools/ffmpeg/build_ffmpeg.sh on $(date -u +%Y-%m-%d)."
@@ -126,7 +133,8 @@ configuration="$(sed -n 's/^#define FFMPEG_CONFIGURATION "\(.*\)"$/\1/p' "$WORK/
     grep -v '^#' "$LOCK" | awk 'NF { printf "  %-12s %-26s sha256 %s\n", $1, $2, $3 }'
     echo
     echo "Toolchain: $($HOST-gcc --version | head -1); $($HOST-ld --version | head -1); $(nasm -v)"
-    echo "Library builds: ./configure --host=$HOST --disable-shared --enable-static (+ docs/examples/tests off)"
+    echo "Library builds: ./configure --host=$HOST --disable-shared --enable-static (+ docs/examples/tests off;"
+    echo "  libtheora also --disable-asm)"
     echo
     echo "FFmpeg configure line:"
     echo "  ./configure $configuration"

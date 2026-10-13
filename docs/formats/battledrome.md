@@ -57,8 +57,9 @@ RESOURCE.000: 237 chunks, all `OPN:` + method 3; 2,540,712 → 8,301,864 bytes. 
 
 No VOLN archives exist — Battledrome loads loose files by path (`dts\thor.dcs`).
 
-Sounds: `AREAN*.RAW` = arena announcer, `SHER*.RAW` = referee ("sheriff") voice, `ENDRND1` end of
-round, weapon/impact/footfall effects. Music (rendered and selected as decoded in audio_video.md §3) sets selectable in Preferences: ROCK 'N ROLL
+Sounds: `AREAN*.RAW` = arena announcer and referee voice, `SHER*.RAW` = **the Herc's own warning voice** (cockpit
+messages such as SHIELDS LOW; not the referee), `ENDRND1` end of round, weapon/impact/footfall effects; when each
+plays: section 8 "Voices". Music (rendered and selected as decoded in audio_video.md §3) sets selectable in Preferences: ROCK 'N ROLL
 (`ROCK1-3`), TECHNO (`TECHNO1-3`), SOUNDTRACK (`SNDTRAK1-3`), VARIETY (all nine, the default), NONE; shell `TITLE`, `S1-3`
 (identical). `TECHNO4`, `SHELL2`, `BATTLE`, `FOOTFALL` are not referenced by the executables.
 
@@ -176,6 +177,43 @@ muzzle x,y,z} (the `mounts?` guess in hercs.json is misaligned).
 * Damage persists between matches: Hercs must be repaired/reloaded in the hangar (REPAIR, SELL,
   BUY, per-component prices), up to 4 camera probes (PRB100–400) can be carried.
 * Results: win/loss updates wealth, ladder rank and tier ("YOU MOVED UP!").
+
+### Voices (SIM.EXE; decoder `tools/bd_voices.py` -> `cockpit/voices.json`) [C]
+One sim time unit = 4 ms (units.md section 4).
+* **Sound table `0x78998`**: 43 x {u32 kind, char *path}; kind 1 effect (ids 0-14, 42 COLLIDE), 0 music (15-23),
+  2 voice (24-41). The player `0x2828c` drops a voice while Preferences VOICES (SoundManager +0x10a) is off.
+* **End of round** (referee state machine `0x13b74`, jump table `0x767ec`, rescheduled `now + [+0x101]`): when the
+  victory terms are met (`0x13fa8`) state 1 runs at once: `0x13c85` ENDRND1 (id 24) and both Hercs frozen (+0x40,
+  +0x166); after 0x200 units (2.048 s) `0x13cfd` AREAN01 (25); after 0x200 `0x13d6d` AREAN11 (26) when the winner
+  is `[0x954ac]`, else AREAN12 (27); after 0x300 (3.072 s) `0x13dde` ends the sim. `[0x954ac]` is always the
+  machine's own Herc (`0x2508`: the second machine of a link swaps the start pads, not the pointers), so AREAN11
+  is "you won" on the winner's screen and AREAN12 the loser's. Nothing is said at the start of a round or on a kill.
+* **Cockpit messages** (MessageManager::set `0x149b0`, table `0x76830`: 32 x {u32 MSGTEXT line, s32 sound, u8 queued,
+  u8 urgent, s32 repeat, s32 last}): a message repeats only `repeat` units after it was last shown (768 = 3.07 s
+  for INTERNAL DAMAGE, 2560 = 10.24 s for the rest, 1 for the referee lines); within 0x200 units of the previous
+  message a non-urgent one is queued (flag 1; ring of 30 at `0x96f10`, drained by `0x14978` once 0x200 units have
+  passed) or dropped; otherwise the text is shown and the voice plays, ducking every other sound to half volume
+  (`0x2821c`). SHIELDS LOW and SHIELDS DEPLETED share one repeat timer (`0x14ab8` / `0x14ac4`).
+  Voices: SHER05 INTERNAL DAMAGE (armour gone, internal value +0x16c changed: `0x7c92`), SHER04 SHIELDS DEPLETED,
+  SHER03 SHIELDS LOW, SHER06 SHIELD GENERATOR / SHER07 MAIN or TURRET ENGINE / SHER08 TARGETTING COMPUTER destroyed
+  (logical-part table `0x74eb8`, `0xaf88`), SHER09 STRUCTURAL FAILURE IMMINENT, SHER12 PROBE DESTROYED (`0x4901`),
+  SHER10 every weapon destroyed (weapon class -> message 12-17, `0xb04c`); referee (urgent): AREAN13A BREAK IT UP,
+  AREAN10 WATCH IT!, AREAN07 FINE ASSESSED, AREAN14 STEP BACK, AREAN4A every PENALTY (27-31; referee code
+  `0x12c09`..`0x1452c`). AREAN17A is not referenced. There is no crowd sound in the sim.
+* **Shield warning** (`0x8057`, every shield update of a Herc with a HUD while the referee state is 0): level =
+  shield * 256 / SG points (`0x808c`, truncated); 1..25 -> SHIELDS DEPLETED, 26..63 -> SHIELDS LOW; 0 (empty or no
+  generator) says nothing.
+* Shell: `BATDROME.SFX` (SHELL.EXE table `0x7ccb0` slot 8) plays once during the DYNAMIX / LASER .DDA intro
+  (`0x37d74`).
+
+Remake: `ArenaAnnouncer` (the end-of-round voices on every peer for its own pilot when a match in a Battledrome arena
+ends), `BdCockpitMessages` (shield warnings with the original's repeat / spacing / queue for the local pilot's
+Battledrome Herc), `Sfx.play_voice` (a message voice ducks every other sound -- the Sfx "Ducked" bus, music
+included -- by 6 dB while it plays), Options > Audio "Battledrome voices" (`AudioSettings.voices_on`, default on as
+Preferences VOICES; off keeps the message texts); checked by `game/tests/bd_voices_check.tscn`. Not modelled: the
+other cockpit messages (the remake's Battledrome Hercs carry one hull, no logical parts), the referee drone and its
+penalties, and BATDROME.SFX (the remake has no Battledrome shell intro: the DDA animation format is not decoded,
+section 10).
 
 ## 9. Tool compatibility summary
 

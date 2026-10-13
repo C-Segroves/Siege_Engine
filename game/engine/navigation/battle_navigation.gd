@@ -25,10 +25,10 @@ const TILE_HEIGHT_MARGIN := 120.0
 const CELL_SIZE := 0.6   # the soldier radius in one cell, the tile border in two
 const CELL_HEIGHT := 0.1
 ## A Tribes soldier: capsule radius 0.6 (T2 light boundingBox 1.2 / 2), 2.3 m tall. He gets up ledges as high as
-## a jump and a short jet (3 m: the bot jumps and jets at a ledge in its way, as the originals' bots took the jet
-## edges of their graphs - converted bases' doorsills sit up to ~3 m above the terrain outside) and up slopes to
-## 60 degrees (steeper ones he jets or skis).
-const SOLDIER := {"name": "soldier", "radius": 0.6, "height": 2.3, "climb": 3.0, "slope_deg": 60.0}
+## a jetpack climb (8 m: the bot jets at a path point above it, as the originals' bots took the jet edges of their
+## graphs; Tribes bases are built for it - Raindance's inner rooms open only to jet shafts, its floors sit 8 m
+## above the yard) and up slopes to 60 degrees (steeper ones he jets or skis).
+const SOLDIER := {"name": "soldier", "radius": 0.6, "height": 2.3, "climb": 8.0, "slope_deg": 60.0}
 const EDGE_CONNECTION_MARGIN := 1.0
 
 var _root: Node3D
@@ -36,6 +36,9 @@ var _source: NavigationMeshSourceGeometryData3D
 var _maps := {}          # profile name -> navigation map RID
 var _tiles := {}         # "profile|x|z" -> region RID (baked) or null (baking)
 var _pending := 0
+var _last_region_frame := -1000
+## The navigation map takes in new regions on its next sync (a physics frame): paths wait this many frames.
+const SYNC_FRAMES := 2
 
 
 ## The battle's navigation (made on first use).
@@ -66,9 +69,25 @@ func make_path(from: Vector3, to: Vector3, profile := SOLDIER) -> PackedVector3A
 	if missing > 0:
 		return PackedVector3Array()
 	var map := _map_of(profile)
-	if NavigationServer3D.map_get_iteration_id(map) == 0:
+	if NavigationServer3D.map_get_iteration_id(map) == 0 or not is_synced():
 		return PackedVector3Array()
 	return NavigationServer3D.map_get_path(map, from, to, true)
+
+
+## False for SYNC_FRAMES after a tile's region was added (the map may not have taken it in yet: a path then would
+## stop at the old edge).
+func is_synced() -> bool:
+	return Engine.get_physics_frames() - _last_region_frame >= SYNC_FRAMES
+
+
+## The walkable point nearest `p` for `profile` (Vector3.INF while nothing near is baked).
+func make_walkable_point(p: Vector3, profile := SOLDIER) -> Vector3:
+	if _request_tiles(p, p, profile) > 0 or NavigationServer3D.map_get_iteration_id(_map_of(profile)) == 0 or not is_synced():
+		return Vector3.INF
+	var map := _map_of(profile)
+	if not NavigationServer3D.map_get_closest_point_owner(map, p).is_valid():
+		return Vector3.INF   # nothing walkable baked near yet (regions still syncing)
+	return NavigationServer3D.map_get_closest_point(map, p)
 
 
 ## True when every tile between `from` and `to` is baked for `profile` (tests).
@@ -141,6 +160,7 @@ func _on_baked(key: String, nm: NavigationMesh, profile: Dictionary) -> void:
 	NavigationServer3D.region_set_map(region, _map_of(profile))
 	NavigationServer3D.region_set_navigation_mesh(region, nm)
 	_tiles[key] = region
+	_last_region_frame = Engine.get_physics_frames()
 
 
 static func _make_navmesh(profile: Dictionary) -> NavigationMesh:

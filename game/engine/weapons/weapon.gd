@@ -161,12 +161,18 @@ func muzzle() -> Node3D:
 	return HercModel.muzzle_of(mounts[mount_index % mounts.size()])
 
 
-## Starts a trigger pull: one shot, or a burst/salvo. Firing ends the shooter's spawn protection.
-func fire() -> void:
-	herc.end_spawn_protection()
+## One trigger pull's cost: the refire wait and, for an ammunition weapon, one round (every shooter of a Weapon:
+## vehicles, Starsiege turret guns).
+func spend_shot() -> void:
 	cooldown = refire
 	if ammo > 0:
 		ammo -= 1
+
+
+## Starts a trigger pull: one shot, or a burst/salvo. Firing ends the shooter's spawn protection.
+func fire() -> void:
+	herc.end_spawn_protection()
+	spend_shot()
 	_burst_left = burst - 1
 	_burst_t = burst_interval
 	_shoot()
