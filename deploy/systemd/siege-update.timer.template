@@ -1,0 +1,11 @@
+# Rendered by deploy/install.sh into /etc/systemd/system/siege-update.timer.
+[Unit]
+Description=Siege Engine: check for updates every @UPDATE_INTERVAL@
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=@UPDATE_INTERVAL@
+RandomizedDelaySec=30s
+
+[Install]
+WantedBy=timers.target

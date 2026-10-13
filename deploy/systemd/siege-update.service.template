@@ -1,0 +1,15 @@
+# Rendered by deploy/install.sh into /etc/systemd/system/siege-update.service.
+[Unit]
+Description=Siege Engine: pull new commits, re-import the discs, rebuild the browser build
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=@SERVICE_USER@
+Environment=SIEGE_CONF=@SIEGE_CONF@
+ExecStart=@REPO_DIR@/deploy/siege-update.sh
+Nice=10
+IOSchedulingClass=idle
+# A full re-import of every game can take a long time on a small container.
+TimeoutStartSec=12h

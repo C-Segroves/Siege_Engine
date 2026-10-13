@@ -1,0 +1,6 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://tests/death_fx_check.gd" id="1"]
+
+[node name="DeathFxCheck" type="Node3D"]
+script = ExtResource("1")

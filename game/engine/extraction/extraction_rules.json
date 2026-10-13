@@ -1,0 +1,174 @@
+{
+  "version": 1,
+  "notes": "Extraction mode rules (docs/design/extraction.md). Remake design values, not original game data: every item, price and faction roster is built at run time from the user's installed packs.",
+  "currency": "cr",
+  "start_money": 3000,
+  "sell_fraction": 0.5,
+  "player_team_base": 10,
+  "faction_team_base": 300,
+  "timers": {
+    "exfil_delay_s": 25.0,
+    "exfil_wait_s": 45.0,
+    "depart_after_board_s": 4.0,
+    "zone_hold_s": 8.0,
+    "drop_hold_s": 2.5,
+    "end_delay_s": 4.0,
+    "bleed_out_s": 45.0,
+    "revive_s": 5.0
+  },
+  "fast_timers": {
+    "exfil_delay_s": 2.0,
+    "exfil_wait_s": 60.0,
+    "depart_after_board_s": 1.5,
+    "zone_hold_s": 2.0,
+    "drop_hold_s": 1.0,
+    "end_delay_s": 1.5,
+    "bleed_out_s": 12.0,
+    "revive_s": 1.5
+  },
+  "revive": {
+    "reach_m": 2.5,
+    "downed_health_fraction": 0.25,
+    "revived_health_fraction": 0.3,
+    "crawl_speed_mps": 1.2
+  },
+  "transport": {
+    "ids": ["tribes2:HAVOC", "tribes:HAPC", "tribes:LAPC", "starsiege:tr_drop", "starsiege:kn_drop", "starsiege:tr_carg"],
+    "altitude_m": 45.0,
+    "approach_m": 650.0,
+    "fast_approach_m": 160.0,
+    "land_radius_m": 25.0,
+    "leave_m": 500.0
+  },
+  "map": {
+    "edge_inset": 0.12,
+    "loot_areas": 6,
+    "area_min_spacing_m": 150.0,
+    "area_radius_m": 28.0,
+    "caches_per_area": [2, 4],
+    "scattered_caches": 8,
+    "zones": 3,
+    "zone_radius_m": 18.0,
+    "fallback_half_size_m": 600.0,
+    "drop_spread_m": 8.0
+  },
+  "pickup_reach_m": 3.0,
+  "reload_seconds": 0.5,
+  "capacity": {
+    "light": {"slots": 10, "kg": 30.0},
+    "medium": {"slots": 14, "kg": 50.0},
+    "heavy": {"slots": 18, "kg": 80.0}
+  },
+  "item_kinds": {
+    "weapon":   {"label": "Weapons",   "kg": 6.0,   "stack": 1,  "price": [300, 1500]},
+    "ammo":     {"label": "Ammunition", "load_kg": 1.5, "stack": 0,  "load_price_fraction": 0.12},
+    "gear":     {"label": "Grenades, mines, kits", "kg": 0.5, "stack": 5, "price": [40, 120]},
+    "pack":     {"label": "Backpacks", "kg": 8.0,   "stack": 1,  "price": [500, 900]},
+    "salvage":  {"label": "Herc weapon salvage", "kg": 20.0, "stack": 1, "price": [600, 4000]},
+    "valuable": {"label": "Valuables", "kg": 1.0,   "stack": 4,  "price": [0, 0]},
+    "callin":   {"label": "Vehicle call-ins", "kg": 0.0, "stack": 1, "price": [2500, 14000]},
+    "armor":    {"label": "Armour", "stack": 1, "kg_by_size": {"light": 10.0, "medium": 15.0, "heavy": 25.0},
+                 "price_by_size": {"light": 0, "medium": 1800, "heavy": 3600}}
+  },
+  "ammo_loaded_fraction": 0.5,
+  "free_weapons": ["tribes:BLASTER"],
+  "weapon_overrides": {
+    "notes": "Raid-only tuning (playtest X5): the Tribes 2 blaster is a paid upgrade over the free Tribes 1 one.",
+    "tribes2:BLASTER": {"damage_scale": 1.2, "refire_scale": 0.9, "price": 450}
+  },
+  "valuables": [
+    {"key": "power_cell", "name": "Fusion power cell", "kg": 3.0, "stack": 4, "price": 260},
+    {"key": "nav_computer", "name": "Navigation computer", "kg": 1.0, "stack": 4, "price": 420},
+    {"key": "sensor_array", "name": "Sensor array", "kg": 2.0, "stack": 2, "price": 650},
+    {"key": "cybrid_core", "name": "Cybrid neural core", "kg": 2.0, "stack": 2, "price": 1600, "cybrid_only": true},
+    {"key": "faction_flag", "name": "Faction flag", "kg": 4.0, "stack": 1, "price": 0, "task_only": true}
+  ],
+  "caches": {
+    "supply":  {"name": "Supply cache",   "rolls": [2, 4], "money": [40, 260],  "weights": {"ammo": 5, "gear": 4, "weapon": 2, "pack": 1, "valuable": 1},
+                "shapes": ["tribes2:ammo_chaingun", "tribes:ammounit", "starsiege:xboxes"]},
+    "armory":  {"name": "Weapons locker", "rolls": [2, 3], "money": [0, 120],   "weights": {"weapon": 5, "ammo": 3, "pack": 1, "armor": 1},
+                "shapes": ["tribes2:ammo_disc", "tribes:ammounit", "starsiege:xboxes"]},
+    "salvage": {"name": "Salvage crate",  "rolls": [1, 2], "money": [80, 500],  "weights": {"salvage": 6, "valuable": 2},
+                "shapes": ["starsiege:rb_fltb_box", "starsiege:xboxes", "tribes:ammounit"]},
+    "bag":     {"name": "Dropped gear",   "rolls": [0, 0], "money": [0, 0],     "weights": {},
+                "shapes": ["tribes2:ammo_grenade", "tribes2:ammo_plasma", "tribes:ammounit"]},
+    "flag":    {"name": "Faction flag",   "rolls": [0, 0], "money": [0, 0],     "weights": {},
+                "shapes": ["tribes2:flag", "tribes:flag"]},
+    "wreck":   {"name": "Wreck salvage",  "rolls": [0, 0], "money": [0, 0],     "weights": {},
+                "shapes": ["starsiege:rb_fltb_box", "starsiege:xboxes", "tribes:ammounit"]}
+  },
+  "area_cache_weights": {"supply": 5, "armory": 3, "salvage": 2},
+  "scattered_cache_weights": {"supply": 6, "armory": 1, "salvage": 2},
+  "bot_drop_money": [10, 90],
+  "squad": {
+    "infantry": [2, 4],
+    "vehicles": [0, 1],
+    "medium_every": 3,
+    "heavy_every": 5,
+    "skill": 0.45
+  },
+  "factions": [
+    {"id": "uen", "name": "UEN Remnant", "kind": "human",
+     "lore": "Survivors of the old United Earth Nations Herc corps, still flying the Earthsiege-era designs.",
+     "infantry": {"packs": ["tribes", "tribes2"]}, "vehicles": {"packs": ["es1", "es2", "bd"], "side": "herc"}},
+    {"id": "imperial", "name": "Imperial Guard", "kind": "human",
+     "lore": "Harabec's Imperial forces of the Starsiege era, holding the colonies by Herc and tank.",
+     "infantry": {"packs": ["tribes", "tribes2"]}, "vehicles": {"packs": ["starsiege"], "side": "herc", "id_prefixes": ["tr_", "ha_", "pl_"]}},
+    {"id": "knights", "name": "Knights and Rebels", "kind": "human",
+     "lore": "The Knights and the colonial rebels who rose against the Empire.",
+     "infantry": {"packs": ["tribes", "tribes2"]}, "vehicles": {"packs": ["starsiege"], "side": "herc", "id_prefixes": ["kn_", "rb_", "pi_"]}},
+    {"id": "blood_eagle", "name": "Blood Eagle", "kind": "human",
+     "lore": "A warrior tribe of the far future; prizes honour won in battle.",
+     "infantry": {"packs": ["tribes2", "tribes"]}, "vehicles": {"packs": []}},
+    {"id": "diamond_sword", "name": "Diamond Sword", "kind": "human",
+     "lore": "A disciplined tribe that holds its order above all.",
+     "infantry": {"packs": ["tribes2", "tribes"]}, "vehicles": {"packs": []}},
+    {"id": "starwolf", "name": "Starwolf", "kind": "human",
+     "lore": "A pack-minded tribe of hunters and raiders.",
+     "infantry": {"packs": ["tribes", "tribes2"]}, "vehicles": {"packs": []}},
+    {"id": "phoenix", "name": "Children of the Phoenix", "kind": "human",
+     "lore": "A tribe that preaches rebirth through fire.",
+     "infantry": {"packs": ["tribes", "tribes2"]}, "vehicles": {"packs": []}},
+    {"id": "bioderm", "name": "Bioderm Horde", "kind": "bioderm",
+     "lore": "Engineered warriors who answer to no human tribe.",
+     "infantry": {"packs": ["tribes2"], "body_shapes": {"LIGHT": "tribes2:bioderm_light", "MEDIUM": "tribes2:bioderm_medium", "HEAVY": "tribes2:bioderm_heavy"}},
+     "vehicles": {"packs": []}},
+    {"id": "cybrid", "name": "Cybrid", "kind": "cybrid",
+     "lore": "The machine intelligence that has fought mankind since the first Herc wars.",
+     "infantry": {"packs": []}, "vehicles": {"packs": ["es1", "es2", "starsiege"], "side": "cybrid"}, "squad": {"infantry": [0, 0], "vehicles": [1, 2]}}
+  ],
+  "tasks": {
+    "notes": "Pre-raid tasks (docs/design/extraction.md section 5, playtest X8): the stash screen's board offers board_size, a pilot takes up to max_picked; reward = reward_per x count x the target faction's difficulty, paid on extraction.",
+    "board_size": 4,
+    "max_picked": 2,
+    "templates": [
+      {"kind": "kill_infantry", "text": "Kill %d %s soldiers", "count": [3, 6], "reward_per": 150, "needs": "infantry"},
+      {"kind": "kill_vehicles", "text": "Destroy %d %s vehicles", "count": [1, 2], "reward_per": 900, "needs": "vehicles"},
+      {"kind": "destroy_generator", "text": "Blow up the %s generator", "count": [1, 1], "reward_per": 2400, "needs": "base"},
+      {"kind": "steal_flag", "text": "Steal the %s flag and carry it out", "count": [1, 1], "reward_per": 3000, "needs": "base"}
+    ],
+    "difficulty": {"cybrid": 1.6, "bioderm": 1.3, "human": 1.0}
+  },
+  "relations": {
+    "default_preset": "story",
+    "always_hostile_kinds": ["bioderm", "cybrid"],
+    "presets": [
+      {"id": "story", "label": "Story feuds",
+       "notes": "The series' human conflicts; human pairs not listed stay neutral (docs/design/extraction.md section 3).",
+       "human_default": "neutral",
+       "pairs": [
+         {"a": "imperial", "b": "knights", "stance": "hostile", "why": "the Knights and colonial rebels rose against the Empire"},
+         {"a": "uen", "b": "knights", "stance": "hostile", "why": "the old Earth corps hunts rebels and the pirates who ride with them"},
+         {"a": "uen", "b": "imperial", "stance": "neutral", "why": "both descend from Earth's forces: an uneasy truce"},
+         {"a": "blood_eagle", "b": "diamond_sword", "stance": "hostile", "why": "the oldest rivalry of the tribal wars"},
+         {"a": "blood_eagle", "b": "starwolf", "stance": "hostile", "why": "rival tribes raiding the same worlds"},
+         {"a": "blood_eagle", "b": "phoenix", "stance": "hostile", "why": "rival tribes raiding the same worlds"},
+         {"a": "diamond_sword", "b": "starwolf", "stance": "hostile", "why": "rival tribes raiding the same worlds"},
+         {"a": "diamond_sword", "b": "phoenix", "stance": "hostile", "why": "rival tribes raiding the same worlds"},
+         {"a": "starwolf", "b": "phoenix", "stance": "hostile", "why": "rival tribes raiding the same worlds"}
+       ]},
+      {"id": "all_hostile", "label": "Everyone hostile", "human_default": "hostile", "pairs": []},
+      {"id": "humans_allied", "label": "Humans allied", "human_default": "allied", "pairs": []}
+    ]
+  }
+}

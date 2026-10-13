@@ -1,0 +1,9 @@
+{
+  "metres_per_unit": 1.0,
+  "seconds_per_tick": null,
+  "speed": {"to_mps": 1.0},
+  "angular": {"to_deg_per_s": 1.0},
+  "mass": {"unit": "tonne"},
+  "gravity_mps2": null,
+  "notes": "Starsiege (1999) runs on the Darkstar engine like Starsiege: Tribes: 1 world unit = 1 metre, physics time-based (script values per second, DTS sequence durations in seconds). Evidence from this disc: (1) The vehicle tables in scripts.vol label their units explicitly - datHerc_*.cs 'hercPos( maxPosAcc minPosVel maxForPosVel maxRevPosVel (all_m/s) )', 'hercRot(... (all_deg/s))', same for tankPos/flyerPos; e.g. Apocalypse max forward 25 m/s = 90 km/h, Talon 38.5 m/s, Myrmidon tank 27 m/s, Draco bomber 70 m/s. (2) Shape geometry (tools/darkstar_dts.py, LOD 0, 'Seq02_stand' pose) gives Herc heights in metres that match the series: Talon 7.3 m, Minotaur 7.7, Basilisk 9.9, Gorgon 10.4, Apocalypse 11.1 (ES2's Apocalypse: 9.5 m per the ES2 manual), Cybrid Executioner 14.2, Seeker 8.2; tanks 7-11 m long (Paladin 7.2, Myrmidon 11.1), Dropship 67 m; hercCpit/hercColl/newHardPoint offsets (e.g. Apocalypse hardpoints at z 1.9-3.7, collision sphere radius 3) are consistent with these sizes. (3) Weapon/projectile tables: ranges 500-1200 m (Laser 750, Heavy Laser 900, Autocannon 650, Blast Cannon 1050, artillery 5000), projectile speeds in m/s (Autocannon 500, Sparrow 400, beams 2000). (4) Terrain (.ted VOL -> .dtf GFIL header): 'scale shift' 5 => 32-unit squares, blocks of 64x64 squares (.dtb GBLK header 64 64) = 2048 units per block - exactly the 2048 m block of Tribes (256 squares x 8 m), 12x12 block map per mission; height range e.g. HA1 (Mars) 6.5..793 units. Gravity is per planet and lives in the binary mission (.mis SIMG object stream) - not decoded yet, hence gravity_mps2 null. Masses are in tonnes ('Mass/MaxMass' columns; Apocalypse 15/60 t chassis/max loaded, weapons 1-7.5 t)."
+}

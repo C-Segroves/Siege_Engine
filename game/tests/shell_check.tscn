@@ -1,0 +1,6 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://tests/shell_check.gd" id="1"]
+
+[node name="ShellCheck" type="Node"]
+script = ExtResource("1")

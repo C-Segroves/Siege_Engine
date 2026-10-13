@@ -1,0 +1,6 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://tests/cockpit_es2_check.gd" id="1"]
+
+[node name="CockpitEs2Check" type="Node3D"]
+script = ExtResource("1")

@@ -1,0 +1,6 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://tests/command_map_check.gd" id="1"]
+
+[node name="CommandMapCheck" type="Node"]
+script = ExtResource("1")

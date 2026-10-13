@@ -1,0 +1,260 @@
+class_name RaidTasks
+extends Node
+## The pre-raid tasks during a raid (playtest X8; RaidTaskBoard; child "Tasks" of the ExtractionDirector).
+## Host-authoritative:
+##   start     each player's tasks come with his roster kit. Before the squads spawn, every generator / flag task
+##             claims a base of the map (its game-mode objects, map.json "mode_objects": a team's generators and
+##             flag) for its faction, whose squad is then placed at the loot area nearest that base
+##             (make_site_claims, ExtractionSquads). The host binds the tasks: the faction's soldiers / vehicles (a
+##             kill count is cut to what the faction fields), the Tribes base generator nearest its area
+##             (TribesBase), the faction flag (a "flag" loot container holding the flag item, in the map flag's
+##             shape) at the map flag nearest its area. A task the raid cannot hold is void (no gain, no loss).
+##   progress  kills by the player (on foot or in a vehicle he sits in) of the faction's soldiers / vehicles count;
+##             the generator is done when it is destroyed; the flag when he extracts carrying it
+##   payout    extracting pays every done task's reward on top of what he carries (ExtractionDirector.apply_extract)
+## Each owner sees his own tasks (objective lines, ObjectivesPanel), sent on every change.
+
+const NODE_NAME := "Tasks"
+const FLAG_ITEM := "valuable/faction_flag"
+const FLAG_CONTAINER := "flag"
+## A generator / flag belongs to a faction when it lies this close to one of its loot areas (metres).
+const BASE_REACH := 300.0
+
+var director: ExtractionDirector
+## Host: peer -> [task state]; task state = the task + {progress, done, void}.
+var by_peer := {}
+## Every peer: the local player's task states.
+var mine: Array = []
+var _generator_of := {}      # host: task id -> TribesBaseObject
+
+
+func _init(p_director: ExtractionDirector) -> void:
+	director = p_director
+	name = NODE_NAME
+
+
+## Every faction any roster player has a task against (the squads place them first).
+static func make_required_factions(roster: Dictionary) -> Array:
+	var out := []
+	for peer in roster:
+		var kit: Dictionary = roster[peer].get("kit", {}) if roster[peer].get("kit") is Dictionary else {}
+		for t in kit.get("tasks", []):
+			if t is Dictionary and not out.has(str(t.get("faction", ""))):
+				out.append(str(t.get("faction", "")))
+	return out
+
+
+## The bases of map `m` (engine-schema map): per map team the centre of its generators and flag (mode objects).
+static func make_base_sites(m: Dictionary) -> Array:
+	var by_team := {}
+	for d in m.get("mode_objects", []):
+		var o := ModeObject.from_map(d)
+		if o.kind in [ModeObject.KIND_GENERATOR, ModeObject.KIND_FLAG]:
+			if not by_team.has(o.team):
+				by_team[o.team] = []
+			by_team[o.team].append(o.home)
+	var out := []
+	for team in by_team:
+		var sum := Vector3.ZERO
+		for p in by_team[team]:
+			sum += p
+		out.append(sum / float(by_team[team].size()))
+	return out
+
+
+## {faction id: base site} for the generator / flag tasks of the roster (one base per faction, first come first
+## served; a task with no base left is voided later).
+static func make_site_claims(roster: Dictionary, m: Dictionary) -> Dictionary:
+	var sites := make_base_sites(m)
+	var claims := {}
+	for peer in roster:
+		var kit: Dictionary = roster[peer].get("kit", {}) if roster[peer].get("kit") is Dictionary else {}
+		for t in kit.get("tasks", []):
+			if not (t is Dictionary) or not str(t.get("kind", "")) in [RaidTaskBoard.KIND_GENERATOR, RaidTaskBoard.KIND_FLAG]:
+				continue
+			var fid := str(t.get("faction", ""))
+			if not claims.has(fid) and claims.size() < sites.size():
+				claims[fid] = sites[claims.size()]
+	return claims
+
+
+# ------------------------------------------------------------------ host: binding
+
+## Host, after the squads are placed (`faction_areas`: faction id -> [area points]).
+func start_host(faction_areas: Dictionary) -> void:
+	var base := _find_base()
+	if base:
+		base.object_destroyed.connect(_on_base_object_destroyed)
+	for peer in director.battle.config.get("roster", {}):
+		var kit: Dictionary = director.battle.config.roster[peer].get("kit", {}) if director.battle.config.roster[peer].get("kit") is Dictionary else {}
+		var states := []
+		for t in kit.get("tasks", []).slice(0, RaidTaskBoard.make_max_picked()):
+			if t is Dictionary:
+				states.append(_bind(t.duplicate(), faction_areas))
+		by_peer[int(peer)] = states
+		_send_state(int(peer))
+
+
+func _bind(task: Dictionary, faction_areas: Dictionary) -> Dictionary:
+	task["progress"] = 0
+	task["done"] = false
+	task["void"] = false
+	task["count"] = int(task.get("count", 1))
+	var areas: Array = faction_areas.get(str(task.faction), [])
+	match str(task.kind):
+		RaidTaskBoard.KIND_KILL_INFANTRY, RaidTaskBoard.KIND_KILL_VEHICLES:
+			task["count"] = mini(int(task.count), _count_units(task))
+		RaidTaskBoard.KIND_GENERATOR:
+			var gen := _find_generator(areas)
+			if gen:
+				_generator_of[str(task.id)] = gen
+			task["count"] = 1 if gen else 0
+		RaidTaskBoard.KIND_FLAG:
+			task["count"] = 1 if _place_flag(areas) else 0
+	task["void"] = int(task.count) <= 0
+	task["reward"] = RaidTaskBoard.make_reward(task) if not task.void else 0
+	return task
+
+
+## The faction's units of the task's kind in the raid.
+func _count_units(task: Dictionary) -> int:
+	var n := 0
+	for h in director.battle.vehicles.values():
+		if is_instance_valid(h) and _is_task_target(task, h):
+			n += 1
+	return n
+
+
+func _is_task_target(task: Dictionary, h: Herc) -> bool:
+	if str(director.faction_teams.get(h.team, "")) != str(task.faction) or h.has_meta("transport"):
+		return false
+	return (h is Infantry) == (str(task.kind) == RaidTaskBoard.KIND_KILL_INFANTRY)
+
+
+func _find_base() -> Node:
+	var base := director.battle.get_node_or_null("TribesBase")
+	return base if base != null and base.has_signal("object_destroyed") else null
+
+
+## The live generator nearest one of `areas` within BASE_REACH (null when none).
+func _find_generator(areas: Array) -> Node3D:
+	var base := _find_base()
+	if base == null:
+		return null
+	var best: Node3D = null
+	var best_d := BASE_REACH
+	for o in base.get("objects"):
+		if str(o.get("kind")) != "generator" or _generator_of.values().has(o):
+			continue
+		var d := _distance_to_areas((o as Node3D).global_position, areas)
+		if d < best_d:
+			best_d = d
+			best = o
+	return best
+
+
+## Puts the faction's flag (a loot container holding FLAG_ITEM) at the map flag nearest one of `areas`; false when
+## the map has no flag within BASE_REACH.
+func _place_flag(areas: Array) -> bool:
+	var m: Dictionary = director.built.get("map", {}) if director.built.get("map") is Dictionary else {}
+	var best: ModeObject = null
+	var best_d := BASE_REACH
+	for d in m.get("mode_objects", []):
+		var o := ModeObject.from_map(d)
+		if o.kind == ModeObject.KIND_FLAG and _distance_to_areas(o.home, areas) < best_d:
+			best_d = _distance_to_areas(o.home, areas)
+			best = o
+	if best == null:
+		return false
+	director.add_container({"kind": FLAG_CONTAINER, "stacks": [[FLAG_ITEM, 1]], "money": 0, "shape": best.shape}, best.home)
+	return true
+
+
+static func _distance_to_areas(p: Vector3, areas: Array) -> float:
+	var best := INF
+	for a in areas:
+		best = minf(best, Vector2(p.x - a.x, p.z - a.z).length())
+	return best
+
+
+# ------------------------------------------------------------------ host: progress
+
+## Host (ExtractionDirector._on_destroyed): `h` was destroyed by `killer`.
+func on_unit_destroyed(h: Herc, killer: Node) -> void:
+	var peer := _peer_of_killer(killer)
+	if peer == 0 or not by_peer.has(peer):
+		return
+	var changed := false
+	for task in by_peer[peer]:
+		if not task.done and not task.void and str(task.kind) in [RaidTaskBoard.KIND_KILL_INFANTRY, RaidTaskBoard.KIND_KILL_VEHICLES] \
+				and _is_task_target(task, h):
+			task.progress = int(task.progress) + 1
+			task.done = int(task.progress) >= int(task.count)
+			changed = true
+	if changed:
+		_send_state(peer)
+
+
+## The raid player whose soldier is `killer` or who sits in the vehicle `killer` (0: none).
+func _peer_of_killer(killer: Node) -> int:
+	for peer in director.make_raid_peers():
+		if killer != null and (director.battle.occupancy.soldier_of(int(peer)) == killer or director.battle.occupancy.vehicle_of(int(peer)) == killer):
+			return int(peer)
+	return 0
+
+
+func _on_base_object_destroyed(obj: Node, _killer: Node) -> void:
+	for peer in by_peer:
+		for task in by_peer[peer]:
+			if _generator_of.get(str(task.id)) == obj and not task.done:
+				task.progress = 1
+				task.done = true
+				_send_state(int(peer))
+
+
+## Host: what `peer`'s done tasks pay when he extracts carrying `stacks` (a carried flag completes a flag task; flags
+## are handed in, never stashed: without_flags).
+func make_payout(peer: int, stacks: Array) -> int:
+	var carried := ExtractionInventory.new()
+	carried.apply_merge(stacks)
+	var flags := carried.count(FLAG_ITEM)
+	var total := 0
+	for task in by_peer.get(peer, []):
+		if str(task.kind) == RaidTaskBoard.KIND_FLAG and not task.void and not task.done and flags > 0:
+			flags -= 1
+			task.progress = 1
+			task.done = true
+		if task.done and not task.void:
+			total += int(task.reward)
+	_send_state(peer)
+	return total
+
+
+func _send_state(peer: int) -> void:
+	director.send_to(peer, self, "_task_state", [by_peer.get(peer, [])])
+
+
+@rpc("authority", "reliable", "call_local")
+func _task_state(states: Array) -> void:
+	mine = states
+
+
+# ------------------------------------------------------------------ every peer
+
+## Objective lines of the local player's tasks ({text, done}).
+func make_objective_lines() -> Array:
+	var out := []
+	for task in mine:
+		var text := RaidTaskBoard.make_text(task)
+		if bool(task.get("void", false)):
+			out.append({"text": "%s  (not on this map)" % text, "done": false})
+			continue
+		var progress := "  %d / %d" % [int(task.progress), int(task.count)] if int(task.count) > 1 else ""
+		out.append({"text": "%s%s  -  %s" % [text, progress, ExtractionRules.make_money_text(int(task.reward))],
+			"done": bool(task.done)})
+	return out
+
+
+## `stacks` without the faction flags (handed in at extraction: worth nothing in a stash).
+static func without_flags(stacks: Array) -> Array:
+	return stacks.filter(func(st: Array) -> bool: return str(st[0]) != FLAG_ITEM)

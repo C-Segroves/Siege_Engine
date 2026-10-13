@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://tests/es1_mission_end_check.gd" id="1"]
+
+[node name="ES1MissionEndCheck" type="Node"]
+script = ExtResource("1")

@@ -1,0 +1,117 @@
+# Builds a Windows release and attaches it, with the source of its GPL / LGPL parts, to a DRAFT GitHub release.
+#
+# Trigger: pushing a tag v* (e.g. v0.3.0), or "Run workflow" by hand (then only the build artifacts are kept and
+# no release is made). A human reviews the draft and publishes it.
+#
+# Assets of one release (both always together; licenses\SOURCE-CODE.txt in the first points to the second):
+#   SiegeEngine-<v>-win64.zip        app + importer + licenses\ (tools/package_release.ps1)
+#   third-party-sources-<v>.zip      FFmpeg / libogg / libvorbis / libtheora archives + build scripts, the PyOPL and
+#                                    pycdlib sdists, this repository, SOURCES.md (tools/third_party_sources.py)
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GODOT_VERSION: "4.6.3"
+
+jobs:
+  ffmpeg:
+    # LGPL ffmpeg.exe cross-compiled with MinGW-w64 from the archives pinned in tools/ffmpeg/sources.lock
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: |
+          sudo bash tools/ffmpeg/build_ffmpeg.sh --install-deps build/ffmpeg
+          sudo chown -R "$(id -u):$(id -g)" build
+          rm -rf build/ffmpeg/work
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-build
+          path: build/ffmpeg
+          if-no-files-found: error
+
+  windows:
+    needs: ffmpeg
+    runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - id: version
+        shell: pwsh
+        run: |
+          $v = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}".TrimStart("v") } else { "dev-$("${{ github.sha }}".Substring(0, 8))" }
+          "version=$v" >> $env:GITHUB_OUTPUT
+      - uses: actions/download-artifact@v4
+        with:
+          name: ffmpeg-build
+          path: build/ffmpeg
+      - name: Python dependencies (a clean environment, so only the listed packages are frozen)
+        run: python -m pip install -r tools/requirements.txt
+      - name: Godot ${{ env.GODOT_VERSION }} and its export templates (checked against Godot's SHA512-SUMS.txt)
+        shell: pwsh
+        run: |
+          $base = "https://github.com/godotengine/godot-builds/releases/download/$env:GODOT_VERSION-stable"
+          $exeZip = "Godot_v$env:GODOT_VERSION-stable_win64.exe.zip"
+          $tpz = "Godot_v$env:GODOT_VERSION-stable_export_templates.tpz"
+          New-Item -ItemType Directory -Force godot | Out-Null
+          Invoke-WebRequest "$base/SHA512-SUMS.txt" -OutFile godot/SHA512-SUMS.txt
+          foreach ($f in @($exeZip, $tpz)) {
+            Invoke-WebRequest "$base/$f" -OutFile "godot/$f"
+            $want = (Select-String -Path godot/SHA512-SUMS.txt -Pattern ([regex]::Escape($f) + '$')).Line.Split(" ")[0]
+            $got = (Get-FileHash -Algorithm SHA512 "godot/$f").Hash.ToLower()
+            if (-not $want -or $want -ne $got) { throw "SHA-512 mismatch for $f" }
+          }
+          Expand-Archive "godot/$exeZip" -DestinationPath godot
+          $tpl = Join-Path $env:APPDATA "Godot/export_templates/$env:GODOT_VERSION.stable"
+          Expand-Archive "godot/$tpz" -DestinationPath godot/tpl
+          New-Item -ItemType Directory -Force $tpl | Out-Null
+          Copy-Item godot/tpl/templates/* $tpl
+          $console = (Get-ChildItem godot -Filter "*_console.exe" | Select-Object -First 1).FullName
+          "GODOT=$console" >> $env:GITHUB_ENV
+      - name: Import the Godot project (first open)
+        shell: pwsh
+        run: '& $env:GODOT --headless --audio-driver Dummy --path game --import'
+      - name: Package
+        shell: pwsh
+        run: >
+          ./tools/package_release.ps1 -Godot $env:GODOT -RebuildImporter -Zip
+          -Version ${{ steps.version.outputs.version }}
+          -SourceUrl "${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ github.ref_name }}"
+          -FfmpegBuild build/ffmpeg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: |
+            dist/SiegeEngine-*-win64.zip
+            dist/third-party-sources-*.zip
+          if-no-files-found: error
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: windows
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: assets
+      - name: Draft release with both assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" assets/*.zip --repo "${{ github.repository }}" --draft \
+            --title "Siege Engine ${{ needs.windows.outputs.version }}" \
+            --notes "Windows build: SiegeEngine-${{ needs.windows.outputs.version }}-win64.zip. The source code of its GPL / LGPL components (FFmpeg, libogg, libvorbis, libtheora, PyOPL, pycdlib) and their build scripts: third-party-sources-${{ needs.windows.outputs.version }}.zip. Keep both assets attached to this release."

@@ -1,0 +1,66 @@
+# Siege Engine browser server - settings for deploy/install.sh and deploy/siege-update.sh.
+#
+# Copy this file to /etc/siege-engine/siege.conf (install.sh does it on its first run) and edit it there.
+# The real siege.conf holds your own setup (repository address, folders, password): it is never committed.
+# Every value below is a placeholder or a generic default. The file is read by bash: KEY="value", no spaces
+# around "=".
+# Guide: docs/WEB_DEPLOY.md.
+
+# ------------------------------------------------------------------ source code
+# Git address of the Siege Engine repository. With an ssh address (git@host:owner/repo.git or ssh://...)
+# install.sh creates a deploy key for the service user and prints it; add it as a read-only deploy key.
+# An https address works for a public repository (or with a credential helper you set up yourself).
+REPO_URL="git@git.example.lan:owner/Siege_Engine.git"
+BRANCH="main"
+
+# ------------------------------------------------------------------ folders
+# Program files: the git checkout (<INSTALL_DIR>/repo), the Python venv, Godot, the export templates.
+INSTALL_DIR="/opt/siege-engine"
+# Your disc images (.iso, or .cue + .bin). CD-audio tracks ripped next to an .iso go in a folder named like it.
+ISO_DIR="/srv/siege/iso"
+# Optional: folders of ripped soundtrack files (MP3/FLAC/WAV, one sub folder per game). Empty = none.
+SOUNDTRACK_DIR=""
+# Imported game data (one folder per game, written by the importer). Private: never served directly.
+DATA_DIR="/srv/siege/gamedata"
+# Scratch space for imports (unpacked discs; several GB for the bigger games).
+WORK_DIR="/srv/siege/work"
+# Built web app and packed game data; the web server serves the "current" links in here.
+SITE_DIR="/srv/siege/site"
+LOG_DIR="/var/log/siege-engine"
+# System user that runs updates and owns the folders above (created by install.sh).
+SERVICE_USER="siege"
+
+# ------------------------------------------------------------------ what to build
+# Games to import from ISO_DIR: "all" or pack ids separated by spaces (es1 bd es2 starsiege tribes tribes2).
+IMPORT_PACKS="all"
+# Games offered to the browser: "all" imported ones or pack ids separated by spaces ("_soundtracks" = music).
+WEB_PACKS="all"
+# Re-import the discs after every code update ("yes"), or only when the files in ISO_DIR change ("no").
+REIMPORT_ON_CODE_CHANGE="yes"
+# Older builds kept for a quick manual rollback.
+KEEP_RELEASES="2"
+# Pre-compress the build (gzip, plus brotli when available) so it downloads faster: "yes" / "no".
+COMPRESS="yes"
+
+# ------------------------------------------------------------------ update schedule
+# How often the server checks for new commits and changed disc images (systemd time span: 5min, 1h, ...).
+UPDATE_INTERVAL="15min"
+
+# ------------------------------------------------------------------ web server (nginx)
+HTTP_PORT="8080"
+# Optional password prompt for the page (HTTP basic auth). Both empty = no password.
+BASIC_AUTH_USER=""
+BASIC_AUTH_PASSWORD=""
+# HTTPS: "off", "self-signed" (install.sh makes a certificate; browsers warn once) or "files" (TLS_CERT/TLS_KEY).
+# Browsers only allow some features (sound worklets, the threaded engine) on https or localhost pages.
+TLS_MODE="off"
+TLS_PORT="8443"
+TLS_CERT=""
+TLS_KEY=""
+
+# ------------------------------------------------------------------ Godot (must match the project's version)
+GODOT_VERSION="4.6.3"
+GODOT_RELEASE_URL="https://github.com/godotengine/godot/releases/download"
+# Optional SHA-512 pins. Empty = check the downloads against the release's own SHA512-SUMS.txt.
+GODOT_SHA512=""
+TEMPLATES_SHA512=""

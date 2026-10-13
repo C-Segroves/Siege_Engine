@@ -1,0 +1,96 @@
+class_name Targeting
+extends RefCounted
+## The player's target selection (playtest 2026-10-11 A2), for every vehicle and soldier. Candidates are the living
+## units of other, non-allied teams: vehicles and soldiers (group "vehicles") and targetable structures (group
+## "targetables": mission buildings with display_name / team / alive / integrity).
+##
+## target_nearest (C) picks the candidate nearest the crosshair: the smallest angle off the sight line, weighted by
+## distance, a blocked line of sight counting extra; target_next (T) cycles through the candidates in front (within
+## FRONT_CONE of the sight and in view) in that order, and through all of them, best first, when none is in front.
+## The original games' keys (ES1 T next / C nearest, docs/CODING_STANDARDS.md section 2) keep their meaning; only
+## the order now starts in front of the pilot instead of anywhere on the map.
+
+const VEHICLES := "vehicles"
+const TARGETABLES := "targetables"
+## Half angle (rad) of the cone in front of the sight whose units target_next cycles through.
+const FRONT_CONE := deg_to_rad(30.0)
+## Distance (m) that weighs as much as one cone half-angle off the crosshair.
+const DISTANCE_SCALE := 600.0
+## Score added for a candidate behind terrain or buildings.
+const BLOCKED_PENALTY := 2.0
+## Aim point above a target's origin (m): the middle of a Herc or a building's lower storey.
+const CENTRE_HEIGHT := 4.0
+
+
+## Living units `viewer` may target: not itself, not allied, not dormant (mission units waiting off stage).
+static func make_candidates(viewer: Herc) -> Array:
+	var out := []
+	var seen := {}
+	for group in [VEHICLES, TARGETABLES]:
+		for n in viewer.get_tree().get_nodes_in_group(group):
+			if seen.has(n) or not _is_candidate(viewer, n):
+				continue
+			seen[n] = true
+			out.append(n)
+	return out
+
+
+static func _is_candidate(viewer: Herc, n: Node) -> bool:
+	return n != viewer and n is Node3D and bool(n.get("alive")) and not n.has_meta("dormant") \
+		and not TeamRelations.is_allied(viewer.team, int(n.get("team")))
+
+
+## The point a target is aimed at and ranked by.
+static func make_centre(t: Node3D) -> Vector3:
+	return t.global_position + Vector3.UP * CENTRE_HEIGHT
+
+
+## Angle (rad) between `viewer`'s sight line and target `t`.
+static func make_off_angle(viewer: Herc, t: Node3D) -> float:
+	var to := make_centre(t) - viewer.aim_origin()
+	return (-viewer.aim_basis().z).angle_to(to.normalized()) if to.length() > 0.001 else 0.0
+
+
+## Lower is better: angle off the crosshair in cone half-angles plus the distance in DISTANCE_SCALE units, plus
+## BLOCKED_PENALTY when terrain or a building hides it.
+static func make_score(viewer: Herc, t: Node3D) -> float:
+	var score := make_off_angle(viewer, t) / FRONT_CONE + viewer.aim_origin().distance_to(make_centre(t)) / DISTANCE_SCALE
+	if not is_visible_to(viewer, t):
+		score += BLOCKED_PENALTY
+	return score
+
+
+static func is_visible_to(viewer: Herc, t: Node3D) -> bool:
+	return LineOfSight.is_clear(viewer, viewer.aim_origin(), t, make_centre(t))
+
+
+## Candidates best first (make_score).
+static func make_ranking(viewer: Herc) -> Array:
+	var scored := []
+	for t in make_candidates(viewer):
+		scored.append([make_score(viewer, t), t])
+	scored.sort_custom(func(a, b): return a[0] < b[0])
+	return scored.map(func(e): return e[1])
+
+
+## The ranked candidates within FRONT_CONE of the sight and in view.
+static func make_front_set(viewer: Herc) -> Array:
+	return make_ranking(viewer).filter(func(t): return make_off_angle(viewer, t) <= FRONT_CONE and is_visible_to(viewer, t))
+
+
+## target_nearest: the best candidate, null when there is none.
+static func pick_best(viewer: Herc) -> Node3D:
+	var ranking := make_ranking(viewer)
+	return ranking[0] if not ranking.is_empty() else null
+
+
+## target_next: the candidate after `current` among those in front (all candidates when none is in front),
+## wrapping round; the first of them when `current` is not one.
+static func pick_next(viewer: Herc, current: Node3D) -> Node3D:
+	var pool := make_front_set(viewer)
+	if pool.is_empty():
+		pool = make_ranking(viewer)
+	if pool.is_empty():
+		return null
+	var i := pool.find(current)
+	return pool[(i + 1) % pool.size()]

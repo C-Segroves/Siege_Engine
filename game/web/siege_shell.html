@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0">
+<title>$GODOT_PROJECT_NAME</title>
+<!--
+	Siege Engine page shell for the browser build (export preset "Web", html/custom_html_shell).
+	Before the engine starts, the player picks which imported game packs to load. Each pack is one
+	.pck file listed in data/packs.json (written by game/tools/web/pack_gamedata.gd). Downloads are
+	kept in IndexedDB, keyed by the file's SHA-256, so a pack is only downloaded again after the
+	server re-imported it. The packs are copied into PACK_DIR of the engine's in-memory file system,
+	where WebPlatform.mount_packs() (game/engine/web_platform.gd) mounts them.
+	The Start button is also the click browsers require before a page may play sound.
+	Setup and serving: docs/WEB_DEPLOY.md.
+-->
+<style>
+html, body, #canvas { margin: 0; padding: 0; border: 0; }
+body {
+	color: #d8dde3;
+	background-color: #000;
+	overflow: hidden;
+	touch-action: none;
+	font-family: 'Noto Sans', 'Droid Sans', 'Segoe UI', Arial, sans-serif;
+}
+#canvas { display: block; }
+#canvas:focus { outline: none; }
+#picker {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: #0b0f14;
+	z-index: 2;
+}
+#picker-box {
+	width: min(560px, calc(100% - 32px));
+	max-height: calc(100% - 32px);
+	overflow-y: auto;
+	background: #151b22;
+	border: 1px solid #2c3742;
+	border-radius: 8px;
+	padding: 20px 24px;
+	box-sizing: border-box;
+}
+#picker h1 { font-size: 1.4rem; margin: 0 0 4px; color: #f0c060; }
+#picker p { margin: 6px 0; line-height: 1.35; }
+.dim { color: #8a96a3; font-size: 0.9rem; }
+#pack-list { list-style: none; padding: 0; margin: 14px 0; }
+#pack-list li {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 8px 4px;
+	border-bottom: 1px solid #222b34;
+}
+#pack-list label { flex: 1; cursor: pointer; }
+.size { color: #8a96a3; font-size: 0.85rem; white-space: nowrap; }
+.cached { color: #7fc77f; font-size: 0.8rem; margin-left: 6px; }
+#start {
+	width: 100%;
+	padding: 12px;
+	font-size: 1.05rem;
+	font-weight: bold;
+	color: #10151a;
+	background: #f0c060;
+	border: 0;
+	border-radius: 6px;
+	cursor: pointer;
+}
+#start:disabled { background: #5a5a4a; cursor: default; }
+#progress-row { display: none; margin-top: 12px; }
+#progress { width: 100%; }
+#message { min-height: 1.3em; white-space: pre-line; }
+.error { color: #ff8a80; }
+</style>
+$GODOT_HEAD_INCLUDE
+</head>
+<body>
+<canvas id="canvas">Your browser does not support the canvas tag.</canvas>
+<noscript>Your browser does not support JavaScript.</noscript>
+
+<div id="picker">
+	<div id="picker-box">
+		<h1>$GODOT_PROJECT_NAME</h1>
+		<p class="dim">Browser version: single player (campaigns, arena against AI). LAN multiplayer needs the desktop app.</p>
+		<ul id="pack-list"></ul>
+		<p id="message" class="dim">Looking for game data on the server...</p>
+		<div id="progress-row"><progress id="progress"></progress></div>
+		<button id="start" disabled>Start</button>
+	</div>
+</div>
+
+<script src="$GODOT_URL"></script>
+<script>
+const GODOT_CONFIG = $GODOT_CONFIG;
+const GODOT_THREADS_ENABLED = $GODOT_THREADS_ENABLED;
+
+(function () {
+	'use strict';
+
+	const MANIFEST_URL = 'data/packs.json';
+	const DATA_URL = 'data/';
+	const PACK_DIR = '/siege_packs';          // WebPlatform.PACK_DIR
+	const DB_NAME = 'siege-engine-packs';
+	const DB_STORE = 'packs';
+	const CHOICE_KEY = 'siege-engine-pack-choice';
+	const MB = 1024 * 1024;
+
+	const engine = new Engine(GODOT_CONFIG);
+	const picker = document.getElementById('picker');
+	const list = document.getElementById('pack-list');
+	const message = document.getElementById('message');
+	const progressRow = document.getElementById('progress-row');
+	const progress = document.getElementById('progress');
+	const startButton = document.getElementById('start');
+
+	function showMessage(text, isError) {
+		message.textContent = text;
+		message.className = isError ? 'error' : 'dim';
+	}
+
+	function showProgress(done, total) {
+		progressRow.style.display = 'block';
+		if (total > 0) {
+			progress.max = total;
+			progress.value = done;
+		} else {
+			progress.removeAttribute('value');
+		}
+	}
+
+	// ------------------------------------------------------------ pack cache (IndexedDB)
+
+	function openCache() {
+		return new Promise((resolve) => {
+			if (!window.indexedDB) {
+				resolve(null);
+				return;
+			}
+			const request = indexedDB.open(DB_NAME, 1);
+			request.onupgradeneeded = () => request.result.createObjectStore(DB_STORE, { keyPath: 'id' });
+			request.onsuccess = () => resolve(request.result);
+			request.onerror = () => resolve(null);    // private mode etc.: download every time
+		});
+	}
+
+	function readCached(db, pack) {
+		return new Promise((resolve) => {
+			if (!db) {
+				resolve(null);
+				return;
+			}
+			const request = db.transaction(DB_STORE).objectStore(DB_STORE).get(pack.id);
+			request.onsuccess = () => {
+				const row = request.result;
+				resolve(row && row.sha256 === pack.sha256 ? row.blob : null);
+			};
+			request.onerror = () => resolve(null);
+		});
+	}
+
+	function writeCached(db, pack, blob) {
+		return new Promise((resolve) => {
+			if (!db) {
+				resolve();
+				return;
+			}
+			try {
+				const tx = db.transaction(DB_STORE, 'readwrite');
+				tx.objectStore(DB_STORE).put({ id: pack.id, sha256: pack.sha256, blob: blob });
+				tx.oncomplete = () => resolve();
+				tx.onerror = () => resolve();          // quota full: the pack still loads this time
+				tx.onabort = () => resolve();
+			} catch (err) {
+				resolve();
+			}
+		});
+	}
+
+	// ------------------------------------------------------------ manifest and choice
+
+	function loadChoice() {
+		try {
+			return JSON.parse(localStorage.getItem(CHOICE_KEY) || 'null');
+		} catch (err) {
+			return null;
+		}
+	}
+
+	function saveChoice(ids) {
+		try {
+			localStorage.setItem(CHOICE_KEY, JSON.stringify(ids));
+		} catch (err) {
+			// storage blocked: the default choice comes back next time
+		}
+	}
+
+	async function fetchManifest() {
+		const response = await fetch(MANIFEST_URL, { cache: 'no-cache' });
+		if (!response.ok) {
+			return [];
+		}
+		const manifest = await response.json();
+		return Array.isArray(manifest.packs) ? manifest.packs : [];
+	}
+
+	async function buildPackList(packs, db) {
+		const remembered = loadChoice();
+		for (const pack of packs) {
+			const li = document.createElement('li');
+			const box = document.createElement('input');
+			box.type = 'checkbox';
+			box.id = 'pack-' + pack.id;
+			box.value = pack.id;
+			box.checked = remembered ? remembered.includes(pack.id) : !pack.id.startsWith('_');
+			const label = document.createElement('label');
+			label.htmlFor = box.id;
+			label.textContent = pack.name;
+			if (await readCached(db, pack)) {
+				const badge = document.createElement('span');
+				badge.className = 'cached';
+				badge.textContent = 'downloaded';
+				label.appendChild(badge);
+			}
+			const size = document.createElement('span');
+			size.className = 'size';
+			size.textContent = (pack.size / MB).toFixed(0) + ' MB';
+			li.append(box, label, size);
+			list.appendChild(li);
+		}
+	}
+
+	function chosenPacks(packs) {
+		const ids = Array.from(list.querySelectorAll('input:checked')).map((box) => box.value);
+		saveChoice(ids);
+		return packs.filter((pack) => ids.includes(pack.id));
+	}
+
+	// ------------------------------------------------------------ download
+
+	async function download(pack, onBytes) {
+		const response = await fetch(DATA_URL + encodeURIComponent(pack.file), { cache: 'no-store' });
+		if (!response.ok) {
+			throw new Error(`${pack.name}: the server answered ${response.status}`);
+		}
+		const bytes = new Uint8Array(pack.size);
+		const reader = response.body.getReader();
+		let offset = 0;
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) {
+				break;
+			}
+			if (offset + value.length > bytes.length) {
+				throw new Error(`${pack.name}: the file on the server changed - reload the page`);
+			}
+			bytes.set(value, offset);
+			offset += value.length;
+			onBytes(value.length);
+		}
+		if (offset !== bytes.length) {
+			throw new Error(`${pack.name}: download incomplete - reload the page`);
+		}
+		return bytes.buffer;
+	}
+
+	async function loadPacks(packs, db) {
+		const total = packs.reduce((sum, pack) => sum + pack.size, 0);
+		let done = 0;
+		for (const pack of packs) {
+			let buffer;
+			const cached = await readCached(db, pack);
+			if (cached) {
+				showMessage(`Loading ${pack.name} ...`);
+				buffer = await cached.arrayBuffer();
+			} else {
+				showMessage(`Downloading ${pack.name} (${(pack.size / MB).toFixed(0)} MB) ...`);
+				let received = 0;
+				buffer = await download(pack, (n) => {
+					received += n;
+					showProgress(done + received, total);
+				});
+				await writeCached(db, pack, new Blob([buffer]));
+			}
+			done += pack.size;
+			showProgress(done, total);
+			await engine.preloadFile(buffer, `${PACK_DIR}/${pack.id}.pck`);
+		}
+	}
+
+	// ------------------------------------------------------------ start
+
+	async function start(packs, db) {
+		startButton.disabled = true;
+		list.querySelectorAll('input').forEach((box) => { box.disabled = true; });
+		await loadPacks(chosenPacks(packs), db);
+		showMessage('Starting the engine ...');
+		showProgress(0, 0);
+		await engine.startGame({
+			onProgress: (current, total) => showProgress(current, total),
+		});
+		picker.remove();
+	}
+
+	async function main() {
+		const missing = Engine.getMissingFeatures({ threads: GODOT_THREADS_ENABLED });
+		if (missing.length !== 0) {
+			showMessage('This browser lacks features the game needs:\n' + missing.join('\n'), true);
+			return;
+		}
+		const db = await openCache();
+		let packs = [];
+		try {
+			packs = await fetchManifest();
+		} catch (err) {
+			console.error(err);
+		}
+		await buildPackList(packs, db);
+		showMessage(packs.length
+			? 'Choose the games to load. Downloads are kept in this browser for next time.'
+			: 'No game data has been published on this server yet - the library will be empty.');
+		startButton.disabled = false;
+		startButton.onclick = () => start(packs, db).catch((err) => {
+			console.error(err);
+			showMessage(err && err.message ? err.message : String(err), true);
+		});
+	}
+
+	main();
+}());
+</script>
+</body>
+</html>

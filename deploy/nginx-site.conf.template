@@ -1,0 +1,47 @@
+# Siege Engine browser build - nginx site.
+# Rendered by deploy/install.sh into /etc/nginx/sites-available/siege-engine; @NAME@ placeholders come from
+# siege.conf. Optional parts (password, HTTPS, brotli) are snippets in @SNIPPET_DIR@, written by install.sh.
+#
+#   /         the exported web app        (@SITE_DIR@/app-current  -> app/<build>)
+#   /data/    game data packs + packs.json (@SITE_DIR@/data-current -> data/<build>)
+# Both links are swapped atomically by deploy/siege-update.sh.
+
+server {
+	listen @HTTP_PORT@;
+	listen [::]:@HTTP_PORT@;
+	server_name _;
+
+	root @SITE_DIR@/app-current;
+	index index.html;
+
+	include @SNIPPET_DIR@/server-*.conf;
+
+	# Godot web files. A "types" block replaces the inherited list, so the standard one is included first.
+	include /etc/nginx/mime.types;
+	types {
+		application/wasm wasm;
+		application/octet-stream pck;
+	}
+
+	# Pre-compressed copies (*.gz) written by siege-update.sh; dynamic gzip for small text files.
+	gzip_static on;
+	gzip on;
+	gzip_types application/json application/javascript text/javascript text/css application/wasm;
+	gzip_min_length 1024;
+
+	# Cross-origin isolation: required only by a threaded Godot build, harmless for the default one.
+	add_header Cross-Origin-Opener-Policy "same-origin" always;
+	add_header Cross-Origin-Embedder-Policy "require-corp" always;
+	add_header X-Content-Type-Options "nosniff" always;
+	# Every file may change with the next build: always revalidate (cheap 304s via ETag / Last-Modified).
+	# The page keeps downloaded packs in IndexedDB itself, keyed by their SHA-256.
+	add_header Cache-Control "no-cache" always;
+
+	location / {
+		try_files $uri $uri/ =404;
+	}
+
+	location /data/ {
+		alias @SITE_DIR@/data-current/;
+	}
+}

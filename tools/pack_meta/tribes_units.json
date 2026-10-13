@@ -1,0 +1,7 @@
+{
+  "metres_per_unit": 1.0,
+  "seconds_per_tick": null,
+  "speed": {"to_mps": 1.0},
+  "gravity_mps2": 20.0,
+  "notes": "Darkstar world unit = 1 metre; all script speeds are units/second (physics is time-based, so no tick conversion is needed: seconds_per_tick null). Evidence from the Tribes disc: (1) armor shapes in their 'root' pose, detail 0: larmor 2.14 m tall x 1.03 m wide, lfemale 1.97 m, marmor 2.27 m, mfemale 2.17 m, harmor 2.56 m; their 'bounds' collision boxes 2.58 / 2.19 / 2.98 / 2.48 / 2.83 m high (tools/darkstar_dts.py). (2) Terrain (.dtf GFIL header): 256x256 squares per block with scale shift 3 => 8 units per square, 3x3 blocks = 6144 units, mission SimTerrain position '-3072 -3072 0' (centred); Raindance heights 6.6..76.9 units. (3) scripts/ArmorData.cs: maxForwardSpeed light/medium/heavy = 11/8/5 (40/29/18 km/h), jumpImpulse/mass = 75/9 = 8.3 m/s; scripts/vehicle.cs Scout maxSpeed 50 (180 km/h); projectile muzzleVelocity chaingun 425, disc 65, blaster 200 (all plausible as m/s). (4) contGravity '0 0 -20' in every mission (SimTerrain) and newMission.cs: gravity is a stylised 20 m/s^2 (about 2 g), not 9.81 - keep it per-pack, do not rescale distances to compensate. Times in DTS sequences ('duration') are seconds."
+}

@@ -1,0 +1,8 @@
+{
+  "metres_per_unit": 1.0,
+  "seconds_per_tick": null,
+  "speed": {"to_mps": 1.0},
+  "time": {"ms_fields": ["lifetimeMS", "fizzleTimeMS", "armingDelayMS"]},
+  "gravity_mps2": 20.0,
+  "notes": "Tribes 2 (Torque V12, 2001): 1 unit = 1 metre, time-based physics (script speeds per second, *MS fields in milliseconds). Evidence from this disc: (1) Shapes (tools/torque_dts.py, default pose, highest detail): light_male 2.28 m, light_female 2.34, medium_male 2.39, medium_female 2.41, heavy_male 2.57, bioderm light/medium/heavy 2.29/2.47/2.65 m; their PlayerData boundingBox values in scripts/player.cs are '1.2 1.2 2.3', '1.45 1.45 2.4', '1.63 1.63 2.6' - the same metres. Vehicles: Wildcat grav cycle 3.6 m long, Shrike 11.1, Thundersword 14.0, Havoc 15.4, Beowulf tank 11.0, Jericho MPB 15.0 m. (2) Terrain: every mission's TerrainBlock has squareSize = \"8\" and a 256x256 .ter heightfield (u16 / 32 = metres, e.g. Katabatic 50..275 m) => 2048 m block, placed at position -1024 -1024 (centred) - the same 8 m squares / 2048 m blocks as Starsiege: Tribes. (3) Scripts: maxForwardSpeed light/medium/heavy = 14/11/6.5 (50/40/23 km/h); jumpForce/mass = 8.3 m/s; jetForce/mass = 26.2/24.6/21.4 m/s^2 (> gravity, so jets lift); muzzle velocities chaingun 425 m/s, disc 90, plasma 55, mortar 63.7; damage radii 4-30 m. (4) Gravity: no gravity field in scripts/missions (only particle gravityCoefficient); Torque's built-in default is -20 m/s^2, the same stylised 2 g that Tribes 1 missions set explicitly (contGravity '0 0 -20'); jet accelerations above 20 m/s^2 are consistent with it. Keep it per pack."
+}

@@ -1,0 +1,8 @@
+# Disc importer (tools/siege_import.py) and the converters it runs
+pycdlib          # ISO 9660 / Joliet disc images
+numpy
+pillow
+imageio-ffmpeg   # bundled ffmpeg: cinematics -> .ogv, music -> .ogg
+pyopl            # DOSBox OPL2 emulator: renders Earthsiege's FM music (optional; music is skipped without it)
+# build only
+pyinstaller      # tools/build_importer.ps1 -> dist/siege-importer/siege-importer.exe

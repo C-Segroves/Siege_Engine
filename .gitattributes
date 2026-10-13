@@ -1,0 +1,3 @@
+# Scripts run on Linux servers (deploy/): keep LF line endings even in a Windows checkout.
+*.sh text eol=lf
+deploy/** text eol=lf
