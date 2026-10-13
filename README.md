@@ -5,6 +5,8 @@ Metaltech: Earthsiege (1994), Metaltech: Battledrome (1994), Earthsiege 2 (1996)
 Starsiege: Tribes (1998) and Tribes 2 (2001). Siege Engine contains **no game content**: it plays the original data
 it converts from **your own discs**, with LAN multiplayer and modes that mix the games.
 
+[![Support me on Ko-fi](https://img.shields.io/badge/Ko--fi-support%20Siege%20Engine-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/csegroves)
+
 ## What the repository contains: code only
 No game content is (or may be) committed: no disc files, no converted assets. The app imports the player's
 own discs (.iso) itself, using the bundled disc importer, and stores the converted packs per user in
