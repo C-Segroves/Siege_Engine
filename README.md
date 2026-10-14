@@ -16,6 +16,8 @@ Starsiege (`starsiege`, disc 1 holds everything converted so far), Tribes 2 (`tr
 `.gitignore` keeps `original/`, `extracted/`, `gamedata/`, the per-game dev trees (`bd/`, `es2/`, ...), `dist/`
 and `build/` out of git.
 
+Sierra Distributed the Earthsiege/Starsiege .iso for free in 2015, its available here (alongside the rest of the series): https://web.archive.org/web/20160410062724/http://www.tribesuniverse.com/
+
 ## Setup (development)
 Players: download a release, start `SiegeEngine.exe` and import your discs from the library. No Python is
 needed. For development:
