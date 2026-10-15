@@ -23,11 +23,12 @@ func open(args: Dictionary) -> void:
 	if not objectives.is_empty():
 		content.add_child(Widgets.section("Objectives"))
 		content.add_child(Widgets.paragraph("- " + "\n- ".join(PackedStringArray(objectives))))
-	_garage_picker = GaragePicker.new(show_hangar(), Session.garage(), Session.mission_herc(),
-		func() -> void: launcher().open_hangar("briefing"))
-	content.add_child(_garage_picker)
+	if not _is_on_foot():
+		_garage_picker = GaragePicker.new(show_hangar(), Session.garage(), Session.mission_herc(),
+			func() -> void: launcher().open_hangar("briefing"))
+		content.add_child(_garage_picker)
 	content.add_child(Widgets.button("Save game", func() -> void: router.go("saves", {"mode": "save", "return_to": "briefing"})))
-	if args.get("from_hangar", false):
+	if args.get("from_hangar", false) and _garage_picker != null:
 		_garage_picker.select_garage()
 	if CampaignPresentation.take_first_showing(CampaignPresentation.MOMENT_BRIEFING, MatchFlow.make_mission_heading()):
 		_present_mission({"mission": Session.current_mission()})
@@ -41,7 +42,21 @@ func _present_mission(context: Dictionary) -> void:
 		ShellTalkPanel.add_to(content, CampaignPresentation.make_talks(c, CampaignPresentation.MOMENT_BRIEFING, context), TALK_INDEX)
 
 
+## A campaign on foot (Aerial Assault) has no garage: the mission issues the soldier.
+func _is_on_foot() -> bool:
+	return Session.campaign != null and Session.campaign.has_method("on_foot") and bool(Session.campaign.call("on_foot"))
+
+
 func _launch() -> void:
+	if _garage_picker == null:
+		var herc := MatchFlow.make_issued_soldier()
+		if herc.is_empty() or not Assets.has_pack(str(herc.vehicle).get_slice(":", 0)):
+			set_status("This mission needs Tribes 2 installed for its soldiers.")
+			return
+		if not Session.coop:
+			Session.save_restore_point({"vehicle": str(herc.vehicle), "loadout": [], "garage": {}})
+		launcher().start_battle(MatchFlow.make_mission_config(str(herc.vehicle), herc.get("loadout", []), {}))
+		return
 	var e := _garage_picker.entry()
 	if not Session.coop:
 		Session.save_restore_point({"vehicle": str(e.vehicle), "loadout": e.loadout, "garage": e.get("garage", {})})

@@ -27,6 +27,9 @@ static func make_for_soldier(s: Infantry) -> InfantryPilot:
 
 func _apply_command(event: InputEvent) -> void:
 	if event.is_action_pressed("weapon_next"):
+		var raid = soldier.get_parent().get("extraction") if soldier.get_parent() != null else null
+		if raid is ExtractionDirector and (raid as ExtractionDirector).apply_next_weapon():
+			return   # a raid: Q cycles every usable weapon in the inventory
 		soldier.apply_weapon_slot(soldier.make_next_slot())
 	else:
 		super._apply_command(event)

@@ -32,6 +32,7 @@ var multiplayer_only := false
 
 func _ready() -> void:
 	super()
+	UiScale.apply(get_tree().root)
 	_remember_home()
 	context["vehicle"] = _first_vehicle()
 	context["loadout"] = []

@@ -13,13 +13,7 @@ var _checked := 0
 
 
 func _ready() -> void:
-	var env := WorldEnvironment.new()
-	env.environment = Environment.new()
-	env.environment.background_mode = Environment.BG_COLOR
-	env.environment.background_color = Color(0.55, 0.65, 0.8)
-	env.environment.ambient_light_color = Color.WHITE
-	env.environment.ambient_light_energy = 0.6
-	add_child(env)
+	SceneLighting.add_studio_environment(self, {"background": Color(0.55, 0.65, 0.8), "ambient_energy": 0.6})
 	var sun := DirectionalLight3D.new()
 	sun.rotation = Vector3(-0.9, 0.4, 0.0)
 	add_child(sun)

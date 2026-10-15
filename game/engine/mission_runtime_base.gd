@@ -53,6 +53,11 @@ static func make_area_rule() -> String:
 
 # ------------------------------------------------------------------ battle contract
 
+## True once the mission has ended.
+func is_over() -> bool:
+	return _over
+
+
 ## Builds what every peer sees (structures, nav points) for `mission`; `vars` = the campaign's mission variables.
 func setup(p_battle: Node3D, mission: Dictionary, vars := PackedInt32Array()) -> void:
 	battle = p_battle

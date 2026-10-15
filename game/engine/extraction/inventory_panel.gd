@@ -125,6 +125,8 @@ func _rebuild() -> void:
 	_shown_key = _make_shown_key()
 	_summary.text = "%s   %.1f / %.0f kg   %d / %d slots" % [ExtractionRules.make_money_text(inv.money), inv.make_used_kg(),
 		inv.max_kg, inv.make_used_slots(), inv.max_slots]
+	_summary.text += "
+" + inv.make_capacity_text()
 	for c in _rows.get_children():
 		_rows.remove_child(c)
 		c.queue_free()

@@ -40,6 +40,9 @@ static func make_relative_bearing_deg(h: Herc, to: Vector3) -> float:
 ## The mission's current nav point (mission runtime nav_points / nav_index), else the nearest marker of group
 ## "nav_points": {pos, label}, or {} when there is none. `battle` may be null (no mission).
 static func make_current_waypoint(h: Herc, battle: Node) -> Dictionary:
+	var raid := make_raid_waypoint(h, battle)
+	if not raid.is_empty():
+		return raid
 	var ms = battle.get("mission") if battle != null else null
 	if ms and "nav_points" in ms and "nav_index" in ms:
 		var i: int = ms.nav_index
@@ -54,3 +57,32 @@ static func make_current_waypoint(h: Herc, battle: Node) -> Dictionary:
 			best_d = d
 			best = {"pos": n.global_position, "label": str(n.get_meta("label", "1"))}
 	return best
+
+
+## An extraction raid's own waypoint: the nearest open task target (flag, generator) of the local player, else
+## {} (label "Flag" / "Generator", shown as "WP <label>  d m").
+static func make_raid_waypoint(h: Herc, battle: Node) -> Dictionary:
+	var ex = battle.get("extraction") if battle != null else null
+	if not (ex is ExtractionDirector) or (ex as ExtractionDirector).tasks == null:
+		return NO_WAYPOINT
+	var best := NO_WAYPOINT
+	var best_d := INF
+	for m in (ex as ExtractionDirector).tasks.make_markers():
+		var d := h.global_position.distance_to(m.pos)
+		if d < best_d:
+			best_d = d
+			best = m
+	return best
+
+
+## Living teammates (players, wingmen, bots) other than `viewer`: [{pos, label (first 3 letters, upper), color}].
+static func make_team_marks(viewer: Herc) -> Array:
+	var out := []
+	for v in viewer.get_tree().get_nodes_in_group("vehicles"):
+		if v == viewer or not bool(v.get("alive")) or (v is Infantry and (v as Infantry).stowed):
+			continue
+		if not TeamRelations.is_allied(viewer.team, int(v.get("team"))):
+			continue
+		out.append({"pos": v.global_position, "label": str(v.get("display_name")).substr(0, 3).to_upper(),
+			"color": TargetInfo.make_iff_color(viewer, v)})
+	return out

@@ -102,6 +102,9 @@ func _draw() -> void:
 			draw_rect(Rect2(p - Vector2.ONE * NAV_SIZE * 0.5, Vector2.ONE * NAV_SIZE), NAV_COLOR, false, 1.5)
 	for v in make_units():
 		_draw_unit(v)
+	_draw_raid_markers()
+	for m in PersonalWaypoints.make_marks(viewer.global_position):
+		UnitSymbols.draw_labeled_marker(self, to_map(m.pos), str(m.label), PersonalWaypoints.COLOR, ThemeDB.fallback_font, 14)
 	var orders := CommandOrders.of(battle)
 	if orders:
 		for id in orders.orders:
@@ -123,10 +126,34 @@ func _draw_unit(v: Node3D) -> void:
 	var friendly := _is_friend(v)
 	var c := FRIEND_COLOR if friendly else ENEMY_COLOR
 	var p := to_map(v.global_position)
-	if not icons.draw(self, icons.make_unit_kind(v, v == viewer), p, friendly, c):
-		draw_circle(p, UNIT_RADIUS + (1.5 if v == viewer else 0.0), c)
+	if is_unit_symbology():
+		if friendly:
+			UnitSymbols.draw_arrow(self, p, UnitSymbols.make_facing(v), c, 1.3 if v == viewer else 1.0)
+		else:
+			UnitSymbols.draw_square(self, p, c)
+	elif not icons.draw(self, icons.make_unit_kind(v, v == viewer), p, friendly, c):
+		UnitSymbols.draw_arrow(self, p, UnitSymbols.make_facing(v), c) if friendly else UnitSymbols.draw_square(self, p, c)
 	if selected.has(int(v.net_id)) or v == viewer:
 		draw_arc(p, UNIT_RADIUS + 3.0, 0.0, TAU, 16, Color.WHITE, 1.5)
+
+
+## True in an extraction raid: every unit wears the arrow (team) / square (contact) symbols, not the game's icons.
+func is_unit_symbology() -> bool:
+	return battle != null and battle.get("extraction") != null
+
+
+## Extraction zones ("EXFIL A") and the player's task targets, as labelled markers.
+func _draw_raid_markers() -> void:
+	var ex = battle.get("extraction")
+	if not (ex is ExtractionDirector):
+		return
+	var font := ThemeDB.fallback_font
+	for i in ex.zones.size():
+		UnitSymbols.draw_labeled_marker(self, to_map(ex.zones[i]), "EXFIL %s" % ExtractionTransports.make_zone_name(i),
+			Color(0.4, 1.0, 0.6), font, 14)
+	if ex.tasks != null:
+		for m in ex.tasks.make_markers():
+			UnitSymbols.draw_labeled_marker(self, to_map(m.pos), str(m.label), Color(1.0, 0.95, 0.3), font, 14)
 
 
 func _is_friend(v: Node) -> bool:

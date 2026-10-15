@@ -5,6 +5,7 @@ extends RoutedScreen
 
 const TABLE_COLUMNS := 4
 const FILE_DIALOG_RATIO := 0.7
+const GAMES_URL := "https://web.archive.org/web/20160410062724/http://www.tribesuniverse.com/"
 
 var _importer: DiscImporter
 
@@ -14,6 +15,9 @@ func open(_args: Dictionary) -> void:
 	set_back("Back", router.back)
 	content.add_child(Widgets.paragraph("Siege Engine reads the game data from your own discs. Each import records "
 		+ "which release the disc holds; the releases below are the ones the engine was tested with.", "DimLabel"))
+	content.add_child(Widgets.paragraph("Sierra released these games for free. Download them from the archived "
+		+ "Tribes Universe page; Siege Engine ships no game files.", "DimLabel"))
+	content.add_child(Widgets.button("Open the download page", func() -> void: OS.shell_open(GAMES_URL)))
 	_add_installed_section()
 	_add_tested_section()
 

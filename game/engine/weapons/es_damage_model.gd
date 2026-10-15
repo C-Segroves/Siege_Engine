@@ -8,13 +8,22 @@ extends DamageModel
 ##   component, chance 0x802/0x1000, takes S x (r - d) / r, d = hit point to its sphere), A - S to the struck one;
 ## - an EMP hit switches both banks off for the game's shield-down time (ES1 BND emp_shield_down_time 6000 timer
 ##   units, ES2 the weapon's 6000 units = 2.93 s; 0x13c39 / 0x418c4a).
-## Not modelled yet (noted in docs/STANDARDIZATION_AUDIT.md): AI damage scaled by difficulty, overflow into the
-## linked systems, weapon-component knock-out.
+## - a hit fired by an AI unit is scaled by the mission mode / difficulty (0x1f82c, called from 0x13bcb for the armour
+##   and shield damage when the attacker is not a human pilot).
+## Not modelled yet (noted in docs/STANDARDIZATION_AUDIT.md): overflow into the linked systems, weapon-component
+## knock-out.
 
 ## 0x13acd: a component in the splash takes damage with chance 0x802 / 0x1000.
 const SPLASH_CHANCE := float(0x802) / float(0x1000)
 ## The in-unit splash radius when a weapon names none (500 original units, 0x13a7c).
 const DEFAULT_SPLASH_UNITS := 500.0
+
+## 0x922c4 (fixmul 10 bits): AI damage factor per difficulty 0..3; a campaign mission always uses entry 3.
+const AI_DAMAGE_TABLE := [2800, 2000, 1400, 1000]
+const AI_DAMAGE_CAMPAIGN_ENTRY := 3
+
+## The running Earthsiege 1 mission's AI damage factor (MissionRuntime sets it; 1.0 outside a mission).
+static var ai_damage_scale := 1.0
 
 var pack := ""
 var _shield_down_s := -1.0
@@ -22,6 +31,23 @@ var _shield_down_s := -1.0
 
 func _init(p_pack: String) -> void:
 	pack = p_pack
+
+
+## 0x1f82c: table[difficulty] / 1024 in a single mission, table[3] / 1024 in a campaign (header: mode, difficulty).
+static func make_ai_damage_scale(header: Dictionary) -> float:
+	var entry := AI_DAMAGE_CAMPAIGN_ENTRY if str(header.get("mode", "single")) == "campaign" 		else clampi(int(header.get("difficulty", AI_DAMAGE_CAMPAIGN_ENTRY)), 0, AI_DAMAGE_TABLE.size() - 1)
+	return float(AI_DAMAGE_TABLE[entry]) / 1024.0
+
+
+## 0x13bbb: the attacker's damage scale (an AI-piloted unit only; players and unattributed hits are not scaled).
+func make_hit_scaled(hit: Dictionary) -> Dictionary:
+	var a = hit.get("attacker")
+	if pack != "es1" or ai_damage_scale == 1.0 or not (a is Herc) or a.is_local_player() or a.is_puppet 			or not a.has_meta("group"):   # BattleSpawner marks every mission AI unit with its group
+		return hit
+	var out := hit.duplicate()
+	out.shield = float(hit.shield) * ai_damage_scale
+	out.armor = float(hit.armor) * ai_damage_scale
+	return out
 
 
 func make_shield_through(h: Herc, hit: Dictionary) -> float:

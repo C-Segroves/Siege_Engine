@@ -52,6 +52,23 @@ static func make_weapon_loadout(soldier: Infantry, inv: ExtractionInventory) -> 
 	return out
 
 
+## The weapon item after the one in `soldier`'s hand among every weapon of `inv` his armour may use (sorted by id, so
+## the order stays put as an equip reorders the inventory; wraps round): "" when none is usable.
+static func make_next_weapon_item(soldier: Infantry, inv: ExtractionInventory) -> String:
+	var usable := []
+	for id in inv.stacks:
+		if ExtractionItems.kind_of(id) == "weapon" and InfantryCatalog.allows_weapon(soldier.armor_id, ExtractionItems.ref_of(id)):
+			usable.append(str(id))
+	if usable.is_empty():
+		return ""
+	usable.sort()
+	var cur := soldier.current_weapon()
+	var at := -1
+	if cur != null:
+		at = usable.find(ExtractionItems.make_id("weapon", cur.weapon_id))
+	return usable[(at + 1) % usable.size()]
+
+
 ## The pack `soldier` wears from `inv` ("" = none).
 static func make_worn_pack(soldier: Infantry, inv: ExtractionInventory) -> String:
 	var allowed := InfantryGear.packs_of(soldier.armor)

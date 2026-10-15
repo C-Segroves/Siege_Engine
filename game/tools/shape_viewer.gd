@@ -64,13 +64,7 @@ static func make_shape_names(pack: String) -> Array:
 
 ## Background, light, camera, floor and the info label.
 func _build_stage() -> void:
-	var env := WorldEnvironment.new()
-	env.environment = Environment.new()
-	env.environment.background_mode = Environment.BG_COLOR
-	env.environment.background_color = Color(0.32, 0.36, 0.42)
-	env.environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.environment.ambient_light_color = Color(0.55, 0.55, 0.55)
-	add_child(env)
+	SceneLighting.add_studio_environment(self, {"background": Color(0.32, 0.36, 0.42), "ambient": Color(0.55, 0.55, 0.55)})
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-50, 35, 0)
 	sun.light_energy = 0.9

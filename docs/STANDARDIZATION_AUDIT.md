@@ -18,7 +18,7 @@ top of the Earthsiege 1 code, not separate engines.
 
 | Game | Where | What | Distance from the original |
 |---|---|---|---|
-| ES1 | `engine/weapons/weapon.gd` (moved from games/es1; fire, capacitor, reload, bursts), `engine/weapons/projectile.gd` (ray-stepped, gravity, homing, ECM, splash), `missile_steering.gd`, `mine_runner.gd`/`mine_body.gd`, `self_destruct_charge.gd`; hits in `herc.gd:428` + `herc_damage.gd`; data from `engine/pack_weapon_loader.gd` | Shield banks first, then a component | gameplay.md section 5: splash should go to the *same* Herc's nearby components (A*splash/1024, radius 500u), the code splashes *other* vehicles (`projectile.gd:202`); component pick is random by height, not COL spheres (`herc_damage.gd:71`); extra death at integrity < 0.15 (`herc_damage.gd:110`); AI difficulty scaling, weapon knock-out and overflow cascade missing; EMP drains instead of switching shields off for 2.93 s (`weapon.gd:327`) |
+| ES1 | `engine/weapons/weapon.gd` (moved from games/es1; fire, capacitor, reload, bursts), `engine/weapons/projectile.gd` (ray-stepped, gravity, homing, ECM, splash), `missile_steering.gd`, `mine_runner.gd`/`mine_body.gd`, `self_destruct_charge.gd`; hits in `herc.gd:428` + `herc_damage.gd`; data from `engine/pack_weapon_loader.gd` | Shield banks first, then a component | gameplay.md section 5: splash should go to the *same* Herc's nearby components (A*splash/1024, radius 500u), the code splashes *other* vehicles (`projectile.gd:202`); component pick is random by height, not COL spheres (`herc_damage.gd:71`); extra death at integrity < 0.15 (`herc_damage.gd:110`); weapon knock-out and overflow cascade missing; EMP drains instead of switching shields off for 2.93 s (`weapon.gd:327`) |
 | ES2 | same code, `es2:` weapon data | | es2.md section 9: ELF should tick per frame; EMP2 second bolt depends on the export's `burst` |
 | BD | Herc weapons as ES1; `games/bd/arena_turret.gd` | Turret: fixed hp/refire, nearest Herc | bd_weapons.md 2/4: per-class shield rules, 3/4 + 1/4 damage spread, missile cruise/seeker/fuse, mine rear ejection (`weapon.gd:220` drops them), plasma decay: all missing. Turret ignores sides (`arena_turret.gd:65`) |
 | Starsiege | `ss_turret.gd`, `ss_turret_gun.gd` (wraps a `Weapon`) | Head turn, arcs, rearm | Turret beams skip `DamageTypes` (`ss_turret_gun.gd:102`) |
@@ -30,7 +30,7 @@ top of the Earthsiege 1 code, not separate engines.
 | W2 | Projectile spawn + fx message x5 | `WeaponShot.launch_projectile(shot)`; the client copy (`battle_fx.gd:83`) still has no shooter | L / S | DONE |
 | W3 | Turret brain x3 (`ss_turret.gd`, `tribes_turret.gd`, `arena_turret.gd`) | `engine/weapons/turret_targeting.gd` `TurretTargeting.find_nearest` / `is_targetable`; each turret plugs in its hostility, aim point and arc / sight tests. Head turning stays per game | M / M | DONE (targeting) |
 | W4 | Splash/blast x4 | `engine/weapons/blast.gd` `Blast` (unit radius damage with Tribes push; Earthsiege 0x13a7c component hits): projectile splash, ThrownItem, EsDamageModel, SelfDestructCharge, ramming | M / M | DONE |
-| W5 | Damage receivers and the per-game hit rules | `engine/weapons/damage_model.gd` `DamageModel` + `EsDamageModel` (COL-sphere pick, in-unit splash, EMP shields off for the shield-down time) + `BdDamageModel` (class shield rules); weapon hits carry their weapon (`Herc.apply_weapon_hit`). Open: AI difficulty scaling, system overflow, weapon knock-out, Tribes vehicle damage scales | H / L | DONE (main) |
+| W5 | Damage receivers and the per-game hit rules | `engine/weapons/damage_model.gd` `DamageModel` + `EsDamageModel` (COL-sphere pick, in-unit splash, EMP shields off for the shield-down time) + `BdDamageModel` (class shield rules); weapon hits carry their weapon (`Herc.apply_weapon_hit`). Open: system overflow, weapon knock-out, Tribes vehicle damage scales | H / L | DONE (main) |
 | W6 | Ammo / energy / rearm x4 | `Weapon.spend_shot` shared by vehicle weapons and Starsiege turret guns; Tribes energy and infantry stations keep their own | L / S | DONE (shots) |
 | W7 | Temporary `Weapon` built only to read a colour (`weapon.gd:302`, `tribes_turret_gun.gd:86`); two fallback speeds (400 for the lead calculation, 300 for the flight) | static `Weapon.make_color(def)`; `DEFAULT_PROJECTILE_SPEED` for both | L / S | DONE |
 | W8 | `Weapon`/`Projectile` lived in `games/es1` but serve every game | moved to `engine/weapons/` (class names and uids kept) | L / S | DONE |
@@ -77,7 +77,7 @@ top of the Earthsiege 1 code, not separate engines.
 
 | # | Duplication | Proposed | Risk / size | Status |
 |---|---|---|---|---|
-| L1 | Environment built in 6 game places + ~12 tests/tools; LINEAR vs FILMIC tonemaps | `engine/lighting/scene_lighting.gd` taking a per-game lighting spec (`spec_from_wld`, `spec_from_arena`, `MapEnvironment.spec_from_map`) | M / M | OPEN |
+| L1 | Environment built in 6 game places + ~12 tests/tools | `SceneLighting`: `build_palette_environment` (ES1 / ES2 worlds), `apply_sun_direction` (every builder), `add_studio_environment` (10 test scenes, shape viewer, line-up). Open: BD arena and MapEnvironment (FILMIC for Darkstar vs LINEAR for 3Space in mixed scenes) still build their own | M / M | PART |
 | L2 | Global `sun_dir` written in 5 places; 3Space sun conversion copied (`world_builder.gd:44`, `world_builder_es2.gd:47`); the ES1/ES2 environments built twice | `engine/lighting/scene_lighting.gd` `SceneLighting.apply_sun_direction`, `make_3space_sun`, `build_palette_environment(spec)`; used by both world builders, the arena and MapEnvironment (hangar_bay.gd still sets its own; it was being edited) | L / S | DONE |
 | L3 | Two dynamic-light builders, different energies, one cap | `engine/lighting/dynamic_lights.gd` `DynamicLights.make_light` / `make_transient` (one budget, MAX_TRANSIENT) for FxPlayer, FxProjectileLook and TribesBaseLights | L / S | DONE |
 | L4 | Palette shaders ignore point lights | `engine/lighting/palette_lights.gd` `PaletteLights` + `palette_point_lights.gdshaderinc`: 3Space explosion lights raise I by I x min(1, full / d) within their cutoff (weapon_fx.md 2.1) in the indexed and shaded shaders | M / M | DONE |
@@ -153,7 +153,7 @@ ignores "enemy knows" (mission.md:275); ES2 failure always 6, es2.md:454 says 10
 
 ## 8. Order of work
 
-Done: B1, B2, B3, B5, L4, M1a, M1b, M2, M3, M4, W3, W4, W5, W6, P1 (gravity), P2 (ramming), L2, L3, O2 (collision), R1, R2, R4 (lookup), W1, W2, W7, W8.
+Done: L1 (tests/tools), B1, B2, B3, B5, L4, M1a, M1b, M2, M3, M4, W3, W4, W5, W6, P1 (gravity), P2 (ramming), L2, L3, O2 (collision), R1, R2, R4 (lookup), W1, W2, W7, W8.
 Next, small: R4 sequence lookup, W6 magazine, O1 ShapeBody (after B), L3 dynamic lights (after H).
 Then medium: M1b MissionOutcome, W3 turret brain, W4 blast, P1 world physics, L1 scene lighting for the Darkstar maps and tests, R2 registry, R3 voice player.
 Large: W5 damage models (with the section 1 fidelity gaps), M4 ES1 runtime split, P3 locomotion, L4 palette point lights, B5 talking heads / video.
@@ -186,6 +186,12 @@ Noted, not fixed (sizes as in the tables above):
 - The splash, EMP and component-pick differences in section 1.
 - The original strings in the killed prompts (now in each provider's `make_presentation`) should come from the imported STR tables (LEGAL_AUDIT).
 
-## 10. Progress log
+## 10. Test harness
+
+- `engine/testing/test_watchdog.gd` (autoload `TestWatchdog`): a test scene whose script failed to load exits 2, any
+  test run past its wall-clock limit (`-- --test-timeout=<s>`, default 3600) exits 3, so no run hangs.
+- `tests/compile_all` counts real failures (exit 1) and names every class_name not yet registered ("run --import").
+
+## 11. Progress log
 
 See item C1 in `docs/PLAYTEST_2026-10-11b.md` for the tests run per refactor.

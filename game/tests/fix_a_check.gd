@@ -101,21 +101,26 @@ func _check_targeting() -> void:
 	await _settle_physics()
 	var best := Targeting.pick_best(viewer)
 	_expect(best == ahead, "A2: target_nearest picks the enemy under the crosshair, not the nearest one behind (%s)" % _name(best))
-	var cycle := {}
+	var order := []
 	var t: Node3D = null
-	for i in 6:
+	for i in 4:
 		t = Targeting.pick_next(viewer, t)
-		cycle[t] = true
-	_expect(cycle.size() == 3 and cycle.has(ahead) and cycle.has(right) and cycle.has(bunker),
-		"A2: target_next cycles through the three in front only (%s)" % [cycle.keys().map(_name)])
-	_expect(not cycle.has(behind) and not cycle.has(far_left) and not cycle.has(friend), "A2: nothing behind, aside or friendly in the cycle")
+		order.append(t)
+	_expect(order[0] == right, "A2: the first target_next press locks the closest enemy in the 45 deg cone (%s)" % _name(order[0]))
+	_expect(order.slice(0, 3) == [right, bunker, ahead] and order[3] == right,
+		"A2: repeated presses cycle the cone nearest first and wrap (%s)" % [order.map(_name)])
+	_expect(not order.has(behind) and not order.has(far_left) and not order.has(friend), "A2: nothing behind, aside or friendly in the cycle")
+	_expect(Targeting.REPEAT_WINDOW_S == 1.5 and is_equal_approx(Targeting.FRONT_CONE, deg_to_rad(45.0)), "A2: 45 deg cone, 1.5 s repeat window")
 	var wall := _build_box(Vector3(30, 30, 2), Vector3(0, 10, -170))
 	await _settle_physics()
-	_expect(Targeting.pick_best(viewer) != ahead, "A2: an enemy hidden behind a wall is not the first pick")
-	_expect(not Targeting.make_front_set(viewer).has(ahead), "A2: a hidden enemy is not in the front set")
+	_expect(Targeting.pick_best(viewer) != ahead, "A2: C (nearest the crosshair) does not pick an enemy hidden behind a wall")
+	_expect(Targeting.make_front_set(viewer).has(ahead), "A2: T ignores line of sight: a hidden enemy in the cone is still cycled")
 	wall.free()
+	viewer.rotation.y = -PI / 2.0
+	_expect(Targeting.make_front_set(viewer).is_empty() and Targeting.pick_next(viewer, null) == behind,
+		"A2: nothing in the cone falls back to the nearest target overall (%s)" % _name(Targeting.pick_next(viewer, null)))
 	viewer.rotation.y = PI
-	_expect(Targeting.pick_best(viewer) == behind, "A2: turning round brings the enemy now in front first")
+	_expect(Targeting.pick_best(viewer) == behind and Targeting.pick_next(viewer, null) == behind, "A2: turning round brings the enemy now in front first")
 	for n in [viewer, ahead, right, behind, far_left, friend, bunker]:
 		n.free()
 

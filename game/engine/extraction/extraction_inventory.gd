@@ -149,3 +149,14 @@ func make_value() -> int:
 	for id in stacks:
 		total += ExtractionItems.make_sell_price(id, count(id))
 	return total
+
+
+## Free kilograms and slots: "Can carry 4.2 kg more, 2 slots free".
+func make_capacity_text() -> String:
+	var slots := maxi(max_slots - make_used_slots(), 0)
+	return "Can carry %.1f kg more, %d slot%s free" % [maxf(max_kg - make_used_kg(), 0.0), slots, "" if slots == 1 else "s"]
+
+
+## True when one more unit of `id` would not fit.
+func is_full_for(id: String) -> bool:
+	return make_room_for(id, 1) < 1

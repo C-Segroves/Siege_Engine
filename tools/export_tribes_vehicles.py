@@ -17,6 +17,7 @@ Usage: python tools/export_tribes_vehicles.py tribes|tribes2
 """
 import glob, json, math, os, re, struct, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import exe_scan  # noqa: E402
 import siege_paths as P  # noqa: E402
 import wav_pcm  # noqa: E402
 
@@ -399,48 +400,54 @@ BOMB_LIFETIME = 20.0                    # remake: a bomb that never hits anythin
 # valley below the muzzle still lands.
 GRENADE_FLIGHT_MARGIN = 1.5
 # Ballistic projectiles (GrenadeProjectile, and the BombProjectile built on it) do not fall at the missions' 20 m/s2:
-# GrenadeProjectile's tick (Tribes2.exe 0x61655b) applies `fld [0x779c54]; fmul [data+0x144]`, an engine constant
-# times the datablock's gravityMod (field offset 0x144, default 1.0 set at 0x6163a7). The importer reads the
-# constant from the user's Tribes2.exe.
+# GrenadeProjectile's force step applies an engine constant times the datablock's gravityMod, found by scanning the
+# code of the user's Tribes2.exe (tools/exe_scan.py), two layouts:
+#   build 21570: `fld [G]; fmul [data+0x144]` (G = 9.81 at 0x779c54, instruction 0x61655b; gravityMod default 1.0);
+#   build 25034: `fld [A]; fmul [B]; fchs; fmul [data+0x140]` (A = 0.4905 at 0x7acf44, B = -20.0 at 0x7a1a20,
+#                instruction 0x633521-0x633529): 0.4905 x 20 = 9.81 again, field offset moved to 0x140.
 T2_EXE = P.work('tribes2', 'original', 'Tribes2', 'GameData', 'Tribes2.exe')
-T2_GRAVITY_CODE = (0x61655b, bytes.fromhex('d905549c7700d88844010000'))   # fld [0x779c54]; fmul [eax+0x144]
-T2_GRAVITY_CONSTANT_VA = 0x779c54
-# Drag: GrenadeProjectile's force step (Tribes2.exe 0x6194b2) applies -velocity x drag x [0x77a264] (15.0) only
-# when the in-water test (0x615d80) says the shell is in water; in air the datablock's `drag` does nothing.
-T2_WATER_DRAG_CODE = (0x6194d6, bytes.fromhex('d90564a27700'))                 # fld [0x77a264]
-T2_WATER_DRAG_CONSTANT_VA = 0x77a264
-T2_IMAGE_BASE = 0x400000
+T2_GRAVITY_CODE_OLD = 'd905 ??{4} d888 ??{2} 0000 8d45dc 50'                      # fld [G]; fmul [eax+off]; lea; push
+T2_GRAVITY_CODE_NEW = 'd905 ??{4} d80d ??{4} d9e0 d888 ??{2} 0000 8d45dc 50'      # fld [A]; fmul [B]; fchs; fmul [eax+off]
+# Drag: GrenadeProjectile's force step (build 21570: 0x6194b2, constant 0x77a264; build 25034: 0x63673e, 0x7ad524)
+# applies -velocity x drag x 15.0 only when the in-water test says the shell is in water; in air the datablock's
+# `drag` does nothing.
+T2_WATER_DRAG_CODE = 'd905 ??{4} d8cc dddc d986 ??{2} 0000 d9e0 ddd9 d986 ??{2} 0000 d9e0 ddda'   # fld [15.0]; fmul st(4) ...
+T2_GRAVITY_RANGE = (1.0, 50.0)         # sanity: m/s2
 _t2_constants = {}
 
 
-def _t2_file_offset(exe, va):
-    pe = struct.unpack_from('<I', exe, 0x3c)[0]
-    count, opt = struct.unpack_from('<H', exe, pe + 6)[0], struct.unpack_from('<H', exe, pe + 20)[0]
-    for i in range(count):
-        o = pe + 24 + opt + i * 40
-        vsize, vaddr, rsize, raddr = struct.unpack_from('<IIII', exe, o + 8)
-        if T2_IMAGE_BASE + vaddr <= va < T2_IMAGE_BASE + vaddr + rsize:
-            return va - T2_IMAGE_BASE - vaddr + raddr
-    raise ValueError('address 0x%x not in Tribes2.exe' % va)
+def _t2_pe():
+    if not os.path.exists(T2_EXE):
+        raise SystemExit('Tribes2.exe not found at %s: engine constants cannot be read' % T2_EXE)
+    return exe_scan.Pe(T2_EXE)
 
 
-def t2_exe_constant(code, constant_va):
-    """A float constant of the user's Tribes2.exe, after checking the instruction that reads it (`code`:
-    (address, expected bytes))."""
-    if constant_va not in _t2_constants:
-        if not os.path.exists(T2_EXE):
-            raise SystemExit('Tribes2.exe not found at %s: engine constants cannot be read' % T2_EXE)
-        exe = open(T2_EXE, 'rb').read()
-        at = _t2_file_offset(exe, code[0])
-        if exe[at:at + len(code[1])] != code[1]:
-            raise SystemExit('Tribes2.exe is not the expected build: 0x%x does not hold the expected code' % code[0])
-        _t2_constants[constant_va] = round(struct.unpack_from('<f', exe, _t2_file_offset(exe, constant_va))[0], 4)
-    return _t2_constants[constant_va]
+def t2_water_drag_factor():
+    """The in-water drag factor of the user's Tribes2.exe (15.0), read by scanning for the instruction that loads it."""
+    if 'drag' not in _t2_constants:
+        pe = _t2_pe()
+        at = pe.find_one(T2_WATER_DRAG_CODE, 'GrenadeProjectile water drag')
+        _t2_constants['drag'] = round(pe.f32(pe.u32(at + 2)), 4)
+    return _t2_constants['drag']
 
 
 def t2_engine_gravity():
-    """The ballistic projectiles' gravity constant of the user's Tribes2.exe (m/s2)."""
-    return t2_exe_constant(T2_GRAVITY_CODE, T2_GRAVITY_CONSTANT_VA)
+    """The ballistic projectiles' gravity constant of the user's Tribes2.exe (m/s2); exactly one of the two known
+    instruction layouts must match once."""
+    if 'gravity' not in _t2_constants:
+        pe = _t2_pe()
+        old, new = pe.find_all(T2_GRAVITY_CODE_OLD), pe.find_all(T2_GRAVITY_CODE_NEW)
+        if len(old) + len(new) != 1:
+            raise SystemExit('Tribes2.exe: GrenadeProjectile gravity code: expected exactly one match, found %d '
+                             '(this build is not known to the importer)' % (len(old) + len(new)))
+        if old:
+            value = pe.f32(pe.u32(old[0] + 2))
+        else:
+            value = abs(pe.f32(pe.u32(new[0] + 2)) * pe.f32(pe.u32(new[0] + 8)))
+        if not T2_GRAVITY_RANGE[0] <= value <= T2_GRAVITY_RANGE[1]:
+            raise SystemExit('Tribes2.exe: gravity constant %s m/s2 is outside %s' % (value, T2_GRAVITY_RANGE))
+        _t2_constants['gravity'] = round(value, 4)
+    return _t2_constants['gravity']
 
 
 def t2_gravity(p, kind):
@@ -454,7 +461,7 @@ def t2_water_drag(p, kind):
     """Per-second velocity loss of a ballistic shell in water (drag x the engine factor); 0 in air."""
     if kind not in ('grenade', 'bomb'):
         return 0.0
-    return r(float(p.get('drag', 0.0)) * t2_exe_constant(T2_WATER_DRAG_CODE, T2_WATER_DRAG_CONSTANT_VA), 4)
+    return r(float(p.get('drag', 0.0)) * t2_water_drag_factor(), 4)
 
 
 def t2_lifetime(p, kind, speed):

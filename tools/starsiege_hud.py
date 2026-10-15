@@ -96,6 +96,7 @@ import struct
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import exe_scan  # noqa: E402
 import darkstar_gfx as G  # noqa: E402
 
 CANVAS = (640, 480)
@@ -107,16 +108,13 @@ TRANSLUCENT_ALPHA = 0.7              # push 0x3f333333 before every meter blit (
 FIXED_SLOTS = (240, 241, 242, 243, 249, 250, 252, 253)
 SCHEME_SLOTS = (244, 245, 246, 247, 248, 251)
 SCHEME_COUNT = 8                     # 0x50be82: cmp edx, 8 (a larger scheme index wraps to 0)
-FIXED_TABLE_VA = 0x6dd184
-SCHEME_TABLE_VA = 0x6dd1c4
 COLOR_RECORD = struct.Struct('<I3Bx')
-HUD_COLOR_CODE = {                   # setScheme instructions that index the two tables (build check)
-    0x50be82: bytes.fromhex('83fa087c02'),     # cmp edx, 8; jl
-    0x50bed9: bytes.fromhex('81c284d16d00'),   # add edx, 0x6dd184
-    0x50befa: bytes.fromhex('83f8087cd2'),     # cmp eax, 8 (fixed records); jl
-    0x50bf17: bytes.fromhex('81c2c4d16d00'),   # add edx, 0x6dd1c4
-    0x50bf38: bytes.fromhex('83f8067cc4'),     # cmp eax, 6 (records per scheme); jl
-}
+# setScheme (HudPalModCtrl 0x50be7c, Feb 1999 build; Aug 1999 build 0x51062c) found by scanning the code: cmp edx, 8;
+# jl | add edx, <fixed table VA> | cmp eax, 8 (fixed records); jl | add edx, <scheme table VA> | cmp eax, 6 (records
+# per scheme); jl.  Feb build: fixed table 0x6dd184, scheme table 0x6dd1c4.
+HUD_COLOR_CODE = '83fa087c02 ??{82} 81c2 ??{4} ??{27} 83f8087cd2 ??{24} 81c2 ??{4} ??{27} 83f8067cc4'
+FIXED_TABLE_OPERAND = 5 + 82 + 2          # offsets in HUD_COLOR_CODE of the two table addresses
+SCHEME_TABLE_OPERAND = FIXED_TABLE_OPERAND + 4 + 27 + 5 + 24 + 2
 DEFAULT_SCHEME = 0                  # HudLayout +0x28c = 0 (0x508c85)
 SCREEN_PALETTE_ID = 0xFFFFFFFF       # PiDX of every HUD bitmap; the world PPL palette holding the HUD slots
 
@@ -238,15 +236,13 @@ def read_hud_colors(exe_path):
     Starsiege.exe, after checking the setScheme code (0x50be7c) that reads them."""
     if not os.path.exists(exe_path):
         raise SystemExit('Starsiege.exe not found at %s: the HUD colours cannot be read' % exe_path)
-    with open(exe_path, 'rb') as f:
-        exe = f.read()
-    to_offset = _make_pe_offset(exe)
-    for va, code in HUD_COLOR_CODE.items():
-        if exe[to_offset(va):to_offset(va) + len(code)] != code:
-            raise SystemExit('Starsiege.exe is not the analysed build: 0x%x does not hold the HUD colour code' % va)
+    pe = exe_scan.Pe(exe_path)
+    code = pe.find_one(HUD_COLOR_CODE, 'HUD colour code (HudPalModCtrl::setScheme)')
+    fixed_va, scheme_va = pe.u32(code + FIXED_TABLE_OPERAND), pe.u32(code + SCHEME_TABLE_OPERAND)
     scheme_size = len(SCHEME_SLOTS) * COLOR_RECORD.size
-    return {'fixed': _read_color_records(exe, to_offset(FIXED_TABLE_VA), FIXED_SLOTS),
-            'schemes': [_read_color_records(exe, to_offset(SCHEME_TABLE_VA) + i * scheme_size, SCHEME_SLOTS)
+    exe = pe.data
+    return {'fixed': _read_color_records(exe, pe.to_offset(fixed_va), FIXED_SLOTS),
+            'schemes': [_read_color_records(exe, pe.to_offset(scheme_va) + i * scheme_size, SCHEME_SLOTS)
                         for i in range(SCHEME_COUNT)]}
 
 
@@ -259,21 +255,6 @@ def _read_color_records(exe, at, slots):
                              % (at + i * COLOR_RECORD.size, found, slot))
         colors[slot] = tuple(rgb)
     return colors
-
-
-def _make_pe_offset(exe):
-    """VA -> file offset function of a PE image."""
-    pe = struct.unpack_from('<I', exe, 0x3c)[0]
-    count, opt = struct.unpack_from('<H', exe, pe + 6)[0], struct.unpack_from('<H', exe, pe + 20)[0]
-    base = struct.unpack_from('<I', exe, pe + 52)[0]
-    sections = [struct.unpack_from('<IIII', exe, pe + 24 + opt + i * 40 + 8) for i in range(count)]
-
-    def to_offset(va):
-        for _vsize, vaddr, rsize, raddr in sections:
-            if base + vaddr <= va < base + vaddr + rsize:
-                return va - base - vaddr + raddr
-        raise SystemExit('Starsiege.exe is not the analysed build: 0x%x is outside its sections' % va)
-    return to_offset
 
 
 def make_hud_palette(world_colors, hud_colors, scheme=DEFAULT_SCHEME):

@@ -29,6 +29,6 @@ const TRIBES2_METHODS := ["setvisible", "setactive", "push", "pop", "bindcmd", "
 	"setinventoryhuditem", "setinventoryhudclearall", "setweightfreq", "setmonitorfreq", "setweight", "preload",
 	"setskin", "setcloaked", "setenergylevel", "setrechargerate", "setdamagestate", "playaudio", "stopaudio",
 	"setselectedcategory", "setscopealways", "setcontrolobject", "registerentrytype", "resetfields",
-	"settransformcompound"]
+	"settransformcompound", "clearbackpackicon"]
 ## Of those, the ones that answer a query: their result.
 const TRIBES2_QUERY_RESULTS := {"isvisible": 1, "isawake": 0, "iscursoron": 0, "getbinding": "", "isactive": 1}

@@ -90,6 +90,7 @@ func _voices_row() -> OptionRow:
 
 func _add_display_section() -> void:
 	content.add_child(Widgets.section("Display"))
+	content.add_child(_ui_scale_row())
 	content.add_child(_gamma_row())
 	var objectives := Widgets.check_box("Show the mission objectives panel in battle", DisplaySettings.objectives_panel_on())
 	objectives.toggled.connect(DisplaySettings.apply_objectives_panel)
@@ -100,6 +101,17 @@ func _add_display_section() -> void:
 
 	missile_cam.toggled.connect(DisplaySettings.apply_missile_cam_window)
 	content.add_child(OptionRow.new("Missile cam window", missile_cam))
+
+
+## The whole UI's size (UiScale): Auto follows the window, or a fixed 75-200 %.
+func _ui_scale_row() -> OptionRow:
+	var items := ["Auto"]
+	for p in UiScale.PERCENTS:
+		items.append("%d%%" % p)
+	var current := UiScale.percent()
+	var b := Widgets.option_button(items, 0 if current == UiScale.AUTO else 1 + UiScale.PERCENTS.find(current))
+	b.item_selected.connect(func(i: int) -> void: UiScale.apply_percent(UiScale.AUTO if i == 0 else int(UiScale.PERCENTS[i - 1])))
+	return OptionRow.new("UI scale", b)
 
 
 ## Remake brightness of the original 8-bit screens (DisplaySettings): 1.0 = raw VGA palette.

@@ -202,7 +202,7 @@ components have no spheres here (they carry their own in WEAPONS.DAT).
 ### Hit pipeline (Mech::onHit 0x13b44)
 1. Hit struct: `+0 ray, +4 armour dmg, +6 shield dmg, +8 splash/1024, +0xa fx ptr, +0xe attacker,
    +0x12 kind` (5 = bolt; 2 = EMP-kind: shields off & `mech+0x201`=6000 timer).
-2. AI-fired damage is scaled by difficulty (0x1f82c) when the attacker isn't the player.
+2. AI-fired damage (attacker record +0x14 byte = 0) is scaled by 0x1f82c: both the armour and the shield damage word `x = x * T[i] >> 10`, T = word table 0x922c4 = {2800, 2000, 1400, 1000}, i = header difficulty (word 7) in a single mission, 3 in a campaign (header mode word 2 != 0). Remake: `EsDamageModel.make_ai_damage_scale` / `make_hit_scaled` (H).
 3. Shields (0xfca8): projectile must enter the shield sphere (DAT 0x16/0x18) else miss. Two banks
    front/rear (each max/2, chosen by hit side); bank absorbs min(shield dmg, bank). If the shield
    damage is fully absorbed → ricochet effect, **no armour damage**.
@@ -283,7 +283,6 @@ campaign_availability.md section 7);
 ## Unknown / TODO
 - Speed units → m/s: solved in `docs/formats/units.md`. Speed is an animation rate (256 = authored stride), 1 unit = 6 mm.
   DAT 0x0c/0x0e are actually the walk/run sequence ids (0x12547/0x125ba).
-- Damage-scaling by difficulty (0x1f82c).
 - WEAPONS 0x2a/0x2c/0x46/0x48/0x4a/0x4e; projectile row field `d`; ROCKETS/EXPLOS fields.
 - Most BND constants (only the table above is named); AI (MECHIQ/FLYERIQ) logic.
 - Energy budget: what feeds beam capacitors & shields per update (mech update path).

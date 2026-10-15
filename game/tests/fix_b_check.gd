@@ -41,6 +41,7 @@ func _ready() -> void:
 	await get_tree().process_frame
 	_check_team_data()
 	_check_collision_rules()
+	_check_ai_damage_scale()
 	_check_bounds_data()
 	var battle := await _start_battle({})   # an Earthsiege world: open, flat ground
 	await _check_ramming(battle)
@@ -81,6 +82,15 @@ func _seconds(s: float) -> void:
 
 func _roster(vehicle: String) -> Dictionary:
 	return {1: {"name": "Tester", "vehicle": vehicle, "team": 0, "loadout": []}}
+
+
+## DBSIM 0x1f82c: AI damage = table[difficulty] / 1024 in a single mission, table[3] in a campaign.
+func _check_ai_damage_scale() -> void:
+	var single := [0, 1, 2, 3].map(func(d): return EsDamageModel.make_ai_damage_scale({"mode": "single", "difficulty": d}))
+	_expect(is_equal_approx(single[0], 2800.0 / 1024.0) and is_equal_approx(single[2], 1400.0 / 1024.0)
+		and is_equal_approx(single[3], 1000.0 / 1024.0), "AI damage scale per difficulty %s" % [single])
+	_expect(is_equal_approx(EsDamageModel.make_ai_damage_scale({"mode": "campaign", "difficulty": 0}), 1000.0 / 1024.0),
+		"a campaign mission always uses the last table entry")
 
 
 func _start_battle(extra: Dictionary) -> Battle:

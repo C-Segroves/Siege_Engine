@@ -24,6 +24,7 @@ import os
 import re
 import struct
 
+import exe_scan
 import siege_paths as P
 
 ES1_EXE = (P.work('original', 'DBSIM.EXE'), 0x48fd)            # VA = file offset - 0x48FD
@@ -229,17 +230,27 @@ def bd_deaths(lib):
 
 # ================================================================== Starsiege (Starsiege.exe)
 
-SS_EVIDENCE_TAGS = {     # instruction VA -> (bytes, meaning): the Herc death code 0x472f80
-    0x47303B: ('b81e5c0500', 'herc blown apart: debris explosion IDDTS_EXP_L (351262) ...'),
-    0x473048: ('83c04f', '... or +0x4f = IDDTS_SHOCK_M (351341)'),
-    0x4739BC: ('c704246d5c0500', 'quick (small) herc death: debris explosion IDDTS_SHOCK_M'),
+# Byte signatures of the Herc death code (found by scan, not by address: Feb 1999 build 0x47303b, Aug 1999 build
+# 0x4761ff).  `??` = operand bytes that differ between builds.
+SS_EVIDENCE_TAGS = {
+    'b81e5c0500 ?? ?? ?? ?? ?? ?? ?? ?? 83c04f':
+        'herc blown apart: debris explosion IDDTS_EXP_L (351262), or +0x4f = IDDTS_SHOCK_M (351341)',
+    'c704246d5c0500': 'quick (small) herc death: debris explosion IDDTS_SHOCK_M',
 }
+
+
+def check_signatures(path, signatures):
+    """Every signature must match exactly once in the executable's code (nothing is checked when it is absent)."""
+    if os.path.exists(path):
+        pe = exe_scan.Pe(path)
+        for sig, why in signatures.items():
+            pe.find_one(sig, why)
 
 
 def starsiege_deaths(fx):
     """Herc / tank deaths (Starsiege.exe 0x472f80: debris pieces carrying IDDTS_EXP_L or IDDTS_SHOCK_M explode
     where they land) and structure deaths (each mission record names its own IDDTS_EXP_* explosion tag)."""
-    CodeCheck(SS_EXE, _pe_offset(SS_EXE), SS_EVIDENCE_TAGS)
+    check_signatures(SS_EXE, SS_EVIDENCE_TAGS)
     large, shock = fx.impact('IDDTS_EXP_L'), fx.impact('IDDTS_SHOCK_M')
     blast = [make_step(large), make_step(shock, height=GROUND),
              make_step(large, delay=DEBRIS_DELAY_S, count=3, interval=DEBRIS_INTERVAL_S, scatter=DEBRIS_SCATTER,

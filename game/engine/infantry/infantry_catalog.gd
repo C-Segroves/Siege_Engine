@@ -106,9 +106,26 @@ static func make_default_pack() -> String:
 	return ""
 
 
-## True when weapon `weapon_id` may be carried in armour `armor_id` (Tribes $ItemMax / max[]).
+## True when weapon `weapon_id` may be carried in armour `armor_id` (Tribes $ItemMax / max[]). A weapon of the other
+## Tribes game follows the rule of that game's armour of the same size (a Tribes 2 Spinfusor in Tribes 1 light armour
+## is allowed because Tribes 2 light armour carries it; a mortar is not, in either game's light armour).
 static func allows_weapon(armor_id: String, weapon_id: String) -> bool:
-	return (armor(armor_id).get("weapons", []) as Array).has(weapon_id)
+	return (make_rules_armor(armor_id, weapon_id).get("weapons", []) as Array).has(weapon_id)
+
+
+## Rounds of `weapon_id` armour `armor_id` carries (Tribes max[]), by the same same-size rule; 0 when none.
+static func make_ammo_capacity(armor_id: String, weapon_id: String) -> int:
+	return int((make_rules_armor(armor_id, weapon_id).get("ammo", {}) as Dictionary).get(weapon_id, 0))
+
+
+## The armour whose limits apply to `weapon_id` worn as `armor_id`: the armour itself for its own game's weapons,
+## else the weapon's game's armour of the same size ({} when that game has none).
+static func make_rules_armor(armor_id: String, weapon_id: String) -> Dictionary:
+	var a := armor(armor_id)
+	var weapon_pack := weapon_id.get_slice(":", 0)
+	if a.is_empty() or weapon_pack == str(a.get("pack", "")) or not INFANTRY_PACKS.has(weapon_pack):
+		return a
+	return armor("%s:%s" % [weapon_pack, armor_id.get_slice(":", 1)])
 
 
 ## Drops the cache (tests, pack reloads).

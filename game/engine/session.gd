@@ -346,6 +346,8 @@ func apply_save_dict(d: Dictionary) -> void:
 static func make_mission_heading(c: Object) -> String:
 	if c == null:
 		return ""
+	if c.has_method("make_heading"):
+		return c.call("make_heading")
 	var number: Variant = c.get("campaign")   # Starsiege campaigns have a variant instead
 	if number != null and campaign_pack(c) == ES1_PACK:
 		number = int(number) + 1                  # Earthsiege counts its campaigns from 0 (C0..C3), its shell shows + 1

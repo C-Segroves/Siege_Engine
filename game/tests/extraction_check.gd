@@ -60,6 +60,7 @@ func _ready() -> void:
 		await _check_raid_extract()
 		await _check_raid_death()
 		await _check_base_tasks()
+	await _check_flag_response()
 	await _check_revive()
 	await _check_screen()
 	_guard.restore()
@@ -686,6 +687,36 @@ func _check_task_kill(battle: Battle, soldier: Infantry) -> void:
 	await _shot("x8_task_done_panel", "extraction2")
 
 
+## Q cycles every usable weapon of the inventory (picked-up ones too), never one the armour cannot use.
+func _check_weapon_cycle(_battle: Battle, x: ExtractionDirector, soldier: Infantry) -> void:
+	var inv: ExtractionInventory = x.inventories[1]
+	var added := 0
+	var added_ids := []
+	for rec in ExtractionItems.items_of_kind("weapon"):
+		var id := str(rec.id)
+		if added < 4 and InfantryCatalog.allows_weapon(soldier.armor_id, ExtractionItems.ref_of(id)) and inv.count(id) == 0:
+			inv.apply_add_unchecked(id, 1)
+			added_ids.append(id)
+			added += 1
+	x.send_inventory(1)
+	await _frames(5)
+	var usable := inv.stacks.keys().filter(func(id: String) -> bool:
+		return ExtractionItems.kind_of(id) == "weapon" and InfantryCatalog.allows_weapon(soldier.armor_id, ExtractionItems.ref_of(id)))
+	var seen := {}
+	for i in usable.size() + 1:
+		_expect(x.apply_next_weapon(), "Q takes the next usable weapon")
+		await _frames(6)
+		if soldier.current_weapon():
+			seen[soldier.current_weapon().weapon_id] = true
+	_expect(usable.size() >= 4 and seen.size() >= mini(usable.size(), 4) , "Q reached every usable weapon of the inventory (%d of %d, more than the 3 slots)" % [seen.size(), usable.size()])
+	for id in added_ids:
+		inv.apply_take(id, 1)
+	x.apply_equipment(1)
+	x.send_inventory(1)
+	await _frames(5)
+	_expect(inv.make_capacity_text().begins_with("Can carry"), "capacity text: %s" % inv.make_capacity_text())
+
+
 func _check_pickup(battle: Battle, soldier: Infantry) -> void:
 	var x := battle.extraction
 	var cache: LootContainer = null
@@ -705,6 +736,8 @@ func _check_pickup(battle: Battle, soldier: Infantry) -> void:
 		_expect(absf(bottom - ground) < 0.2, "the %s stands on the ground (%.2f / %.2f)" % [cache.make_title(), bottom, ground])
 	var hud := x.hud
 	_expect(hud.hint.contains(cache.make_title()), "the pickup hint: '%s'" % hud.hint)
+	_expect(hud.hint.contains("Can carry") and hud.hint.contains("kg more") and hud.hint.contains("slot"), "the pickup hint shows the free capacity")
+	await _check_weapon_cycle(battle, x, soldier)
 	await _shot("3_cache")
 	await _shot_close(battle, cache.position, "3b_cache_model")
 	soldier.global_position = cache.position + Vector3(1.2, 0.5, 0.0)   # the shots took a while: back beside it
@@ -888,6 +921,11 @@ func _check_base_tasks() -> void:
 			flag = c
 	_expect(flag != null, "the faction flag lies at the map flag")
 	if flag:
+		var wp := HeadingFrame.make_raid_waypoint(soldier, battle)
+		_expect(not wp.is_empty() and (wp.pos as Vector3).distance_to(flag.position) < 15.0, "the flag task is the compass waypoint (%s)" % [wp])
+		_expect(x.tasks.make_markers().any(func(m: Dictionary) -> bool: return str(m.label).contains("flag")), "the flag is a map / radar marker")
+		_expect(x.tasks.make_objective_lines().any(func(l: Dictionary) -> bool: return str(l.text).contains(" m]")), "the objectives line shows the distance")
+		_expect(flag.get_child_count() > 0 and flag.find_children("*", "MeshInstance3D", true, false).size() > 0, "the flag is built in the world (with a light column)")
 		soldier.global_position = flag.position + Vector3(1.0, 0.5, 0.0)
 		soldier.velocity = Vector3.ZERO
 		await _frames(5)
@@ -898,6 +936,18 @@ func _check_base_tasks() -> void:
 		x._apply_pickup(1)
 		await _frames(2)
 		_expect((x.inventories[1] as ExtractionInventory).count(RaidTasks.FLAG_ITEM) == 1, "he carries the flag")
+		await _frames(5)
+		var fr: Dictionary = x.tasks.response.responses.get("qa_flag", {})
+		_expect(str(fr.get("state", "")) == "wait", "stealing the flag starts the faction's response (waits delay_s)")
+		fr["timer"] = 0.0
+		await _frames(10)
+		_expect(str(fr.get("state", "")) == "hunt" and fr.bots.size() >= 1, "the response squad spawned (%d bots, vehicle %s)" % [fr.bots.size(), fr.vehicle != null])
+		var far := true
+		for b in fr.bots:
+			far = far and (b as InfantryBot).soldier.global_position.distance_to(soldier.global_position) >= 100.0
+		_expect(far, "the squad spawned well away from the carrier, out of his sight")
+		await _frames(40)
+		_expect(fr.bots.any(func(b) -> bool: return is_instance_valid(b) and (b as InfantryBot).objective.get("target") == soldier), "the squad hunts the carrier")
 	var before := ExtractionProfile.load_for(_pilot)
 	var owed: int = states.reduce(func(sum: int, t: Dictionary) -> int: return sum + int(t.reward), 0)
 	var carried_money := (x.inventories[1] as ExtractionInventory).money
@@ -907,6 +957,62 @@ func _check_base_tasks() -> void:
 	_expect(x.tasks.mine.size() == 2 and x.tasks.mine.all(func(t: Dictionary) -> bool: return bool(t.done)), "carrying the flag out completes the flag task")
 	_expect(after.money - before.money == owed + carried_money, "both tasks paid on extraction (%d cr, owed %d)" % [after.money - before.money - carried_money, owed])
 	_expect(after.stash.count(RaidTasks.FLAG_ITEM) == 0, "the flag is handed in, not stashed")
+	await _wait_for(func() -> bool: return get_tree().current_scene is MatchResults, 20.0)
+	_free_scene()
+
+
+## The flag response in full: a vehicle (chance forced to 1), a spawn out of the carrier's sight, and after the
+## carrier dies a bot reaching his bag retakes the flag and puts it back home.
+func _check_flag_response() -> void:
+	print("X8b flag response:")
+	var chance_was = ExtractionRules.data()["flag_response"]["vehicle_chance"]
+	ExtractionRules.data()["flag_response"]["vehicle_chance"] = 1.0
+	var battle := await _start_raid(0, 0, func(p: ExtractionProfile) -> void:
+		var flag := {"id": "qa_flag", "kind": RaidTaskBoard.KIND_FLAG, "faction": FLAG_FACTION, "count": 1}
+		flag["reward"] = RaidTaskBoard.make_reward(flag)
+		p.tasks = [flag])
+	var x := battle.extraction
+	var soldier := battle.player as Infantry
+	await _wait_for(func() -> bool: return not soldier.stowed, 60.0)
+	soldier.spawn_protection = 600.0
+	soldier.apply_spawn_protection()
+	var flag: LootContainer = null
+	for c in x.containers.values():
+		if (c as LootContainer).kind == RaidTasks.FLAG_CONTAINER:
+			flag = c
+	if flag == null:
+		_expect(false, "the flag exists")
+		_free_scene()
+		return
+	var home := flag.position
+	soldier.global_position = home + Vector3(1.0, 0.5, 0.0)
+	soldier.velocity = Vector3.ZERO
+	await _frames(3)
+	x._apply_pickup(1)
+	await _frames(5)
+	var fr: Dictionary = x.tasks.response.responses.get("qa_flag", {})
+	fr["timer"] = 0.0
+	await _frames(15)
+	_expect(fr.get("vehicle") != null, "with chance 1.0 an armed vehicle joins the response")
+	var spawn: Vector3 = fr.get("spawn", Vector3.ZERO)
+	_expect(spawn.distance_to(soldier.global_position) >= 100.0, "the spawn point is 100+ m from the carrier (%.0f m)" % spawn.distance_to(soldier.global_position))
+	_expect(not LineOfSight.is_clear(soldier, soldier.global_position + FlagResponse.EYE, soldier, spawn + FlagResponse.EYE), "the spawn point is out of the carrier's line of sight")
+	soldier.spawn_protection = 0.0
+	_lethal_hit(soldier)
+	await _frames(10)
+	var bag := x.tasks.response._find_flag_container()
+	_expect(bag != null and bag.kind == "bag", "the dead carrier's bag holds the flag")
+	if bag and not fr.bots.is_empty():
+		var bot := fr.bots[0] as InfantryBot
+		bot.soldier.global_position = bag.position + Vector3(1.5, 0.5, 0.0)
+		bot.soldier.velocity = Vector3.ZERO
+		await _frames(30)
+		var back: LootContainer = null
+		for c in x.containers.values():
+			if (c as LootContainer).kind == RaidTasks.FLAG_CONTAINER:
+				back = c
+		_expect(str(fr.state) == "done" and back != null and back.position.distance_to(home) < 15.0, "a bot retook the flag and it lies at its base again (state %s)" % fr.state)
+	ExtractionRules.data()["flag_response"]["vehicle_chance"] = chance_was
 	await _wait_for(func() -> bool: return get_tree().current_scene is MatchResults, 20.0)
 	_free_scene()
 

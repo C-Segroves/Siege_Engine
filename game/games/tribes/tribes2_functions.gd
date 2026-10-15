@@ -68,7 +68,7 @@ func _register_audio() -> void:
 func _register_game() -> void:
 	_on(["aiconnect"], _ai_connect)
 	_on(["disconnect"], func(_n, _a): rt.end_session(); return "")
-	_on(["isdemo"], _zero)
+	_on(["isdemo", "ispureserver"], _zero)   # ispureserver: build 25034 scripts (false = plain eval path)
 
 
 # ------------------------------------------------------------------ helpers

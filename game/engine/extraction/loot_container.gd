@@ -12,6 +12,8 @@ const MAX_SIZE := 1.6
 const FALLBACK_SIZE := Vector3(1.0, 0.7, 0.7)
 const FALLBACK_COLOR := Color(0.35, 0.42, 0.3)
 const BAG_COLOR := Color(0.55, 0.3, 0.2)
+const BEACON_HEIGHT := 40.0
+const BEACON_COLOR := Color(1.0, 0.85, 0.2, 0.55)
 
 var container_id := 0
 var kind := "supply"
@@ -65,6 +67,8 @@ func make_record() -> Dictionary:
 
 
 func _build_model() -> void:
+	if kind == "flag":
+		_build_beacon()
 	var shape_id := shape_override if _is_imported(shape_override) else make_shape_id(kind)
 	if shape_id == "":
 		_build_fallback_box()
@@ -76,6 +80,25 @@ func _build_model() -> void:
 	if extent > 0.0 and shape_id != shape_override:
 		model.scale *= clampf(extent, MIN_SIZE, MAX_SIZE) / extent
 	model.position.y -= _make_world_box(model).position.y - global_position.y   # standing on its base
+
+
+## A faction flag shows from afar: a tall, unshaded light column over it.
+func _build_beacon() -> void:
+	var beam := MeshInstance3D.new()
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = 0.15
+	cyl.bottom_radius = 0.15
+	cyl.height = BEACON_HEIGHT
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = BEACON_COLOR
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	cyl.material = mat
+	beam.mesh = cyl
+	beam.position.y = BEACON_HEIGHT * 0.5
+	beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(beam)
 
 
 ## The first imported model of the kind's shapes ("" when none is imported).

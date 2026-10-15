@@ -55,7 +55,7 @@ def call_main(module, *argv):
         raise RuntimeError('%s exited with %s' % (module.__name__, r))
 
 
-from . import es1, bd, es2, tribes, starsiege, tribes2  # noqa: E402
+from . import es1, bd, es2, tribes, starsiege, tribes2, tribes_aa, tribes_vengeance  # noqa: E402
 
 # order matters only for discs that could match several signatures (most specific first)
-GAMES = [es1, bd, es2, tribes, starsiege, tribes2]
+GAMES = [es1, bd, es2, tribes, starsiege, tribes2, tribes_aa, tribes_vengeance]

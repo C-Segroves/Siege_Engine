@@ -23,7 +23,12 @@ const STAGES := [
 	{"pack": "es2", "name": "Earthsiege 2"},
 	{"pack": "starsiege", "name": "Starsiege", "choice": ["human", "cybrid"]},
 ]
+## Campaigns of their own, outside the saga's order (New campaign lists them after the saga's games).
+const STANDALONE := [
+	{"pack": "tribes_aa", "name": "Tribes: Aerial Assault", "needs": ["tribes2"]},
+]
 const PROVIDERS := {
+	"tribes_aa": "res://games/tribes_aa/campaign_provider.gd",
 	"es1": "res://games/es1/mission/campaign_provider.gd",
 	"es2": "res://games/es2/campaign_provider.gd",
 	"starsiege": "res://games/starsiege/campaign_provider.gd",

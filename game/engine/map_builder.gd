@@ -80,7 +80,7 @@ static func _build_ground(parent: Node3D, m: Dictionary) -> void:
 	if m.get("terrain") is Dictionary:
 		MapTerrain.build(parent, m.terrain, m._dir)
 	else:
-		_build_flat_ground(parent)
+		_build_flat_ground(parent, float(m.get("ground_y", 0.0)))
 
 
 ## An Earthsiege 1 / 2 arena map (tools/export_es_arenas.py): the original world and zone, built by WorldBuilder;
@@ -89,8 +89,9 @@ static func _build_es_world(parent: Node3D, world: Dictionary) -> Dictionary:
 	return WorldBuilder.build(parent, int(world.get("index", 0)), int(world.get("zone", -1)), str(world.get("pack", "es1")))
 
 
-static func _build_flat_ground(parent: Node3D) -> void:
+static func _build_flat_ground(parent: Node3D, height := 0.0) -> void:
 	var ground := StaticBody3D.new()
+	ground.position.y = height
 	var col := CollisionShape3D.new()
 	col.shape = WorldBoundaryShape3D.new()
 	ground.add_child(col)
@@ -236,6 +237,8 @@ static func _place(parent: Node3D, o: Dictionary, pal: String, collide: bool) ->
 	var sid := String(o.get("shape", ""))
 	if sid == "" or (sid.contains(":") and not Assets.has_pack(Assets.split_id(sid)[0])):
 		return null   # a borrowed shape (the Starsiege maps' Tribes stations) needs its game installed
+	if MapPlaceholder.is_unconverted(sid):
+		return MapPlaceholder.place(parent, o, _xf(o), collide)
 	if Assets.shape(sid).get("lods", [{}])[0].get("pieces", []).is_empty():
 		return null
 	var spack: String = Assets.split_id(sid)[0]

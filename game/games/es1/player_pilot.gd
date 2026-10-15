@@ -11,6 +11,7 @@ const AUTOFIRE_FLAG := "--autofire" # test aid: hold both fire groups
 const FIRE_GROUP_ACTIONS := ["fire_group_1", "fire_group_2"]   # weapon.group 0 / 1
 
 var herc: Herc
+var _last_next_msec := -100000   ## ticks of the previous target_next press
 var aim_yaw := 0.0
 var aim_pitch := 0.0
 var _autofire := false
@@ -140,6 +141,10 @@ func nearest_enemy() -> Node3D:
 	return Targeting.pick_best(herc)
 
 
-## target_next: the next target in front of the pilot after the current one (wraps round).
+## target_next: the first press locks the nearest target in the 45 deg cone ahead; presses within
+## Targeting.REPEAT_WINDOW_S of the previous one cycle on through the cone (wraps round).
 func next_enemy() -> Node3D:
-	return Targeting.pick_next(herc, herc.target)
+	var now := Time.get_ticks_msec()
+	var repeat := now - _last_next_msec <= int(Targeting.REPEAT_WINDOW_S * 1000.0)
+	_last_next_msec = now
+	return Targeting.pick_next(herc, herc.target if repeat else null)

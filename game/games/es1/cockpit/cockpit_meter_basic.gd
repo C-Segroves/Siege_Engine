@@ -71,6 +71,10 @@ func _draw_compass(m: Dictionary, mod: Color) -> void:
 
 ## The current waypoint on the dial: a dot at its bearing, turned with the letters (remake, playtest A7).
 func _draw_compass_waypoint(c: Vector2, radius: float, heading: float, mod: Color) -> void:
+	for m in PersonalWaypoints.make_marks(herc.global_position):
+		var pa := deg_to_rad(HeadingFrame.make_bearing_deg(herc.global_position, m.pos)) + heading
+		var pp := (c + Vector2(sin(pa), -cos(pa)) * (radius + WAYPOINT_DOT * 2.0)).round()
+		canvas.fill(Rect2(pp - Vector2(1, 2), Vector2(2, 4)), PersonalWaypoints.COLOR * mod)
 	var wp := HeadingFrame.make_current_waypoint(herc, display.battle)
 	if wp.is_empty():
 		return

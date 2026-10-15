@@ -35,12 +35,7 @@ func _ready() -> void:
 
 
 func _build_world() -> void:
-	var env := WorldEnvironment.new()
-	env.environment = Environment.new()
-	env.environment.background_mode = Environment.BG_COLOR
-	env.environment.background_color = BACKGROUND
-	env.environment.ambient_light_color = Color(0.5, 0.5, 0.55)
-	add_child(env)
+	SceneLighting.add_studio_environment(self, {"background": BACKGROUND})
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-50, 30, 0)
 	add_child(sun)

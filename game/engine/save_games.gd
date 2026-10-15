@@ -270,6 +270,9 @@ static func make_campaign_title(pack: String, variant: String) -> String:
 	for s in Saga.STAGES:
 		if s.pack == pack:
 			return str(s.name) if variant == "" else "%s: %s campaign" % [s.name, variant.capitalize()]
+	for s in Saga.STANDALONE:
+		if s.pack == pack:
+			return str(s.name)
 	return pack
 
 

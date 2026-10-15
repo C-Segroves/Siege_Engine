@@ -58,7 +58,7 @@ def test_tested_table_is_well_formed():
     with open(TABLE, encoding='utf-8') as f:
         table = json.load(f)
     games = [e['game'] for e in table['releases']]
-    assert sorted(games) == sorted(['es1', 'bd', 'es2', 'starsiege', 'tribes', 'tribes2'])
+    assert set(games) == {'es1', 'bd', 'es2', 'starsiege', 'tribes', 'tribes2'}   # several releases per game
     for e in table['releases']:
         assert len(e['exe_sha256']) == 64 and len(e['disc_sha256']) == 64
         assert e['version'] and e['result']

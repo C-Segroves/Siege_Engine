@@ -175,11 +175,28 @@ func _check_map(battle: Battle, me: Node3D, label: String) -> void:
 	_expect(map._status.text != "No orders for that target.", "opening says nothing about a target (%s)" % map._status.text)
 	_expect(map.view.icons.is_empty() == not (label in ["tribes", "tribes2", "starsiege"]),
 		"the game's own map icons (%s)" % ("none" if map.view.icons.is_empty() else "loaded"))
+	_expect(not map.view.is_unit_symbology(), "a campaign battle keeps the game's own unit icons (symbology is for raids)")
+	var fwd := UnitSymbols.make_facing(me)
+	_expect(fwd.is_finite() and absf(fwd.length() - 1.0) < 0.2 or fwd.length() > 0.0, "a unit's arrow faces the way it faces (%s)" % fwd)
+	_expect(UnitSymbols.make_facing(me, PI).distance_to(-UnitSymbols.make_facing(me)) < 0.01, "a heading-up radar rotates the arrow with the view")
+	_expect(battle.overlay == null or not battle.overlay.visible, "the open map hides the HUD overlay (modal)")
+	PersonalWaypoints.clear()
+	for i in PersonalWaypoints.MAX:
+		map.place_marker()
+	_expect(PersonalWaypoints.points.size() == PersonalWaypoints.MAX and not map.place_marker(), "up to %d personal waypoints, no more" % PersonalWaypoints.MAX)
+	var marks := PersonalWaypoints.make_marks(me.global_position)
+	_expect(marks.size() == 3 and marks[0].label == "P1" and marks[0].distance >= 0.0, "personal waypoints carry a label and distance")
+	_expect(HeadingFrame.make_current_waypoint(me, battle) != marks[0] , "they are separate from the mission waypoint")
+	PersonalWaypoints.remove(0)
+	_expect(PersonalWaypoints.points.size() == 2, "a personal waypoint can be removed")
+	PersonalWaypoints.clear()
+	_expect(HeadingFrame.make_team_marks(me).all(func(t: Dictionary) -> bool: return t.label.length() <= 3), "teammate compass marks have short labels")
 	_check_known(battle, map.view, me)
 	await _shot(battle, label)
 	input.apply_toggle()
 	await _frames(3)
 	_expect(CommandMap.find_open(battle) == null, "command_map closes it again")
+	_expect(battle.overlay == null or battle.overlay.visible, "closing the map shows the HUD overlay again")
 
 
 ## The map shows enemies only while the radar does and buildings only where the mission makes them known.

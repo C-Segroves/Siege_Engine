@@ -10,6 +10,7 @@ const TEXT_COLOR := Color(0.9, 1.0, 0.9)
 const DIM_COLOR := Color(0.7, 0.8, 0.7, 0.85)
 const MONEY_COLOR := Color(1.0, 0.85, 0.35)
 const ZONE_COLOR := Color(0.4, 1.0, 0.6)
+const TASK_COLOR := Color(1.0, 0.95, 0.3)
 const CACHE_COLOR := Color(1.0, 0.8, 0.3)
 const BAG_COLOR := Color(1.0, 0.45, 0.3)
 const BANNER_COLOR := Color(1.0, 0.85, 0.35)
@@ -61,7 +62,18 @@ func make_pickup_hint() -> String:
 	var c := director.find_container_near(s.global_position)
 	if c == null:
 		return ""
-	return "%s: %s" % [InfantryInteraction.make_key_text(), make_loot_text(c)]
+	return "%s: %s
+%s%s" % [InfantryInteraction.make_key_text(), make_loot_text(c), director.my_inventory.make_capacity_text(),
+		make_unfit_text(c)]
+
+
+## "  -  will not fit: Chaingun, Ammo" (the container's items that no longer fit this inventory); "" when all fit.
+func make_unfit_text(c: LootContainer) -> String:
+	var names := []
+	for st in c.stacks:
+		if director.my_inventory.is_full_for(str(st[0])):
+			names.append(ExtractionItems.make_name(str(st[0])))
+	return "" if names.is_empty() else "  -  will not fit: %s" % ", ".join(names)
 
 
 ## "loot Supply cache (5 items, $120)".
@@ -128,6 +140,8 @@ func _draw_markers() -> void:
 		return
 	for i in director.zones.size():
 		_draw_marker(cam, director.zones[i] + Vector3.UP * 2.0, "EXFIL %s" % ExtractionTransports.make_zone_name(i), ZONE_COLOR, s)
+	for m in director.tasks.make_markers():
+		_draw_marker(cam, m.pos + Vector3.UP * 3.0, "TASK: %s" % str(m.label).to_upper(), TASK_COLOR, s)
 	for c in director.containers.values():
 		var lc := c as LootContainer
 		if lc.position.distance_to(s.global_position) < CACHE_MARKER_RANGE:

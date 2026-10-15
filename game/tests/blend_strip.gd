@@ -52,13 +52,7 @@ func _build_stage() -> void:
 	_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	_viewport.own_world_3d = true
 	add_child(_viewport)
-	var env := WorldEnvironment.new()
-	env.environment = Environment.new()
-	env.environment.background_mode = Environment.BG_COLOR
-	env.environment.background_color = BACKGROUND
-	env.environment.ambient_light_color = Color(0.7, 0.7, 0.7)
-	env.environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	_viewport.add_child(env)
+	SceneLighting.add_studio_environment(_viewport, {"background": BACKGROUND, "ambient": Color(0.7, 0.7, 0.7)})
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-50, 40, 0)
 	_viewport.add_child(sun)

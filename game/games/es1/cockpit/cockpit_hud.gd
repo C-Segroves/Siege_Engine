@@ -71,6 +71,14 @@ func _draw_heading_tape(tr: Rect2, cx: float, heading: float, mod: Color) -> voi
 ## Marker on the tape; the "WP n: dddd M." text under it (Earthsiege 2: at the HUD's nav point, unless the
 ## Herc flies: the altimeter sits there).
 func _draw_waypoint(h: Dictionary, tr: Rect2, cx: float, heading: float, mod: Color) -> void:
+	for t in HeadingFrame.make_team_marks(herc):
+		var tdd := wrapf(HeadingFrame.make_bearing_deg(herc.global_position, t.pos) - heading, -180.0, 180.0)
+		if absf(tdd) * TAPE_PX_PER_DEG < (tr.end.x - tr.position.x) * 0.5:
+			canvas.fill(Rect2(cx + tdd * TAPE_PX_PER_DEG - 1, tr.position.y + TAPE_HEIGHT + 2, 2, 3), t.color * mod)
+	for m in PersonalWaypoints.make_marks(herc.global_position):
+		var pdd := wrapf(HeadingFrame.make_bearing_deg(herc.global_position, m.pos) - heading, -180.0, 180.0)
+		var px := clampf(cx + pdd * TAPE_PX_PER_DEG, tr.position.x, tr.end.x - 3)
+		canvas.fill(Rect2(px - 1, tr.position.y + TAPE_HEIGHT - 3, 3, 5), PersonalWaypoints.COLOR * mod)
 	var wp := make_current_waypoint()
 	if wp.is_empty():
 		return

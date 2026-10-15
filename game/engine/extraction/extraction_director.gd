@@ -42,6 +42,7 @@ var containers := {}
 var zones: Array = []
 var exfil_states: Array = []
 var faction_teams := {}
+var squads: ExtractionSquads
 ## The local player's inventory (the host's copy for him) and raid status.
 var my_inventory := ExtractionInventory.new()
 var my_status := STATUS_IN_RAID
@@ -130,6 +131,19 @@ func request_equip(item_id: String) -> void:
 	_request("_request_equip_item", [item_id])
 
 
+## Q in a raid: the next usable weapon of the inventory (ExtractionLoadout.make_next_weapon_item) goes in hand.
+## False when this peer is not in a raid or carries no usable weapon (the soldier's own slot cycle then runs).
+func apply_next_weapon() -> bool:
+	var s := battle.player as Infantry
+	if my_status != STATUS_IN_RAID or s == null:
+		return false
+	var next := ExtractionLoadout.make_next_weapon_item(s, my_inventory)
+	if next == "":
+		return false
+	request_equip(next)
+	return true
+
+
 @rpc("any_peer", "reliable")
 func _request_equip_item(item_id: String) -> void:
 	if is_inside_tree() and multiplayer.is_server():
@@ -184,7 +198,7 @@ func start_host() -> void:
 	map = ExtractionMap.make(battle, built, rng)
 	transports = ExtractionTransports.make(self)
 	var records := _roll_caches()
-	var squads := ExtractionSquads.make(battle, rng)
+	squads = ExtractionSquads.make(battle, rng)
 	var roster: Dictionary = battle.config.get("roster", {})
 	faction_teams = squads.spawn_all(map.areas, RaidTasks.make_required_factions(roster),
 		RaidTasks.make_site_claims(roster, built.get("map", {}) if built.get("map") is Dictionary else {}))

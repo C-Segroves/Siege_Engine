@@ -25,11 +25,13 @@ var director: ExtractionDirector
 var by_peer := {}
 ## Every peer: the local player's task states.
 var mine: Array = []
+var response: FlagResponse
 var _generator_of := {}      # host: task id -> TribesBaseObject
 
 
 func _init(p_director: ExtractionDirector) -> void:
 	director = p_director
+	response = FlagResponse.new(p_director)
 	name = NODE_NAME
 
 
@@ -95,6 +97,13 @@ func start_host(faction_areas: Dictionary) -> void:
 		_send_state(int(peer))
 
 
+func _process(delta: float) -> void:
+	if not is_inside_tree() or not multiplayer.is_server() or by_peer.is_empty():
+		return
+	for peer in by_peer:
+		response.apply_tick(by_peer[peer], delta)
+
+
 func _bind(task: Dictionary, faction_areas: Dictionary) -> Dictionary:
 	task["progress"] = 0
 	task["done"] = false
@@ -108,9 +117,13 @@ func _bind(task: Dictionary, faction_areas: Dictionary) -> Dictionary:
 			var gen := _find_generator(areas)
 			if gen:
 				_generator_of[str(task.id)] = gen
+				task["target"] = gen.global_position
 			task["count"] = 1 if gen else 0
 		RaidTaskBoard.KIND_FLAG:
-			task["count"] = 1 if _place_flag(areas) else 0
+			var flag_at = _place_flag(areas)
+			task["count"] = 1 if flag_at != null else 0
+			if flag_at != null:
+				task["target"] = flag_at
 	task["void"] = int(task.count) <= 0
 	task["reward"] = RaidTaskBoard.make_reward(task) if not task.void else 0
 	return task
@@ -154,8 +167,8 @@ func _find_generator(areas: Array) -> Node3D:
 
 
 ## Puts the faction's flag (a loot container holding FLAG_ITEM) at the map flag nearest one of `areas`; false when
-## the map has no flag within BASE_REACH.
-func _place_flag(areas: Array) -> bool:
+## the map has no flag within BASE_REACH. Returns the flag's place (Vector3), null when there is none.
+func _place_flag(areas: Array):
 	var m: Dictionary = director.built.get("map", {}) if director.built.get("map") is Dictionary else {}
 	var best: ModeObject = null
 	var best_d := BASE_REACH
@@ -165,9 +178,9 @@ func _place_flag(areas: Array) -> bool:
 			best_d = _distance_to_areas(o.home, areas)
 			best = o
 	if best == null:
-		return false
+		return null
 	director.add_container({"kind": FLAG_CONTAINER, "stacks": [[FLAG_ITEM, 1]], "money": 0, "shape": best.shape}, best.home)
-	return true
+	return best.home
 
 
 static func _distance_to_areas(p: Vector3, areas: Array) -> float:
@@ -250,9 +263,53 @@ func make_objective_lines() -> Array:
 			out.append({"text": "%s  (not on this map)" % text, "done": false})
 			continue
 		var progress := "  %d / %d" % [int(task.progress), int(task.count)] if int(task.count) > 1 else ""
-		out.append({"text": "%s%s  -  %s" % [text, progress, ExtractionRules.make_money_text(int(task.reward))],
+		var marker := _make_marker(task)
+		var where := "  [%d m]" % int(_player_distance(marker.pos)) if not marker.is_empty() else ""
+		out.append({"text": "%s%s%s  -  %s" % [text, progress, where, ExtractionRules.make_money_text(int(task.reward))],
 			"done": bool(task.done)})
 	return out
+
+
+## Markers for the local player's open tasks that have a place: [{pos, label}] (the compass waypoint, the command
+## map and the objectives line). A flag already carried points at the nearest extraction zone instead.
+func make_markers() -> Array:
+	var out := []
+	for task in mine:
+		var m := _make_marker(task)
+		if not m.is_empty():
+			out.append(m)
+	return out
+
+
+func _make_marker(task: Dictionary) -> Dictionary:
+	if bool(task.get("void", false)) or bool(task.get("done", false)) or not task.has("target"):
+		return {}
+	var kind := str(task.kind)
+	var label := "Generator" if kind == RaidTaskBoard.KIND_GENERATOR else "%s flag" % str(task.get("faction", "")).capitalize()
+	var pos: Vector3 = task.target
+	if kind == RaidTaskBoard.KIND_FLAG and director.my_inventory.count(FLAG_ITEM) > 0 and not director.zones.is_empty():
+		var at = _player_position()
+		pos = director.zones[director.zones.size() - 1 if at == null else _nearest_zone(at)]
+		label = "Exfil with flag"
+	return {"pos": pos, "label": label}
+
+
+func _nearest_zone(p: Vector3) -> int:
+	var best := 0
+	for i in director.zones.size():
+		if (director.zones[i] as Vector3).distance_to(p) < (director.zones[best] as Vector3).distance_to(p):
+			best = i
+	return best
+
+
+func _player_position():
+	var s = director.battle.player
+	return s.global_position if s != null else null
+
+
+func _player_distance(p: Vector3) -> float:
+	var at = _player_position()
+	return 0.0 if at == null else Vector2(p.x - at.x, p.z - at.z).length()
 
 
 ## `stacks` without the faction flags (handed in at extraction: worth nothing in a stash).

@@ -202,12 +202,29 @@ func _draw_radar(center: Vector2, r: float) -> void:
 		var col := TargetInfo.make_iff_color(herc, v)
 		if v == herc.target:
 			draw_rect(Rect2(center + p - Vector2(5, 5), Vector2(10, 10)), AMBER, false, 1.5)
-		draw_circle(center + p, 3.5, col)
+		if TeamRelations.is_allied(herc.team, v.team):
+			UnitSymbols.draw_arrow(self, center + p, UnitSymbols.make_facing(v, HeadingFrame.make_heading(herc)), col, 0.8)
+		else:
+			UnitSymbols.draw_square(self, center + p, col, 0.75)
+	UnitSymbols.draw_arrow(self, center, Vector2.UP, GREEN, 0.9)   # the viewer: heading up
 	for nav in herc.get_tree().get_nodes_in_group("nav_points"):
 		var p := make_radar_point(nav.global_position, r)
 		if p.length() > r:
 			p = p.normalized() * r
 		draw_string(font, center + p - Vector2(4, -5), str(nav.get_meta("label", "N")), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, AMBER)
+
+	var ex = herc.get_parent().get("extraction")
+	if ex is ExtractionDirector:
+		var marks := []
+		for i in ex.zones.size():
+			marks.append({"pos": ex.zones[i], "label": "EXFIL %s" % ExtractionTransports.make_zone_name(i), "color": GREEN})
+		for m in ex.tasks.make_markers():
+			marks.append({"pos": m.pos, "label": str(m.label), "color": AMBER})
+		for m in marks:
+			var p := make_radar_point(m.pos, r)
+			if p.length() > r:
+				p = p.normalized() * r
+			UnitSymbols.draw_labeled_marker(self, center + p, str(m.label), m.color, font, 11)
 
 
 ## Target box, name with its friend-or-foe word, range and health, in its friend-or-foe colour (A5).

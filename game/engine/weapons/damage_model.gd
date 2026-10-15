@@ -57,6 +57,11 @@ static func make_hit(shield: float, armor: float, attacker: Node, pos: Vector3, 
 	return {"shield": shield, "armor": armor, "attacker": attacker, "pos": pos, "weapon": wdef}
 
 
+## The hit as this game's rules deliver it (Earthsiege 1 scales an AI unit's damage by the difficulty).
+func make_hit_scaled(hit: Dictionary) -> Dictionary:
+	return hit
+
+
 ## Share (0..1) of the armour damage that gets through `h`'s shields; takes the shield damage off the bank.
 func make_shield_through(h: Herc, hit: Dictionary) -> float:
 	return h.absorb_with_shield(float(hit.shield), h.is_front_hit(hit.pos, hit.attacker))

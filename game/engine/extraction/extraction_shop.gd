@@ -12,8 +12,9 @@ const BUY_CATEGORIES := ["weapon", "ammo", "gear", "pack", "armor", "callin"]
 static func make_offers(category: String, pack := "") -> Array:
 	if not BUY_CATEGORIES.has(category):
 		return []
+	# by the price of one Buy lot: an ammo item's per-round price is fractional (a cheap chaingun round is < 1 cr)
 	var offers := ExtractionItems.items_of_kind(category, [pack] if pack != "" else []).filter(func(r: Dictionary) -> bool:
-		return int(r.get("price", 0)) > 0)
+		return make_buy_price(str(r.id)) > 0)
 	offers.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 		var pa := make_buy_price(str(a.id))
 		var pb := make_buy_price(str(b.id))

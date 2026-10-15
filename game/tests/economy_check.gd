@@ -133,6 +133,10 @@ func _check_squad() -> void:
 	_expect(SquadRoster.pilot_of(g, g.selected).is_empty() and not SquadRoster.pilot_of(g, 1).is_empty(), "pilots sit in the Hercs besides the player's")
 	var squad := SquadRoster.make_squad_config(g, c.wingman_slots({}))
 	_expect(squad.size() == 3 and float(squad[0].skill) > 0.0 and str(squad[0].name) == "DUGGAN", "three wingmen with their pilots (%s)" % [squad.map(func(w): return w.name)])
+	var expected := {"B0_C0_0A": 0, "B0_C0_1A": 0, "B0_C0_2A": 2, "B0_C0_3A": 1, "B0_C0_5A": 0, "B0_C0_6A": 2}
+	for name in expected:
+		var slots := c.wingman_slots(MissionCompiler.load_mission(name, PackedInt32Array(), 1))
+		_expect(slots == expected[name], "%s takes %d wingmen (MSN group 0 slots), got %d" % [name, expected[name], slots])
 	SquadRoster.apply_toggle_wingman(g, 1, 3)
 	_expect(SquadRoster.make_squad(g, 3).size() == 2 and not g.squad_auto, "a wingman left at home")
 	SquadRoster.apply_assign(g, 2, str(g.crew.pilots[5].id))

@@ -100,6 +100,14 @@
   "area_cache_weights": {"supply": 5, "armory": 3, "salvage": 2},
   "scattered_cache_weights": {"supply": 6, "armory": 1, "salvage": 2},
   "bot_drop_money": [10, 90],
+  "flag_response": {
+    "notes": "Stealing a faction flag sends that faction's response squad after the carrier (FlagResponse): infantry bots, plus an armed vehicle by chance, spawned out of the carrier's sight spawn_distance_m away after delay_s; if the carrier dies they take the flag back to its base.",
+    "infantry": [3, 5],
+    "vehicle_chance": 0.35,
+    "delay_s": 8.0,
+    "spawn_distance_m": [150.0, 300.0],
+    "retake_radius_m": 4.0
+  },
   "squad": {
     "infantry": [2, 4],
     "vehicles": [0, 1],

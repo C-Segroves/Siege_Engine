@@ -739,6 +739,15 @@ func _check_briefing_presentation() -> void:
 			"es1: the debriefing officer gives the verdict")
 		var holder := Control.new()
 		add_child(holder)
+		var player := AudioStreamPlayer.new()
+		holder.add_child(player)
+		var files: Dictionary = ShellData.meta().get("snc_files", {}).get("C0", {})
+		var speech := TalkingHead._speech_file(files, int(talks[0].line))
+		var head := TalkingHead.new(TTMScene.new(), player, holder, func() -> bool: return true)
+		var length := head._start_voice(speech, -1.0)
+		_expect(speech != "" and player.stream != null and length > 0.0,
+			"es1: the commander's speech clip loads through the shared voice naming (%s, %.1f s)" % [speech, length])
+		player.stop()
 		var panel := ShellTalkPanel.add_to(holder, talks)
 		await get_tree().process_frame
 		await get_tree().process_frame

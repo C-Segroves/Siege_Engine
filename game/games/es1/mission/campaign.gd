@@ -209,9 +209,17 @@ func apply_battle_result(result: Dictionary) -> Dictionary:
 	return GarageReport.apply(garage, availability_context(), result)
 
 
-## Wingmen the squad may take into a mission (SquadRoster): up to three in every mission.
-func wingman_slots(_mission: Dictionary) -> int:
-	return economy().make_squad_max()
+## Wingmen the squad takes into a mission: the MSN's group 0 is the player's squad (mission.md section 2.12), so its
+## member slots besides the player's fix the size (0A / 1A / 5A fly solo), at most the economy's squad maximum.
+func wingman_slots(mission: Dictionary) -> int:
+	var groups = mission.get("groups")
+	if not (groups is Array) or (groups as Array).is_empty():
+		return economy().make_squad_max()
+	var n := 0
+	for mi in (groups[0] as Dictionary).get("members", []):
+		if int(mi) >= 0:
+			n += 1
+	return clampi(n - 1, 0, economy().make_squad_max())
 
 
 ## End-of-mission page texts (CampaignPresentation): the killed pilot's warning is the shell's MENU1250 dialog,

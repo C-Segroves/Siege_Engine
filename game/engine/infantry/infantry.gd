@@ -87,6 +87,7 @@ func _configure() -> void:
 		armor_id = InfantryCatalog.light_armor_id(InfantryCatalog.make_default_pack())
 		armor = InfantryCatalog.armor(armor_id)
 	def = armor
+	apply_floor_limit()
 	vehicle_id = armor_id
 	if display_name == "":
 		display_name = str(armor.get("name", armor_id))
@@ -241,7 +242,8 @@ func apply_worn_pack(pack_id: String) -> void:
 
 ## Rounds of weapon `wid` the soldier carries full: the armour's limit plus the ammo pack's (-1: no ammunition).
 func make_rounds(wid: String) -> int:
-	var rounds := int((armor.get("ammo", {}) as Dictionary).get(wid, -1))
+	var rules := InfantryCatalog.make_rules_armor(armor_id, wid)
+	var rounds := int((rules.get("ammo", {}) as Dictionary).get(wid, -1))
 	return rounds + kit.make_extra_rounds(wid) if rounds >= 0 else rounds
 
 
@@ -297,6 +299,13 @@ func aim_origin() -> Vector3:
 
 
 # ------------------------------------------------------------------ simulation
+
+## Walkable slope: the steepest floor is where the surface normal's up share falls to jumpSurfaceMinDot (0.2, T1 larmor).
+func apply_floor_limit() -> void:
+	floor_max_angle = acos(clampf(float(armor.get("jump_surface_min_dot", 0.2)), 0.0, 1.0))
+	floor_snap_length = 0.5
+	floor_stop_on_slope = true
+
 
 func _physics_process(delta: float) -> void:
 	if is_puppet:

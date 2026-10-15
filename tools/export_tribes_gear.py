@@ -331,7 +331,11 @@ def t2_pack(resolve, item, effect, weapon_items):
     elif effect in ('shield', 'jammer'):
         p.update(toggled=True, min_energy=float(img['minEnergy']), energy_per_s=float(img['stateEnergyDrain[1]']))
         if effect == 'jammer':
-            p['jam_radius'] = float(resolve('JammerSensorObject')['jamRadius'])
+            # build 21570 has one JammerSensorObject block; build 25034 splits it into ...Active / ...Passive (radius 0)
+            sensor = resolve('JammerSensorObject')
+            if 'jamRadius' not in sensor:
+                sensor = resolve('JammerSensorObjectActive')
+            p['jam_radius'] = float(sensor['jamRadius'])
         else:
             p['note'] = 'Armor checkShields: energy / energyPerDamagePoint (per armour) absorbs the hit.'
     elif effect == 'ammo':

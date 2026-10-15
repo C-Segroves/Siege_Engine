@@ -19,6 +19,7 @@ var imports: ImportQueue
 
 func _ready() -> void:
 	super()
+	UiScale.apply(get_tree().root)
 	imports = ImportQueue.new()
 	add_child(imports)
 	get_window().files_dropped.connect(_on_files_dropped)

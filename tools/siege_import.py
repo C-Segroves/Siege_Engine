@@ -2,10 +2,11 @@
 
 Command-line contract (game/engine/importer.gd):
 
-  siege-importer identify <iso|cue|bin>
-      -> one JSON line {"game", "pack", "name", "disc", "discs", "needs": [...], "audio_tracks": n}
+  siege-importer identify [--game <pack>] <iso|cue|bin>
+      -> one JSON line {"game", "pack", "name", "disc", "discs", "needs": [...], "audio_tracks": n, "also": [packs]}
+         ("also" only on a disc holding several games: Starsiege + Tribes; --game picks one of them)
          or {"error": "..."}   (fast: reads only the disc's directory records)
-  siege-importer import --out <packs_dir> <iso|cue|bin> [...]
+  siege-importer import [--game <pack>] --out <packs_dir> <iso|cue|bin> [...]
       -> JSON lines {"stage", "progress": 0..1, "message"} then {"done": true, "pack": "<id>"}
          or {"error": "<human readable message>"}
   siege-importer games
@@ -83,23 +84,33 @@ class ImportFailed(Exception):
 
 
 # ---------------------------------------------------------------------------------------------- identify
-def identify_disc(path):
-    """-> (game module, info dict) or raises ImportFailed."""
+def identify_disc(path, want=None):
+    """-> (game module, info dict) or raises ImportFailed. A disc that holds several games (Starsiege + Tribes)
+    lists the other packs in info["also"]; want (a pack id) picks one of them, else the first is returned."""
     import siege_iso
     import siege_games
+    if path.lower().endswith('.zip'):
+        return _identify_zip(path)
     try:
         disc = siege_iso.Disc(path)
     except siege_iso.DiscError as e:
         raise ImportFailed(str(e))
     try:
-        for g in siege_games.GAMES:
-            n = g.identify(disc)
+        found = [(g, g.identify(disc)) for g in siege_games.GAMES]
+        found = all_found = [(g, n) for g, n in found if n]
+        if want:
+            if not any(g.GAME['pack'] == want for g, _ in found):
+                raise ImportFailed('%s does not hold the pack "%s".' % (os.path.basename(path), want))
+            found = [(g, n) for g, n in found if g.GAME['pack'] == want]
+        for g, n in found[:1]:
             if n:
                 info = {'game': g.GAME['game'], 'pack': g.GAME['pack'], 'name': g.GAME['name'], 'disc': n,
                         'discs': g.GAME.get('discs', 1), 'needs': list(g.GAME.get('needs', {}).get(n, [])),
                         'label': disc.label, 'audio_tracks': len(disc.audio)}
                 if not g.GAME.get('supported', True):
                     info['supported'] = False
+                if len(all_found) > 1:
+                    info['also'] = [o.GAME['pack'] for o, _ in all_found]
                 return g, info
     finally:
         disc.close()
@@ -107,12 +118,43 @@ def identify_disc(path):
         os.path.basename(path), disc.label, ', '.join(g.GAME['name'] for g in siege_games.GAMES)))
 
 
+def _identify_zip(path):
+    """A zip holding a game installer (Tribes: Vengeance) -> (game module, info) like identify_disc."""
+    import zipfile
+    import siege_games
+    try:
+        with zipfile.ZipFile(path) as z:
+            names = z.namelist()
+    except (OSError, zipfile.BadZipFile) as e:
+        raise ImportFailed('Could not read %s: %s' % (os.path.basename(path), e))
+    for g in siege_games.GAMES:
+        if hasattr(g, 'identify_zip') and g.identify_zip(names):
+            info = {'game': g.GAME['game'], 'pack': g.GAME['pack'], 'name': g.GAME['name'], 'disc': 1,
+                    'discs': 1, 'needs': [], 'label': '', 'audio_tracks': 0}
+            if not g.GAME.get('supported', True):
+                info['supported'] = False
+            return g, info
+    raise ImportFailed('%s is not an archive this importer recognises.' % os.path.basename(path))
+
+
+def _take_option(args, name):
+    """-> (value of `name <value>` or None, the other args)."""
+    args = list(args)
+    if name in args:
+        i = args.index(name)
+        value = args[i + 1] if i + 1 < len(args) else None
+        del args[i:i + 2]
+        return value, args
+    return None, args
+
+
 def cmd_identify(args):
+    want, args = _take_option(args, '--game')
     if len(args) != 1:
-        PROTO.emit({'error': 'usage: identify <iso|cue|bin>'})
+        PROTO.emit({'error': 'usage: identify [--game <pack>] <iso|cue|bin>'})
         return 2
     try:
-        _g, info = identify_disc(args[0])
+        _g, info = identify_disc(args[0], want)
     except ImportFailed as e:
         PROTO.emit({'error': str(e)})
         return 1
@@ -385,11 +427,14 @@ def _explain(e):
 
 
 def _parse_import_args(args):
-    """-> (out, work_arg, keep, isos) or None when the command line is incomplete."""
-    out, work_arg, keep, isos = None, None, False, []
+    """-> (out, work_arg, keep, isos, want) or None when the command line is incomplete.
+    --game <pack> picks one pack of a disc that holds several games (Starsiege + Tribes)."""
+    out, work_arg, keep, isos, want = None, None, False, [], None
     it = iter(args)
     for a in it:
-        if a == '--out':
+        if a == '--game':
+            want = next(it, None)
+        elif a == '--out':
             out = next(it, None)
         elif a == '--work':
             work_arg = next(it, None)
@@ -399,7 +444,7 @@ def _parse_import_args(args):
             isos.append(a)
     if not out or not isos:
         return None
-    return os.path.abspath(out), work_arg, keep, _unique_discs(isos)
+    return os.path.abspath(out), work_arg, keep, _unique_discs(isos), want
 
 
 def _unique_discs(isos):
@@ -414,12 +459,12 @@ def _unique_discs(isos):
     return uniq
 
 
-def _identify_all(isos):
+def _identify_all(isos, want=None):
     """-> (game module, {disc number: (path, info)}); raises ImportFailed for discs of different games.
     A second image of the same disc number is reported and skipped."""
     game, infos = None, {}
     for p in isos:
-        g, info = identify_disc(p)
+        g, info = identify_disc(p, want)
         if game is not None and g is not game:
             raise ImportFailed('These discs belong to different games (%s and %s): import them separately.' % (
                 game.GAME['name'], g.GAME['name']))
@@ -539,9 +584,9 @@ def _convert(game, infos, out, job):
 def cmd_import(args):
     parsed = _parse_import_args(args)
     if parsed is None:
-        PROTO.emit({'error': 'usage: import --out <packs_dir> <iso|cue|bin> [...]'})
+        PROTO.emit({'error': 'usage: import [--game <pack>] --out <packs_dir> <iso|cue|bin> [...]'})
         return 2
-    out, work_arg, keep, isos = parsed
+    out, work_arg, keep, isos, want = parsed
     t_start = time.time()
     try:
         _clean_stale_work_dirs()            # scratch folders of imports that were killed (cancelled)
@@ -549,7 +594,7 @@ def cmd_import(args):
         pass
     PROTO.emit({'stage': 'identify', 'progress': 0.0, 'message': 'Reading the disc...'})
     try:
-        game, infos = _identify_all(isos)
+        game, infos = _identify_all(isos, want)
     except ImportFailed as e:
         PROTO.emit({'error': str(e)})
         return 1
@@ -599,7 +644,7 @@ def provides(pack_dir):
 
     def load(*p):
         try:
-            with open(os.path.join(pack_dir, *p)) as f:
+            with open(os.path.join(pack_dir, *p), encoding='utf-8') as f:
                 return json.load(f)
         except (OSError, ValueError):
             return None
@@ -632,6 +677,9 @@ def provides(pack_dir):
     n = _count(os.path.join(pack_dir, 'missions', 'msn'))
     if n:
         out['missions'] = n
+    camp = load('campaign', 'campaign.json')      # Aerial Assault (tools/aa_import.py)
+    if isinstance(camp, dict) and camp.get('missions'):
+        out['missions'] = len(camp['missions'])
     n = _count(os.path.join(pack_dir, 'shapes'))
     if n:
         out['shapes'] = n
@@ -718,8 +766,8 @@ def cmd_identify_release(args):
     pack_dir, iso = os.path.abspath(args[1]), args[2]
     meta_path = os.path.join(pack_dir, 'pack.json')
     try:
-        game, info = identify_disc(iso)
         meta = json.load(open(meta_path, encoding='utf-8'))
+        game, info = identify_disc(iso, meta.get('game', os.path.basename(pack_dir)))
         if meta.get('game', os.path.basename(pack_dir)) != game.GAME['game']:   # older pack.json: no "game"
             raise ImportFailed('%s is a %s disc, but %s holds %s.' % (
                 os.path.basename(iso), game.GAME['name'], pack_dir, meta.get('name', meta.get('game'))))

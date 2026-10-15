@@ -13,7 +13,6 @@ extends RefCounted
 static func apply_sun_direction(travel_dir: Vector3) -> void:
 	RenderingServer.global_shader_parameter_set("sun_dir", travel_dir.normalized())
 
-
 ## The engine-space sun of a 3Space WLD light vector (stored as RzRyRx, original x / y / z = engine x / -z / y).
 static func make_3space_sun(light_vector: Array) -> Vector3:
 	return Vector3(float(light_vector[0]), float(light_vector[2]), -float(light_vector[1])).normalized()
@@ -40,3 +39,22 @@ static func build_palette_environment(parent: Node3D, spec: Dictionary) -> World
 	env_node.environment = env
 	parent.add_child(env_node)
 	return env_node
+
+
+## A plain studio environment for tools and test scenes (shape viewer, line-ups, screenshot sheets): a flat
+## background colour, a flat ambient colour when spec has "ambient" (else the background's ambient), at
+## "ambient_energy" (default 1).
+## spec: {background: Color, ambient: Color (optional), ambient_energy: float (optional)}.
+static func add_studio_environment(parent: Node, spec: Dictionary) -> WorldEnvironment:
+	var env := Environment.new()
+	env.background_mode = Environment.BG_COLOR
+	env.background_color = spec.background
+	if spec.has("ambient"):
+		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+		env.ambient_light_color = spec.ambient
+	env.ambient_light_energy = float(spec.get("ambient_energy", 1.0))
+	var node := WorldEnvironment.new()
+	node.environment = env
+	parent.add_child(node)
+	return node
+

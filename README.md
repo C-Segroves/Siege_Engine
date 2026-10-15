@@ -5,6 +5,8 @@ Metaltech: Earthsiege (1994), Metaltech: Battledrome (1994), Earthsiege 2 (1996)
 Starsiege: Tribes (1998) and Tribes 2 (2001). Siege Engine contains **no game content**: it plays the original data
 it converts from **your own discs**, with LAN multiplayer and modes that mix the games.
 
+**Don't have the discs?** Sierra released the games as freeware: download them from the [archived Tribes Universe page](https://web.archive.org/web/20160410062724/http://www.tribesuniverse.com/) and import the files (see [Getting the games](#getting-the-games)).
+
 [![Support me on Ko-fi](https://img.shields.io/badge/Ko--fi-support%20Siege%20Engine-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/csegroves)
 
 ## What the repository contains: code only
@@ -66,6 +68,11 @@ The import converts the tracks to `<pack>/audio/cd/track_NN.ogg` (Vorbis q6) plu
 missions that play them). Without audio the import still succeeds and says "no CD audio found".
 Code: `tools/siege_cd.py`; tests: `python tools/tests/test_siege_cd.py [--exe dist\siege-importer\siege-importer.exe]`.
 
+## Getting the games
+Sierra released these games as freeware. Download them from the archived Tribes Universe page
+(<https://web.archive.org/web/20160410062724/http://www.tribesuniverse.com/>) and import the disc images with the
+importer. Siege Engine ships no game files.
+
 ## Tested game versions
 The importer records which release each disc holds (`pack.json` "release": version / build strings, the main
 executable's and the disc image's SHA-256; `tools/disc_version.py`). The library's **Tested game versions** page
@@ -82,6 +89,10 @@ reads: `game/engine/tested_versions.json`.
 | Starsiege | 1.000r (retail) | none (1.003 / 1.004 not applied) | Starsiege.exe `42569d3408848481` | passed: import + 25/25 sandbox checks (2026-10-12) |
 | Starsiege: Tribes | 1.0 (retail) | none (1.11 not applied) | tribes.exe `9486763a27522034` | passed: import + 25/25 sandbox checks, training missions (2026-10-12) |
 | Tribes 2 | 1.0 build 21570 (retail) | none (25034 not applied) | Tribes2.exe `f32e4560c07e61ad` | passed: import + 25/25 sandbox checks, training missions (2026-10-12) |
+| Metaltech: Earthsiege | 1.0 CD (DOS), freeware release | none | DBSIM.EXE `e5fb35966f3c7551` | recommended (freeware); passed: import + 25/25 sandbox checks (2026-10-13) |
+| Earthsiege 2 | 1.0 (Windows), freeware release | none | DBSIM.EXE `3360074881057866` | recommended (freeware); passed: import + 25/25 sandbox checks (2026-10-13) |
+| Starsiege | 1.000r, freeware release (Starsiege disc 1) | none | Starsiege.exe `a77e83e26d776303` | passed: import + 25/25 sandbox checks (2026-10-13) |
+| Tribes 2 | build 25034 (freeware release) | 25034 | Tribes2.exe `7ad1d40a6aa74a25` | passed: import + 25/25 sandbox checks, training missions (2026-10-13) |
 <!-- tested-table:end -->
 
 All six were tested on 2026-10-12, each disc alone in a sandbox (fresh data folder and user store:

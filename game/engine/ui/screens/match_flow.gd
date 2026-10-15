@@ -45,6 +45,9 @@ const CAMPAIGN_DESCRIPTIONS := {
 		+ "to the assault on Luna, with flying Razors and a growing squad.",
 	"starsiege_human": "Starsiege (1999), Human campaign. Fight for the free colonies across the solar "
 		+ "system against the Imperial forces and the Cybrid threat.",
+	"tribes_aa": "Tribes: Aerial Assault (2002, PS2). Five training missions, then the Blood Eagle campaign on foot. "
+		+ "Needs Tribes 2 installed for the soldiers and base equipment; the scripted mission logic is not "
+		+ "reproduced: each mission is a reach-and-destroy run.",
 	"starsiege_cybrid": "Starsiege (1999), Cybrid campaign. Serve Prometheus as a Cybrid unit in the war "
 		+ "against humanity (the original's advanced campaign).",
 }
@@ -242,6 +245,13 @@ static func make_skirmish_config(vehicle_id: String, loadout: Array, map_config:
 	return cfg
 
 
+## The soldier an on-foot mission issues ({vehicle: "<pack>:<armour>", loadout}); armours are not vehicles
+## (Packs.vehicle), so this asks the mission's runtime directly, as the battle does.
+static func make_issued_soldier() -> Dictionary:
+	var mission := Session.current_mission()
+	return MissionKinds.runtime_script(mission).make_mission_herc(mission) if not mission.is_empty() else {}
+
+
 ## The current campaign mission with the Herc chosen in the pre-mission hangar; `garage_tag` names the
 ## garage Herc it is (Garage.make_battle_tag; {} for the Herc a mission issues).
 static func make_mission_config(vehicle_id: String, loadout: Array, garage_tag := {}) -> Dictionary:
@@ -266,6 +276,12 @@ static func make_campaign_entries() -> Array:
 			var key := SaveGames.make_campaign_key(str(stage_def.pack), str(variant), false)
 			out.append({"text": text, "pack": stage_def.pack, "variant": variant, "playable": bool(stage.playable),
 				"key": key, "description": str(CAMPAIGN_DESCRIPTIONS.get(key, ""))})
+	for s in Saga.STANDALONE:
+		var key := SaveGames.make_campaign_key(str(s.pack), "", false)
+		var playable := Assets.has_pack(str(s.pack)) and (s.get("needs", []) as Array).all(
+			func(p: String) -> bool: return Assets.has_pack(p))
+		out.append({"text": "%s campaign" % s.name, "pack": s.pack, "variant": "", "playable": playable,
+			"key": key, "description": str(CAMPAIGN_DESCRIPTIONS.get(key, ""))})
 	return out
 
 

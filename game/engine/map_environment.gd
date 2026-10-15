@@ -39,6 +39,7 @@ static func build(parent: Node3D, e: Dictionary, dir := "") -> void:
 	env.fog_light_color = make_color(e.get("fog_color", DEFAULT_FOG))
 	env.fog_depth_begin = float(e.get("fog_start", DEFAULT_FOG_START))
 	env.fog_depth_end = float(e.get("fog_end", DEFAULT_FOG_END))
+	env.fog_sky_affect = float(e.get("fog_sky_affect", env.fog_sky_affect))   # < 1 keeps a skybox visible through the fog
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	var env_node := WorldEnvironment.new()
 	env_node.environment = env

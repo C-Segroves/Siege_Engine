@@ -24,6 +24,7 @@ Sfx="*res://engine/sfx.gd"
 Packs="*res://engine/packs.gd"
 Net="*res://engine/net.gd"
 Session="*res://engine/session.gd"
+TestWatchdog="*res://engine/testing/test_watchdog.gd"
 
 [display]
 

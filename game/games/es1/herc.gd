@@ -453,9 +453,10 @@ func apply_hit(shield_dmg: float, armor_dmg: float, attacker: Node = null, hit_p
 
 ## A weapon hit (DamageModel hit record): the game's damage model takes the shields, then lands the armour damage
 ## that gets through on the components; then the death test.
-func apply_weapon_hit(hit: Dictionary) -> void:
+func apply_weapon_hit(raw_hit: Dictionary) -> void:
 	if not alive or is_puppet or is_spawn_protected():
 		return
+	var hit := damage_model.make_hit_scaled(raw_hit)
 	_big_blast_played = false
 	var through := damage_model.make_shield_through(self, hit)
 	if through > 0.0:

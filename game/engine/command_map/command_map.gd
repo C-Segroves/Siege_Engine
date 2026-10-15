@@ -24,6 +24,8 @@ var _units: VBoxContainer
 var _orders_box: VBoxContainer
 var _target_label: Label
 var _status: Label
+var _markers_box: VBoxContainer
+var _hidden: Array = []
 var _unit_boxes := {}               # net id -> CheckBox
 
 
@@ -39,6 +41,7 @@ static func open(p_battle: Node3D, unit: Node3D) -> CommandMap:
 	layer.add_child(m)
 	p_battle.add_child(layer)
 	m._build()
+	m._hide_battle_ui()
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	m.view.build_background()
 	return m
@@ -93,12 +96,35 @@ func _build_side() -> VBoxContainer:
 	_units = VBoxContainer.new()
 	side.add_child(_units)
 	_fill_units()
+	side.add_child(Widgets.section("My waypoints"))
+	side.add_child(Widgets.button("Mark this spot  (P)", place_marker))
+	_markers_box = VBoxContainer.new()
+	side.add_child(_markers_box)
+	_fill_markers()
 	side.add_child(Widgets.section("Orders"))
 	_target_label = Widgets.label("Target: none", "DimLabel")
 	side.add_child(_target_label)
 	_orders_box = VBoxContainer.new()
 	side.add_child(_orders_box)
 	return side
+
+
+## Sticks a personal waypoint (PersonalWaypoints: local, on the compass) at the picked spot, else at the cursor.
+func place_marker() -> bool:
+	var at: Vector3 = pick.point if not pick.is_empty() else view.to_world(view.cursor)
+	var ok := PersonalWaypoints.add(at)
+	_status.text = "Waypoint P%d placed." % PersonalWaypoints.points.size() if ok else "Only %d waypoints: remove one first." % PersonalWaypoints.MAX
+	_fill_markers()
+	return ok
+
+
+func _fill_markers() -> void:
+	for c in _markers_box.get_children():
+		c.queue_free()
+	for i in PersonalWaypoints.points.size():
+		_markers_box.add_child(Widgets.small_button("Remove P%d" % (i + 1), func() -> void:
+			PersonalWaypoints.remove(i)
+			_fill_markers()))
 
 
 func _fill_units() -> void:
@@ -146,7 +172,27 @@ func give(entry: Dictionary) -> void:
 	_status.text = "%s: %d unit(s)." % [str(entry.label), recipients.size()]
 
 
+## A proper modal: the battle's HUD, hints, chat and objectives hide under the map (shown again on close).
+func _hide_battle_ui() -> void:
+	for n in _battle_ui():
+		if n.get("visible") == true:
+			n.visible = false
+			_hidden.append(n)
+
+
+func _battle_ui() -> Array:
+	var out := []
+	for name in ["overlay", "hud"]:
+		var n = battle.get(name)
+		if n != null and n.get("visible") != null:
+			out.append(n)
+	return out
+
+
 func close() -> void:
+	for n in _hidden:
+		if is_instance_valid(n):
+			n.visible = true
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	closed.emit()
 	get_parent().queue_free()
@@ -158,8 +204,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		close()
 		return
 	var key := event as InputEventKey
-	if key and key.pressed and not key.echo and key.unicode > 0 and not pick.is_empty():
-		give_by_letter(char(key.unicode).to_lower())
+	if key and key.pressed and not key.echo and key.unicode > 0:
+		var letter := char(key.unicode).to_lower()
+		if not pick.is_empty() and give_by_letter(letter):
+			return
+		if letter == "p":
+			get_viewport().set_input_as_handled()
+			place_marker()
 
 
 ## The original's order letter for the current pick (true when one matched).

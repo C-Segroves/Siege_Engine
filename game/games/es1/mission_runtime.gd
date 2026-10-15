@@ -100,6 +100,7 @@ static func make_area_rule() -> String:
 
 func setup(p_battle: Node3D, mission: Dictionary, vars := PackedInt32Array()) -> void:
 	super.setup(p_battle, mission, vars)
+	EsDamageModel.ai_damage_scale = EsDamageModel.make_ai_damage_scale(mission.get("header", {})) if radio_pack() == "es1" else 1.0
 	targets = MissionTargets.new(self)
 	win_rules = ES1WinRules.new(self)
 	for wp in _arr(m.get("player_start", {}).get("waypoints")):
@@ -248,6 +249,10 @@ func start_wingman_radio(units: Array) -> void:
 	for u in units:
 		if u is Herc:
 			wingman_radio.add_wingman(u)
+
+
+func _exit_tree() -> void:
+	EsDamageModel.ai_damage_scale = 1.0
 
 
 ## The pack whose radio tables this mission speaks (audio/tables/pilot<n>_voice.json).

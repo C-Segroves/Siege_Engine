@@ -104,7 +104,7 @@ func _make_place(area: Vector3, spread: float) -> Transform3D:
 	return Transform3D(Basis(Vector3.UP, rng.randf() * TAU), p)
 
 
-func _spawn_soldier(faction: Dictionary, pack: String, team: int, area: Vector3, k: int, squad: Dictionary) -> void:
+func _spawn_soldier(faction: Dictionary, pack: String, team: int, area: Vector3, k: int, squad: Dictionary) -> InfantryBot:
 	_soldiers_left -= 1
 	var radius := float(ExtractionRules.map_rules().get("area_radius_m", 28.0))
 	var id := battle.infantry.bots.allocate_bot_id()
@@ -121,6 +121,7 @@ func _spawn_soldier(faction: Dictionary, pack: String, team: int, area: Vector3,
 	if brain:
 		brain.guard_point = area
 		brain.guard_radius = radius * GUARD_RADIUS_FACTOR
+	return brain
 
 
 ## Every medium_every-th soldier medium, every heavy_every-th heavy, the rest light.
@@ -134,7 +135,7 @@ static func _make_size(k: int, squad: Dictionary) -> String:
 	return SIZES[0]
 
 
-func _spawn_vehicle(vehicle_id: String, faction: Dictionary, team: int, area: Vector3, radius: float, squad: Dictionary) -> void:
+func _spawn_vehicle(vehicle_id: String, faction: Dictionary, team: int, area: Vector3, radius: float, squad: Dictionary) -> Herc:
 	_vehicles_left -= 1
 	var vdef := Packs.vehicle(vehicle_id)
 	var spec := {"net_id": battle.spawner.allocate_id(), "vehicle": vehicle_id, "team": team, "owner": 1,
@@ -144,8 +145,32 @@ func _spawn_vehicle(vehicle_id: String, faction: Dictionary, team: int, area: Ve
 	battle.send_spawn(spec)
 	var h: Herc = battle.vehicles.get(int(spec.net_id))
 	if h == null:
-		return
+		return null
 	for c in h.get_children():
 		if c is AIPilot:
 			(c as AIPilot).order = AIPilot.Order.GUARD
 			(c as AIPilot).guard_point = area
+	return h
+
+
+## A flag-theft response squad of faction `faction_id` (team `team`) at `at`: `soldiers` infantry bots and, when
+## `with_vehicle`, one armed faction vehicle. Ignores the raid's bot caps. Returns {bots: [InfantryBot], vehicle: Herc}.
+func spawn_response(faction_id: String, team: int, at: Vector3, soldiers: int, with_vehicle: bool) -> Dictionary:
+	var out := {"bots": [], "vehicle": null}
+	var faction := {}
+	for f in ExtractionFactions.make_available():
+		if str(f.id) == faction_id:
+			faction = f
+	if faction.is_empty():
+		return out
+	var squad := ExtractionFactions.make_squad_rules(faction)
+	var pack := ExtractionFactions.make_infantry_pack(faction)
+	if pack != "":
+		for k in soldiers:
+			var b := _spawn_soldier(faction, pack, team, at, k, squad)
+			if b:
+				out.bots.append(b)
+	var pool := ExtractionFactions.make_vehicle_pool(faction)
+	if with_vehicle and not pool.is_empty():
+		out.vehicle = _spawn_vehicle(str(pool[rng.randi_range(0, pool.size() - 1)]), faction, team, at, 6.0, squad)
+	return out

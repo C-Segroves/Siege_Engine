@@ -62,9 +62,10 @@ def find_discs(iso_dir, only):
         info = run_identify(path)
         if 'error' in info:
             continue
-        if only and info['pack'] not in only:
-            continue
-        out.append((path, info))
+        for pack in info.get('also', [info['pack']]):      # a combined disc: one entry per pack
+            if only and pack not in only:
+                continue
+            out.append((path, info if pack == info['pack'] else run_identify(path, pack)))
     return out
 
 
@@ -75,7 +76,7 @@ def split_duplicate_images(discs):
     sizes = [os.path.getsize(p) for p, _ in discs]
     seen, kept, dupes = {}, [], {}
     for (path, info), size in zip(discs, sizes):
-        key = (size, disc_version.make_file_sha256(path) if sizes.count(size) > 1 else path)
+        key = (info['pack'], size, disc_version.make_file_sha256(path) if sizes.count(size) > 1 else path)
         if key in seen:
             dupes[path] = seen[key]
             continue
@@ -84,8 +85,8 @@ def split_duplicate_images(discs):
     return kept, dupes
 
 
-def run_identify(path):
-    r = subprocess.run([sys.executable, IMPORTER, 'identify', path], capture_output=True, text=True)
+def run_identify(path, pack=None):
+    r = subprocess.run([sys.executable, IMPORTER, 'identify'] + (['--game', pack] if pack else []) + [path], capture_output=True, text=True)
     lines = [l for l in r.stdout.splitlines() if l.strip().startswith('{')]
     return json.loads(lines[-1]) if lines else {'error': r.stderr.strip() or 'no answer'}
 
@@ -97,7 +98,7 @@ def run_import(box, image, info):
     shutil.rmtree(packs, ignore_errors=True)
     os.makedirs(packs)
     t0 = time.time()
-    proc = subprocess.run([sys.executable, IMPORTER, 'import', '--out', packs, image],
+    proc = subprocess.run([sys.executable, IMPORTER, 'import', '--game', info['pack'], '--out', packs, image],
                           capture_output=True, text=True, timeout=IMPORT_TIMEOUT_S)
     seconds = round(time.time() - t0, 1)
     events = [json.loads(l) for l in proc.stdout.splitlines() if l.strip().startswith('{')]
@@ -334,6 +335,8 @@ def write_json(path, obj):
 # ---------------------------------------------------------------------------------------------- main
 def run_disc(sandbox, image, info, args):
     name = os.path.splitext(os.path.basename(image))[0]
+    if info.get('also'):
+        name += '-' + info['pack']             # a combined disc: one sandbox per pack
     box = os.path.join(sandbox, name)
     os.makedirs(box, exist_ok=True)
     result = read_json(os.path.join(box, 'result.json')) or {}

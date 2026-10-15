@@ -34,6 +34,31 @@ static func draw(item: CanvasItem, rect: Rect2, viewer: Herc, waypoint: Dictiona
 		Vector2(cx + CARET, rect.position.y - CARET)]), col)
 	if not waypoint.is_empty():
 		_draw_waypoint(item, rect, viewer, waypoint, style)
+	_draw_personal(item, rect, viewer, style)
+	_draw_team(item, rect, viewer, style)
+
+
+## Teammates: small team-coloured ticks hanging under the tape (only within its span) with a short label.
+static func _draw_team(item: CanvasItem, rect: Rect2, viewer: Herc, style: Dictionary) -> void:
+	for m in HeadingFrame.make_team_marks(viewer):
+		var rel := HeadingFrame.make_relative_bearing_deg(viewer, m.pos)
+		if absf(rel) > HALF_SPAN_DEG:
+			continue
+		var x := make_marker_x(rect, rel)
+		var y := rect.end.y
+		item.draw_colored_polygon(PackedVector2Array([Vector2(x, y), Vector2(x - 3, y + 6), Vector2(x + 3, y + 6)]), m.color)
+		item.draw_string(style.font, Vector2(x - 8.0, y + 6.0 + style.font_size), m.label, HORIZONTAL_ALIGNMENT_LEFT, -1,
+			maxi(style.font_size - 2, 8), m.color)
+
+
+## The player's own waypoints: cyan squares on the tape (below the mission marker) with "P1 d m" under the tape.
+static func _draw_personal(item: CanvasItem, rect: Rect2, viewer: Herc, style: Dictionary) -> void:
+	var at: float = rect.position.y + TICK_MAJOR + style.font_size + 2.0
+	for m in PersonalWaypoints.make_marks(viewer.global_position):
+		var x := make_marker_x(rect, HeadingFrame.make_relative_bearing_deg(viewer, m.pos))
+		item.draw_rect(Rect2(x - MARKER * 0.6, rect.position.y + 1.0, MARKER * 1.2, MARKER * 1.2), PersonalWaypoints.COLOR)
+		item.draw_string(style.font, Vector2(x - 14.0, at + style.font_size), "%s %d m" % [m.label, int(m.distance)],
+			HORIZONTAL_ALIGNMENT_LEFT, -1, style.font_size, PersonalWaypoints.COLOR)
 
 
 static func _draw_tick(item: CanvasItem, at: Vector2, deg: int, style: Dictionary) -> void:

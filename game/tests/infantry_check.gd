@@ -198,6 +198,16 @@ func _check_movement(battle: Battle) -> void:
 	var run := Vector2(s.global_position.x - p0.x, s.global_position.z - p0.z).length()
 	_expect(run > 5.0 and run < 11.5 * RUN_SECONDS, "runs %.1f m in %.1f s (max 11 m/s)" % [run, RUN_SECONDS])
 	await _seconds(0.5)
+	_expect(absf(s.floor_max_angle - acos(0.2)) < 0.01, "walks slopes up to the original jumpSurfaceMinDot 0.2 (%.0f deg)" % rad_to_deg(s.floor_max_angle))
+	var vy0 := s.velocity.y
+	s.jet_input = true
+	s.throttle = 1.0
+	await _seconds(1.0)   # 1 s from rest, moving: net climb = jetForce/mass - gravity (26.2 - 20) = 6.2 m/s per s
+	var vy1 := s.velocity.y
+	s.jet_input = false
+	s.throttle = 0.0
+	_expect(vy1 > 5.0 and vy1 < 7.5, "jetting from rest while moving climbs at jet_accel - gravity (vy %.1f m/s after 1 s, want ~6.2)" % vy1)
+	await _seconds(1.5)
 	var y0 := s.global_position.y
 	s.jump_input = true
 	await _frames(3)

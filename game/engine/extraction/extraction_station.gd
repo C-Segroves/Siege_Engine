@@ -50,7 +50,7 @@ static func make_offers(soldier: Infantry) -> Array:
 static func _is_for(soldier: Infantry, r: Dictionary) -> bool:
 	match str(r.kind):
 		"ammo":
-			return int((soldier.armor.get("ammo", {}) as Dictionary).get(str(r.ref), 0)) > 0 and soldier.make_loadout().has(str(r.ref))
+			return InfantryCatalog.make_ammo_capacity(soldier.armor_id, str(r.ref)) > 0 and soldier.make_loadout().has(str(r.ref))
 		"gear":
 			return (soldier.armor.get("hand_items", {}) as Dictionary).has(str(r.ref))
 		"weapon":

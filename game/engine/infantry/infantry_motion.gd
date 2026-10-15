@@ -31,8 +31,9 @@ static func make_ground_speed_limit(s: Infantry, wish: Vector3) -> float:
 	return Vector2(local.x * side, local.z * along).length()
 
 
-## The jetpack: jetForce / mass of thrust, part of it horizontal along the movement input (at most
-## maxJetSideForceFactor, none beyond maxJetForwardVelocity), the rest up; spends jetEnergyDrain.
+## The jetpack: jetForce / mass of thrust straight up (net of gravity: 26.2 - 20 = 6.2 m/s^2 for the Tribes 1 light
+## armour, so it must never be split with the sideways push), plus a horizontal push along the movement input of
+## maxJetSideForceFactor of it (none beyond maxJetForwardVelocity); spends jetEnergyDrain.
 static func apply_jet(s: Infantry, wish: Vector3, delta: float) -> void:
 	s.capacitor = maxf(0.0, s.capacitor - float(s.armor.get("jet_energy_per_s", 25.0)) * delta)
 	var thrust := float(s.armor.get("jet_accel", 26.2))
@@ -41,7 +42,7 @@ static func apply_jet(s: Infantry, wish: Vector3, delta: float) -> void:
 	if Vector3(s.velocity.x, 0.0, s.velocity.z).dot(dir) >= float(s.armor.get("max_jet_forward_speed", 22.0)):
 		side = 0.0
 	s.velocity += dir * thrust * side * delta
-	s.velocity.y += thrust * sqrt(1.0 - side * side) * delta
+	s.velocity.y += thrust * delta
 
 
 ## Falling (or flying) into something faster than the armour's fall_min_speed hurts, of the armour's fall damage

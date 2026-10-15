@@ -16,6 +16,8 @@ static func runtime_script(mission: Dictionary) -> GDScript:
 		return Tribes2MissionRuntime if String(mission.get("pack", "")) == "tribes2" else Tribes1MissionRuntime
 	if String(mission.get("pack", "")) == MissionRuntimeES2.PACK:
 		return MissionRuntimeES2
+	if AAMissionRuntime.is_aa(mission):
+		return AAMissionRuntime
 	if StarsiegeMissionRuntime.is_starsiege(mission):
 		return StarsiegeMissionRuntime
 	return MissionRuntime

@@ -78,6 +78,7 @@ static func default_config(vehicle := "es1:RAPTOR") -> Dictionary:
 func _ready() -> void:
 	name = "Battle"
 	ShapeInstance.world_palettes.clear()   # set again by MapBuilder for Darkstar maps
+	PersonalWaypoints.clear()
 	TeamRelations.clear()                  # a mode sets its own (the extraction factions)
 	spawner = BattleSpawner.new(self)
 	_fx = BattleFx.new(self)

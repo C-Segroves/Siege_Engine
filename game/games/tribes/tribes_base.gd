@@ -42,6 +42,8 @@ var _palette := ""
 var map_data: Dictionary = {}
 var _check_t := 0.0
 static var _specs := {}          # pack -> base_equipment.json
+## Packs without base_equipment.json of their own that borrow another pack's blocks (their stations are look-alikes).
+const SPEC_PACK_FALLBACK := {"tribes_aa": "tribes2"}
 
 
 ## Builds the base of `built` (MapBuilder.build result) under `p_battle`; null when the map has none.
@@ -78,7 +80,7 @@ static func of(p_battle: Node) -> TribesBase:
 ## base_equipment.json of `pack` ({} when the pack has none).
 static func load_specs(pack: String) -> Dictionary:
 	if not _specs.has(pack):
-		var j = Assets.load_json(SPECS_FILE, pack) if pack != "" else null
+		var j = Assets.load_json(SPECS_FILE, SPEC_PACK_FALLBACK.get(pack, pack)) if pack != "" else null
 		_specs[pack] = j if j is Dictionary else {}
 	return _specs[pack]
 

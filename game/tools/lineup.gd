@@ -206,16 +206,8 @@ func _build_camera(row_width: float, tallest: float, depth: float) -> void:
 
 
 func _build_environment() -> void:
-	var env_node := WorldEnvironment.new()
-	var env := Environment.new()
-	env.background_mode = Environment.BG_COLOR
-	env.background_color = SKY
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.7, 0.7, 0.7)
-	env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
-	env_node.environment = env
-	add_child(env_node)
-	RenderingServer.global_shader_parameter_set("sun_dir", Vector3(-0.4, -0.75, -0.5).normalized())
+	SceneLighting.add_studio_environment(self, {"background": SKY, "ambient": Color(0.7, 0.7, 0.7)})
+	SceneLighting.apply_sun_direction(Vector3(-0.4, -0.75, -0.5))
 	var floor_mi := MeshInstance3D.new()
 	var pm := PlaneMesh.new()
 	pm.size = Vector2(2000, 200)
