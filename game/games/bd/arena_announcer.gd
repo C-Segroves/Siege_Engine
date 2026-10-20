@@ -8,6 +8,7 @@ extends RefCounted
 
 
 ## [[seconds after the end, Sfx voice name], ...] for a pilot who won (`won`) or lost; [] without Battledrome.
+## The voices are a FIFO list of the announcer: each keeps the radio busy for its delay, the next starts after it.
 static func make_end_sequence(won: bool) -> Array:
 	var e: Dictionary = BdVoices.table().get("end_of_round", {})
 	if e.is_empty():
@@ -15,11 +16,14 @@ static func make_end_sequence(won: bool) -> Array:
 	var voices: Array = e.get("voices", []).duplicate()
 	voices.append(e.get("winner_voice" if won else "loser_voice", ""))
 	var delays: Array = e.get("delays_s", [])
-	var out := []
-	var at := 0.0
+	var list: Array[MissionMessage] = []
 	for i in voices.size():
-		out.append([at, BdVoices.sound_name(String(voices[i]))])
-		at += float(delays[i]) if i < delays.size() else 0.0
+		var delay := float(delays[i]) if i < delays.size() else 0.0
+		list.append(MissionMessage.make_voice_only(MissionVoice.make_voice(BdVoices.sound_name(String(voices[i])), delay)))
+	var starts := MissionAnnouncer.make_start_times(list)
+	var out := []
+	for i in list.size():
+		out.append([starts[i], list[i].voice.id])
 	return out
 
 

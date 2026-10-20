@@ -17,6 +17,9 @@ signal mission_over(success: bool, code: int, text: String)
 const MISSION_VAR_COUNT := 100
 ## Player squad starts: wingmen alternate left / right, SQUAD_SPACING apart and back (Earthsiege and Starsiege).
 const SQUAD_SPACING := 25.0
+## Debriefing codes the Darkstar-era games (Starsiege, Tribes, Aerial Assault, Vengeance) store in mission var 0.
+const CODE_SUCCESS := 1
+const CODE_FAILED := 6
 
 var battle: Node3D
 var m: Dictionary                 # resolved mission
@@ -25,8 +28,8 @@ var nav_points: Array[Vector3] = []
 var nav_index := 0
 var structures := []              # index -> Structure
 var _over := false
-var _check_t := 0.0
-var _rules_dt := 0.0
+## The mission blocks (clock, timers, objectives, fail rules, announcer, ender ...) this game fills in.
+var kit := MissionKit.new()
 
 
 # ------------------------------------------------------------------ launch contract (MissionKinds)
@@ -110,15 +113,33 @@ func make_objective_lines() -> Array:
 ## last rules tick when one is due this physics step (a tick spans whole physics steps, so it is usually a bit
 ## more than `interval`; timers driven by it then keep game time), else 0.
 func make_rules_step(delta: float, interval: float) -> float:
-	_rules_dt += delta
-	_check_t -= delta
-	if _check_t > 0.0:
-		return 0.0
-	_check_t = maxf(_check_t + interval, 0.0)
-	var dt := _rules_dt
-	_rules_dt = 0.0
-	return dt
+	return kit.clock.make_step(delta, interval)
 
+
+## The default host tick: advances the clock and runs the kit's blocks in their fixed order (MissionKit.apply_tick) with
+## the rules step of `interval` seconds. Returns the payloads of the kit timers that ran out. A game whose rules need
+## more than the kit overrides _physics_process and calls this for the shared part.
+func apply_kit_tick(world: MissionWorld, delta: float, interval: float) -> Array:
+	kit.clock.apply_advance(delta)
+	return kit.apply_tick(world, delta, make_rules_step(delta, interval))
+
+
+
+## The world the kit's blocks ask about (null: the game has none and fills in no block that needs one).
+func make_world() -> MissionWorld:
+	return null
+
+
+## Seconds between the rules ticks of the default tick.
+func make_rules_interval() -> float:
+	return 0.25
+
+
+## The default tick of a runtime that needs nothing beyond the kit; a game with more rules overrides it.
+func _physics_process(delta: float) -> void:
+	if _over or not multiplayer.is_server():
+		return
+	apply_kit_tick(make_world(), delta, make_rules_interval())
 
 ## Ends the mission once, the same way in every game: the game's end bookkeeping (apply_end), its end code in
 ## mission var 0 (make_end_var), then the result and the debriefing text (make_debriefing_text) to the Battle.

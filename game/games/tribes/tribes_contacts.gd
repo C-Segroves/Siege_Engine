@@ -19,25 +19,34 @@ const ITEM_REACH := Vector2(2.0, 2.5)
 const SHAPE_REACH := Vector2(3.0, 3.5)
 const RESCAN_SECONDS := 1.0
 const INTERACT_EXTRA_REACH := 1.0
+## The player's key in the area triggers' candidate lists (the id of his soldier changes with every respawn).
+const PLAYER_KEY := "player"
 
 var rt: TribesMissionRuntime
 var _items: Array = []
 var _shapes: Array = []
 var _triggers: Array = []
 var _touching := {}             # shape id -> true while the player stays within reach
-var _inside := {}               # trigger id -> true while the player is inside
-var _in_area := true
-var _area := Rect2()
+var _trigger_areas := {}         # trigger id -> AreaTrigger (holds whether the player is inside)
+var _mission_area: AreaTrigger
 var _rescan_t := 0.0
+var _has_area := false
+var _scan_pid := 0          # the player's id during the checks the area triggers answer in
 
 
 func _init(runtime: TribesMissionRuntime) -> void:
 	rt = runtime
+	_mission_area = AreaTrigger.new(AreaShape.make_box(Vector3.ZERO, Vector3.ZERO))
+	_mission_area.apply_assume_inside(PLAYER_KEY)   # the player starts inside: only leaving and returning are told
+	_mission_area.entered.connect(func(_who: Variant) -> void: rt.on_mission_area(_scan_pid, true))
+	_mission_area.left.connect(func(_who: Variant) -> void: rt.on_mission_area(_scan_pid, false))
 
 
 ## The mission area in the original frame (x east, y north): set by the game when the mission defines one.
 func set_area(area: Rect2) -> void:
-	_area = area
+	_has_area = area.size != Vector2.ZERO
+	var middle := area.get_center()
+	_mission_area.shape = AreaShape.make_box(Vector3(middle.x, 0.0, middle.y), Vector3(area.size.x, 0.0, area.size.y))
 
 
 func update() -> void:
@@ -125,38 +134,50 @@ func _check_shapes(pid: int, p: Vector3) -> void:
 
 
 func _check_triggers(pid: int, p: Vector3) -> void:
+	_scan_pid = pid
+	var o := _make_area_frame(TribesSimObjects.to_original(p))
 	for id in _triggers:
 		if not rt.sim.exists(id):
 			continue
-		var inside := _is_in_trigger(id, p)
-		if inside != _inside.has(id):
-			if inside:
-				_inside[id] = true
-			else:
-				_inside.erase(id)
-			rt.on_trigger(id, pid, inside)
+		var area := _make_trigger_area(id)
+		var shape := _make_trigger_shape(id)
+		if shape != null:
+			area.shape = shape
+		area.apply_scan({PLAYER_KEY: o} if shape != null else {})
 
 
-## Tribes trigger: boundingBox "x0 y0 z0 x1 y1 z1" around its position, a sphere when isSphere is true.
-func _is_in_trigger(id: int, p: Vector3) -> bool:
+## The AreaTrigger of trigger `id` (made on first use; it remembers whether the player is inside).
+func _make_trigger_area(id: int) -> AreaTrigger:
+	if not _trigger_areas.has(id):
+		var area := AreaTrigger.new(AreaShape.make_sphere(Vector3.ZERO, 0.0))
+		area.entered.connect(func(_who: Variant) -> void: rt.on_trigger(id, _scan_pid, true))
+		area.left.connect(func(_who: Variant) -> void: rt.on_trigger(id, _scan_pid, false))
+		_trigger_areas[id] = area
+	return _trigger_areas[id]
+
+
+## Tribes trigger: boundingBox "x0 y0 z0 x1 y1 z1" around its position, a sphere when isSphere is true (null without a box).
+func _make_trigger_shape(id: int) -> AreaShape:
 	var f: Dictionary = rt.sim.objects[id].fields
-	var o := TribesSimObjects.to_original(p) - TribesSimObjects.to_original(rt.sim.position_of(id))
 	var box := DarkstarStdLib.make_parts(DarkstarScript.to_str(f.get("boundingbox", "")), " ")
 	if box.size() < 6:
-		return false
+		return null
 	var lo := Vector3(float(box[0]), float(box[1]), float(box[2]))
 	var hi := Vector3(float(box[3]), float(box[4]), float(box[5]))
+	var center := _make_area_frame(TribesSimObjects.to_original(rt.sim.position_of(id)) + (lo + hi) * 0.5)
 	if DarkstarScript.truthy(f.get("issphere", false)):
-		var r := (hi - lo).x * 0.5
-		return (o - (lo + hi) * 0.5).length() <= r
-	return o.x >= lo.x and o.y >= lo.y and o.z >= lo.z and o.x <= hi.x and o.y <= hi.y and o.z <= hi.z
+		return AreaShape.make_sphere(center, (hi - lo).x * 0.5)
+	return AreaShape.make_box(center, _make_area_frame(hi - lo))
+
+
+## The original frame (x east, y north, z up) as the area shapes' (x, up, z): horizontal in x and z.
+static func _make_area_frame(o: Vector3) -> Vector3:
+	return Vector3(o.x, o.z, o.y)
 
 
 func _check_area(pid: int, p: Vector3) -> void:
-	if _area.size == Vector2.ZERO:
+	if not _has_area:
 		return
+	_scan_pid = pid
 	var o := TribesSimObjects.to_original(p)
-	var inside := _area.has_point(Vector2(o.x, o.y))
-	if inside != _in_area:
-		_in_area = inside
-		rt.on_mission_area(pid, inside)
+	_mission_area.apply_scan({PLAYER_KEY: Vector3(o.x, 0.0, o.y)})

@@ -51,10 +51,92 @@ static func make_bodies(armor_id: String) -> Array:
 	if a.is_empty():
 		return []
 	var bodies: Array = a.get("bodies", [])
+	var out := []
 	if bodies.is_empty():
-		return [{"id": str(a.get("shape", "")), "label": "Male", "bioderm": false}]
-	return bodies.filter(func(b: Dictionary) -> bool: return is_shape_installed(str(b.shape))).map(
-		func(b: Dictionary) -> Dictionary: return {"id": str(b.shape), "label": str(b.label), "bioderm": bool(b.bioderm)})
+		out.append({"id": str(a.get("shape", "")), "label": "Male", "bioderm": false})
+	else:
+		out = bodies.filter(func(b: Dictionary) -> bool: return is_shape_installed(str(b.shape))).map(
+			func(b: Dictionary) -> Dictionary: return {"id": str(b.shape), "label": str(b.label), "bioderm": bool(b.bioderm)})
+	out.append_array(make_aa_bodies(armor_id))
+	out.append_array(make_tv_bodies(armor_id))
+	return out
+
+
+## Aerial Assault's soldier shapes per armour size (tools/aa_soldier.py: rigged and animated like the other armours' bodies;
+## a pack imported before that holds rest-pose shapes, which are offered in menus only, see make_preview_bodies).
+const AA_PACK := "tribes_aa"
+const AA_BODIES := {
+	"LIGHT": [["light_male", "Aerial Assault", false], ["light_female", "Aerial Assault Female", false], ["light_bioderm", "Aerial Assault Bioderm", true]],
+	"MEDIUM": [["medium_male", "Aerial Assault", false], ["medium_female", "Aerial Assault Female", false], ["medium_bioderm", "Aerial Assault Bioderm", true]],
+	"HEAVY": [["heavy_male", "Aerial Assault", false], ["heavy_bioderm", "Aerial Assault Bioderm", true]],
+}
+## The weapon mount node of an Aerial Assault soldier (the armour's hand node is found by name; this is the fallback).
+const AA_HAND_NODE := "mount0"
+
+
+## The Aerial Assault bodies armour `armor_id` can wear (same size; the stats come from the armour itself): [{id, label,
+## bioderm, animated}]. Only animated (rigged) shapes: they play like any armour's body and may be spawned.
+static func make_aa_bodies(armor_id: String) -> Array:
+	var out := []
+	for e in AA_BODIES.get(armor_id.get_slice(":", 1), []):
+		var id := "%s:%s" % [AA_PACK, e[0]]
+		if is_shape_installed(id) and is_shape_animated(id):
+			out.append({"id": id, "label": e[1], "bioderm": e[2], "animated": true})
+	return out
+
+
+## Tribes: Vengeance bodies (tools/tv_skeletal.py, gameplay/bodies.json of the "tribes_v" pack): the three factions' soldiers of the
+## armour's size, male and female, rigged and animated like the other bodies (the stats stay the armour's own).
+const TV_PACK := "tribes_v"
+static var _tv_bodies: Array = []
+static var _tv_loaded := false
+
+
+## [{id, label, bioderm, animated}] of the Vengeance bodies armour `armor_id` can wear (empty when the pack is not imported).
+static func make_tv_bodies(armor_id: String) -> Array:
+	_ensure_tv_loaded()
+	var size := armor_id.get_slice(":", 1)
+	var out := []
+	for b in _tv_bodies:
+		if str(b.size) != size or not bool(b.get("offer", false)):
+			continue
+		var id := "%s:%s" % [TV_PACK, b.id]
+		if is_shape_installed(id) and is_shape_animated(id):
+			out.append({"id": id, "label": "Vengeance %s%s" % [b.faction, " Female" if bool(b.female) else ""], "bioderm": false, "animated": true})
+	return out
+
+
+## Every Vengeance body record (offered or not: named characters, civilians), [] when the pack is not imported.
+static func make_tv_all_bodies() -> Array:
+	_ensure_tv_loaded()
+	return _tv_bodies
+
+
+static func _ensure_tv_loaded() -> void:
+	if _tv_loaded:
+		return
+	_tv_loaded = true
+	var j = Assets.load_json("gameplay/bodies.json", TV_PACK)
+	if j is Dictionary:
+		_tv_bodies = j.get("bodies", [])
+
+
+## Aerial Assault bodies for menus and the hangar preview, animated or not (rest-pose shapes from an older import are
+## not for battles). Empty when Tribes 2 is installed (it has its own soldiers) or AA is not.
+static func make_preview_bodies(armor_id: String) -> Array:
+	if Assets.installed_packs().has("tribes2"):
+		return []
+	var out := []
+	for e in AA_BODIES.get(armor_id.get_slice(":", 1), []):
+		var id := "%s:%s" % [AA_PACK, e[0]]
+		if is_shape_installed(id):
+			out.append({"id": id, "label": e[1], "bioderm": e[2], "animated": is_shape_animated(id)})
+	return out
+
+
+## True when shape `shape_id` has animation sequences.
+static func is_shape_animated(shape_id: String) -> bool:
+	return not (Assets.shape(shape_id).get("ds_sequences", []) as Array).is_empty()
 
 
 ## True when shape `shape_id` ("pack:name") was exported.
@@ -65,7 +147,12 @@ static func is_shape_installed(shape_id: String) -> bool:
 
 ## True when `body_id` is one of the bodies of armour `armor_id`.
 static func has_body(armor_id: String, body_id: String) -> bool:
-	return make_bodies(armor_id).any(func(b: Dictionary) -> bool: return b.id == body_id)
+	return make_bodies(armor_id).any(func(b: Dictionary) -> bool: return b.id == body_id) or is_tv_character(body_id)
+
+
+## True when `body_id` is a Tribes: Vengeance body (armour, civilian or named character): campaign soldiers wear them on any armour.
+static func is_tv_character(body_id: String) -> bool:
+	return body_id.begins_with(TV_PACK + ":") and is_shape_installed(body_id)
 
 
 ## The skins of body shape `body_id`: [{id, label}], Default ("") first (SkinCatalog, tools/export_skins.py).
@@ -132,6 +219,8 @@ static func make_rules_armor(armor_id: String, weapon_id: String) -> Dictionary:
 static func reload() -> void:
 	_armors.clear()
 	_loaded = false
+	_tv_bodies = []
+	_tv_loaded = false
 
 
 static func _ensure_loaded() -> void:

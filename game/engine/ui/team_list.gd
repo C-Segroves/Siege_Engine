@@ -10,6 +10,7 @@ extends VBoxContainer
 ##   team_chosen(peer, team) / assign_all_requested / shuffle_requested
 
 signal team_chosen(peer: int, team: int)
+signal member_team_chosen(key: String, team: int)
 signal assign_all_requested
 signal shuffle_requested
 
@@ -35,7 +36,7 @@ func _init() -> void:
 ## Shows the teams of lobby settings `settings` with `roster` (Net.roster); `my_id` / `is_host`: who may change
 ## which pilot's team.
 func refresh(settings: Dictionary, roster: Dictionary, my_id: int, is_host: bool) -> void:
-	var key := JSON.stringify([settings, _make_roster_key(roster), my_id, is_host])
+	var key := JSON.stringify([settings, _make_roster_key(roster), my_id, is_host])  # settings include member_teams
 	if key == _key:
 		return
 	_key = key
@@ -92,7 +93,7 @@ func _add_column(team: int, view: Dictionary) -> void:
 			members += 1
 	for bot in view.bots:
 		if int(bot.team) == team:
-			column.add_child(Widgets.label("%s  (%s)" % [bot.name, bot.kind], "DimLabel"))
+			column.add_child(_make_bot_row(bot, view))
 			members += 1
 	if members == 0:
 		column.add_child(Widgets.label("(nobody)" if team != UNASSIGNED else "(everyone has a team)", "DimLabel"))
@@ -112,6 +113,20 @@ static func make_team_color(team: int) -> Color:
 	return UNASSIGNED_COLOR if team == UNASSIGNED else CatalogBridge.make_team_color(team)
 
 
+## A computer-controlled member's row: name and kind; the host also gets a team picker (member_team_chosen).
+func _make_bot_row(bot: Dictionary, view: Dictionary) -> Control:
+	var label := Widgets.label("%s  (%s)" % [bot.name, bot.kind], "DimLabel")
+	if not bool(view.is_host):
+		return label
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	label.clip_text = true
+	var picker := _make_team_picker(int(bot.team), int(view.count), view.map_config, false)
+	picker.tooltip_text = "Team of %s" % bot.name
+	var key := str(bot.key)
+	picker.item_selected.connect(func(i: int) -> void: member_team_chosen.emit(key, picker.get_item_id(i) - PICKER_ID_OFFSET))
+	return Widgets.row([label, picker])
+
+
 ## The member row: name, and the team picker (his own row, or every row for the host).
 func _make_pilot_row(id: int, entry: Dictionary, view: Dictionary) -> Control:
 	var text := "%s%s" % [entry.get("name", "?"), " (you)" if id == int(view.my_id) else ""]
@@ -128,11 +143,11 @@ func _make_pilot_row(id: int, entry: Dictionary, view: Dictionary) -> Control:
 
 ## Unassigned and every team, each with its colour; `current` selected (item id = team + PICKER_ID_OFFSET: an id of
 ## -1 would mean "use the index").
-static func _make_team_picker(current: int, count: int, map_config: Dictionary) -> OptionButton:
+static func _make_team_picker(current: int, count: int, map_config: Dictionary, with_unassigned := true) -> OptionButton:
 	var picker := OptionButton.new()
 	picker.custom_minimum_size = Vector2(PICKER_WIDTH, 0)
 	picker.clip_text = true
-	for team in range(UNASSIGNED, count):
+	for team in range(UNASSIGNED if with_unassigned else 0, count):
 		picker.add_icon_item(_make_swatch_icon(make_team_color(team)), make_team_name(team, map_config), team + PICKER_ID_OFFSET)
 	picker.select(picker.get_item_index(current + PICKER_ID_OFFSET))
 	return picker

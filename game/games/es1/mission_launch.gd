@@ -39,7 +39,7 @@ static func launch(shell: Node, mission_name: String, state: Dictionary) -> void
 	# the player's Herc: the career garage's selected Herc and its loadout, else the default
 	var herc := {"vehicle": str(state.get("herc", HERC_FOR_CAMPAIGN)), "loadout": [], "name": ""}
 	if mode == "career" and not EsShell.career.is_empty():
-		herc = campaign_for(EsShell.career).garage.make_battle_entry()
+		herc = make_career_battle_entry(EsShell.career)
 	var vdef := Packs.vehicle(str(herc.get("vehicle", "")))
 	if vdef.is_empty():
 		herc = {"vehicle": HERC_FOR_CAMPAIGN, "loadout": [], "name": ""}
@@ -97,3 +97,16 @@ static func on_battle_finished(result: Dictionary) -> void:
 		EsShell.career["next_mission"] = Session.campaign.current_mission()
 		EsShell.career["over"] = Session.campaign.is_over()
 		EsShell.career["victory"] = Session.campaign.is_victory()
+
+
+## The career's battle Herc; a Classic career never takes a weapon Classic forbids into battle (those hardpoints stay empty).
+static func make_career_battle_entry(career: Dictionary) -> Dictionary:
+	var c := campaign_for(career)
+	var entry := c.garage.make_battle_entry()
+	if entry.is_empty() or not bool(career.get("classic", false)):
+		return entry
+	var ctx := c.availability_context()
+	ctx["classic"] = true
+	entry["loadout"] = (entry.loadout as Array).map(func(wid) -> String:
+		return str(wid) if CampaignAvailability.make_weapon_count(ctx, str(wid)) != 0 else "")
+	return entry

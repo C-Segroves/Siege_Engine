@@ -26,7 +26,6 @@ const DROP_PROBE_LIFT := 0.5
 ## Caches are put on the highest floor found this far above the terrain (metres).
 const FLOOR_PROBE_HEIGHT := 60.0
 const STATIC_LAYERS := 0xFFFFFFFF
-const CALLIN_AHEAD := 14.0
 const SCATTER_SPREAD := 0.8
 
 var battle: Battle
@@ -43,24 +42,31 @@ var zones: Array = []
 var exfil_states: Array = []
 var faction_teams := {}
 var squads: ExtractionSquads
+## Host: the site populations of a map with faction sites (null on other maps).
+var site_spawner: SiteSpawner
 ## The local player's inventory (the host's copy for him) and raid status.
 var my_inventory := ExtractionInventory.new()
 var my_status := STATUS_IN_RAID
 ## What the local player's insured slot kept when he was killed.
 var my_kept: Array = []
+## The unlock ids the local operator lost with his death (bought back for the rebuy price).
+var my_lost: Array = []
 var hud: ExtractionHud
 ## Downed players and revives (every peer).
 var revive: ExtractionRevive
 ## Inventory stations (supply panel) and the pre-raid tasks (every peer).
 var station: ExtractionStation
 var tasks: RaidTasks
+## The call-ins and the raid points (engine/extraction/callin; every peer).
+var callins: CallinDirector
 ## Host: peer -> the armour he wore in (dropped on death unless free) and his insured slot [item id, units].
 var worn_armor := {}
 var insured := {}
 var _next_container := 1
-var _reload_t := 0.0
-var _sync_t := 0.0
-var _end_t := -1.0
+var _reload_clock := MissionClock.new()
+var _sync_clock := MissionClock.new()
+## Ends the raid end_delay_s after the last player left it (the verdict is handed over once, then the delay runs).
+var _ender := MissionEnder.new(_end_raid, func() -> bool: return false)
 var _outcomes := {}       # peer -> text
 ## Pad holds (SiegeInput.HELD_ACTIONS): X held opens the inventory, the right stick click held calls exfil.
 var _inventory_hold := HeldAction.new("inventory_toggle")
@@ -77,8 +83,6 @@ func _ready() -> void:
 	hud = ExtractionHud.new(self)
 	battle.overlay.add_child(hud)
 	Net.player_left.connect(_on_player_left)
-	if not Net.is_online():
-		Session.launcher_page = "extraction"
 	var interaction := InfantryInteraction.of(battle)
 	if interaction:
 		interaction.add_provider(make_loot_offer)
@@ -90,6 +94,8 @@ func _ready() -> void:
 	add_child(station)
 	tasks = RaidTasks.new(self)
 	add_child(tasks)
+	callins = CallinDirector.new(self)
+	add_child(callins)
 	_apply_exit_guard()
 	_commit_local_kit()
 
@@ -100,6 +106,7 @@ func _apply_exit_guard() -> void:
 		return
 	battle.occupancy.exit_guard = make_exit_refusal
 	battle.occupancy.exit_refused.connect(func(peer: int, reason: String) -> void: notify(peer, reason))
+	battle.occupancy.boarding_refused.connect(func(peer: int, reason: String) -> void: notify(peer, reason))
 
 
 ## Host: "" when `peer` may leave `vehicle` here, else why not (raid players only).
@@ -196,24 +203,53 @@ func start_host() -> void:
 		return
 	rng.seed = int(battle.config.get("extraction_seed", Time.get_ticks_usec()))
 	map = ExtractionMap.make(battle, built, rng)
+	LoadKeepAlive.pump()
 	transports = ExtractionTransports.make(self)
+	LoadKeepAlive.pump()
 	var records := _roll_caches()
+	LoadKeepAlive.pump()
 	squads = ExtractionSquads.make(battle, rng)
 	var roster: Dictionary = battle.config.get("roster", {})
-	faction_teams = squads.spawn_all(map.areas, RaidTasks.make_required_factions(roster),
-		RaidTasks.make_site_claims(roster, built.get("map", {}) if built.get("map") is Dictionary else {}))
+	if SiteSpawner.has_sites(built):
+		# a map with faction sites (Varuna's Fall): every site keeps its own population (SiteSpawner)
+		site_spawner = SiteSpawner.new(self)
+		add_child(site_spawner)
+		site_spawner.start_host(rng.randi())
+		site_spawner.spawn_initial()
+		faction_teams = site_spawner.make_teams()
+		squads.placed_areas = site_spawner.placed_areas
+	else:
+		faction_teams = squads.spawn_all(map.areas, RaidTasks.make_required_factions(roster),
+			RaidTasks.make_site_claims(roster, built.get("map", {}) if built.get("map") is Dictionary else {}))
 	var teams := faction_teams.duplicate()
 	for peer in battle.config.get("roster", {}):
 		teams[make_player_team(int(peer))] = ""
 	ExtractionFactions.apply_relations(teams, ExtractionFactions.make_preset_id(battle.config))
 	_send_all("_setup_raid", [{"containers": records, "zones": map.zones, "areas": map.areas,
-		"teams": faction_teams, "relations": TeamRelations.make_state()}])
+		"teams": faction_teams, "relations": TeamRelations.make_state(), "owners": make_base_owners()}])
 	tasks.start_host(squads.placed_areas)
 	for peer in battle.config.get("roster", {}):
 		_start_player(int(peer))
+	callins.points.request_reports()
 	for h in battle.vehicles.values():
 		watch(h)
 	transports.start_drop_in(make_raid_peers())
+
+
+## Host: the faction ground of the raid, [{pos, radius, team}]: each site's pad (its base objects and turrets belong to
+## its faction, see TribesBase.apply_owners) or, on a map without sites, each faction squad's loot area.
+func make_base_owners() -> Array:
+	var out := []
+	if site_spawner != null:
+		for st in site_spawner.sites:
+			out.append({"pos": st.pos, "radius": float(st.pad_radius) * 3.0 + 200.0, "team": int(st.team)})
+	else:
+		var area_radius := float(ExtractionRules.map_rules().get("area_radius_m", 28.0)) * 4.0
+		var fids: Array = ExtractionRules.factions().map(func(f: Dictionary) -> String: return str(f.id))
+		for fid in squads.placed_areas:
+			for a in squads.placed_areas[fid]:
+				out.append({"pos": a, "radius": area_radius, "team": ExtractionFactions.make_team(fids.find(fid))})
+	return out
 
 
 func _roll_caches() -> Array:
@@ -223,10 +259,12 @@ func _roll_caches() -> Array:
 	var records := []
 	for area in map.areas:
 		for i in ExtractionRules.roll_range(rng, rules.get("caches_per_area", [2, 3])):
+			LoadKeepAlive.pump()
 			var a := rng.randf() * TAU
 			var p := make_ground_point(area + Vector3(cos(a), 0, sin(a)) * rng.randf_range(4.0, radius))
 			records.append(_make_record(roller.make_cache(roller.make_weighted_key(ExtractionRules.data().area_cache_weights)), p))
 	for i in int(rules.get("scattered_caches", 0)):
+		LoadKeepAlive.pump()
 		var kind := roller.make_weighted_key(ExtractionRules.data().scattered_cache_weights)
 		records.append(_make_record(roller.make_cache(kind), make_ground_point(map.make_random_point())))
 	return records
@@ -289,10 +327,11 @@ func _start_player(peer: int) -> void:
 	send_inventory(peer)
 
 
-## Host: `h` is watched for its death (bags and salvage).
+## Host: `h` is watched for its death (bags and salvage, raid points) and for the hits it takes (assists).
 func watch(h: Herc) -> void:
 	if is_instance_valid(h) and not h.destroyed.is_connected(_on_destroyed):
 		h.destroyed.connect(_on_destroyed)
+		h.damaged.connect(callins.points.apply_hit_seen)
 
 
 # ------------------------------------------------------------------ queries
@@ -310,6 +349,20 @@ func make_raid_peers() -> Array:
 func peer_of(soldier: Infantry) -> int:
 	for peer in status:
 		if battle.occupancy.soldier_of(int(peer)) == soldier:
+			return int(peer)
+	return 0
+
+
+## Host: the raid player who is `unit`: his soldier, or the vehicle he sits in, or the aircraft of his air call-in whose kills
+## are his (0: none, e.g. a bot).
+func peer_of_unit(unit: Node) -> int:
+	if unit == null:
+		return 0
+	if unit.has_meta(CallinAirframes.CALLER_META):
+		var caller := int(unit.get_meta(CallinAirframes.CALLER_META))
+		return caller if is_in_raid(caller) else 0
+	for peer in make_raid_peers():
+		if battle.occupancy.soldier_of(int(peer)) == unit or battle.occupancy.vehicle_of(int(peer)) == unit:
 			return int(peer)
 	return 0
 
@@ -361,11 +414,6 @@ func request_drop(item_id: String, units: int) -> void:
 	_request("_request_drop", [item_id, units])
 
 
-## The inventory panel's Use button (vehicle call-ins).
-func request_use(item_id: String) -> void:
-	_request("_request_use", [item_id])
-
-
 @rpc("any_peer", "reliable")
 func _request_pickup() -> void:
 	if is_inside_tree() and multiplayer.is_server():
@@ -384,13 +432,7 @@ func _request_drop(item_id: String, units: int) -> void:
 		_apply_drop(multiplayer.get_remote_sender_id(), item_id, units)
 
 
-@rpc("any_peer", "reliable")
-func _request_use(item_id: String) -> void:
-	if is_inside_tree() and multiplayer.is_server():
-		_apply_use(multiplayer.get_remote_sender_id(), item_id)
-
-
-# ------------------------------------------------------------------ host: what players do
+@rpc# ------------------------------------------------------------------ host: what players do
 
 ## Host: `peer` loots the nearest container: money and every item that fits.
 func _apply_pickup(peer: int) -> void:
@@ -410,6 +452,8 @@ func _apply_pickup(peer: int) -> void:
 		var n := inv.apply_add(str(s[0]), int(s[1]))
 		if n > 0:
 			taken.append(ExtractionItems.make_stack_text(str(s[0]), n))
+			if str(s[0]) == RaidTasks.FLAG_ITEM:
+				callins.points.apply_flag_taken(peer, c.container_id)
 		if int(s[1]) - n > 0:
 			left.append([s[0], int(s[1]) - n])
 	_set_container(c.container_id, left, 0)
@@ -439,28 +483,6 @@ func _apply_drop(peer: int, item_id: String, units: int) -> void:
 	drop_stacks([[item_id, n]], 0, soldier.global_position)
 	apply_equipment(peer)
 	send_inventory(peer)
-
-
-## Host: `peer` uses `item_id`: a vehicle call-in puts that vehicle, empty, on the ground in front of him.
-func _apply_use(peer: int, item_id: String) -> void:
-	var soldier := battle.occupancy.soldier_of(peer)
-	if not is_in_raid(peer) or soldier == null or soldier.stowed or DownedState.is_downed(soldier) \
-			or ExtractionItems.kind_of(item_id) != "callin":
-		return
-	var inv: ExtractionInventory = inventories[peer]
-	if inv.apply_take(item_id, 1) < 1:
-		return
-	var vid := ExtractionItems.ref_of(item_id)
-	var ahead := soldier.global_position - soldier.global_basis.z * CALLIN_AHEAD
-	var p := SpawnClearance.make(battle).make_clear_origin(battle.infantry.make_on_ground(ahead))
-	var spec := {"net_id": battle.spawner.allocate_id(), "vehicle": vid, "team": soldier.team,
-		"owner": VehicleOccupancy.EMPTY, "xf": Transform3D(soldier.global_basis.orthonormalized(), p),
-		"loadout": Packs.vehicle(vid).get("loadout", []), "name": str(Packs.vehicle(vid).get("name", vid)),
-		"ai": {}, "parked": true, "protection": 0.0}
-	battle.send_spawn(spec)
-	watch(battle.vehicles.get(int(spec.net_id)))
-	send_inventory(peer)
-	notify(peer, "%s delivered." % str(Packs.vehicle(vid).get("name", vid)))
 
 
 ## Host: the soldier's weapons follow the inventory's weapon items (every peer re-equips him).
@@ -493,6 +515,7 @@ func _on_destroyed(h: Herc, killer: Node) -> void:
 	if not multiplayer.is_server() or h.has_meta("transport"):
 		return
 	tasks.on_unit_destroyed(h, killer)
+	callins.points.apply_kill(h, killer)
 	if h is Infantry:
 		_on_soldier_killed(h as Infantry)
 	else:
@@ -513,6 +536,7 @@ func _on_soldier_killed(soldier: Infantry) -> void:
 	var split := ExtractionLoadout.make_insured_split(make_carried_with_armor(peer), insured.get(peer, []))
 	drop_stacks(split.dropped, inv.money, soldier.global_position)
 	inv.apply_clear()
+	callins.apply_peer_dead(peer)
 	_finish_player(peer, STATUS_DEAD, split.kept, 0)
 
 
@@ -543,6 +567,7 @@ func apply_extract(peer: int) -> void:
 		return
 	var soldier := battle.occupancy.soldier_of(peer)
 	var inv: ExtractionInventory = inventories[peer]
+	callins.apply_peer_extracted(peer)
 	var carried := make_carried_with_armor(peer)
 	var pay := tasks.make_payout(peer, carried)
 	var stacks := RaidTasks.without_flags(carried)
@@ -587,15 +612,21 @@ func _raid_result(result: String, stacks: Array, money: int) -> void:
 	if result == STATUS_EXTRACTED:
 		profile.apply_extracted(stacks, money)
 		PlayerHold.apply(battle, true)
+		callins.points.apply_save()
+		RaidOperator.apply_survived(Net.player_name)
 	else:
+		var insured_id := ExtractionProfile.make_insured_id_of(profile.last_kit.get("insured", []) if profile.last_kit.get("insured") is Array else [])
 		profile.apply_died(stacks)
 		my_kept = stacks
+		callins.points.apply_lost()
+		my_lost = RaidOperator.apply_died(Net.player_name, [insured_id] if insured_id != "" else [])
 	profile.save()
 	InventoryPanel.close_open(self)
 
 
 func _on_player_left(peer: int) -> void:
 	if multiplayer.is_server() and is_in_raid(peer):
+		callins.apply_peer_dead(peer)
 		status[peer] = STATUS_LEFT
 		_outcomes[peer] = "%s: left the raid" % battle.make_pilot_name(peer)
 
@@ -639,6 +670,9 @@ func _setup_raid(setup: Dictionary) -> void:
 	zones = setup.get("zones", [])
 	faction_teams = setup.get("teams", {})
 	TeamRelations.apply_state(setup.get("relations", {}))
+	var base := TribesBase.of(battle)
+	if base != null:
+		base.apply_owners(setup.get("owners", []))
 	for record in setup.get("containers", []):
 		_add_container(record)
 
@@ -669,13 +703,9 @@ func _physics_process(delta: float) -> void:
 	if not multiplayer.is_server() or transports == null or battle.is_over():
 		return
 	transports.update(delta)
-	_reload_t -= delta
-	if _reload_t <= 0.0:
-		_reload_t = float(ExtractionRules.data().get("reload_seconds", 0.5))
+	if _reload_clock.make_step(delta, float(ExtractionRules.data().get("reload_seconds", 0.5))) > 0.0:
 		_reload_all()
-	_sync_t -= delta
-	if _sync_t <= 0.0:
-		_sync_t = STATE_SYNC_SECONDS
+	if _sync_clock.make_step(delta, STATE_SYNC_SECONDS) > 0.0:
 		_send_all("_exfil_update", [transports.make_states()])
 	_check_end(delta)
 
@@ -703,12 +733,15 @@ func _exfil_update(states: Array) -> void:
 func _check_end(delta: float) -> void:
 	if status.is_empty() or not make_raid_peers().is_empty():
 		return
-	if _end_t < 0.0:
-		_end_t = ExtractionRules.timer(battle.config, "end_delay_s")
-	_end_t -= delta
-	if _end_t <= 0.0:
-		var lines := PackedStringArray(_outcomes.values().map(func(t) -> String: return str(t)))
-		battle.end_match("Raid over.  %s" % "  -  ".join(lines))
+	if not _ender.has_verdict():
+		_ender.apply_verdict(MissionVerdict.make_win(0, "", ExtractionRules.timer(battle.config, "end_delay_s")))
+	_ender.apply_tick(delta)
+
+
+## The ender's end call: the match ends with every player's outcome line (read now, not when the grace began).
+func _end_raid(_success: bool, _code: int, _text: String) -> void:
+	var lines := PackedStringArray(_outcomes.values().map(func(t) -> String: return str(t)))
+	battle.end_match("Raid over.  %s" % "  -  ".join(lines))
 
 
 # ------------------------------------------------------------------ messages

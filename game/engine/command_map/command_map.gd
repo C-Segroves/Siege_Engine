@@ -6,13 +6,16 @@ extends PanelContainer
 ## none ticked = all), then an order: its button, or its letter from the game's own menu (CommandProvider: the original's command keys are typed
 ## text, like the original shell's hotkeys, docs/CODING_STANDARDS.md section 2). The Tribes 2 commander map look:
 ## a translucent teal panel (siege_theme ModalShade / ModalPanel and the shared widgets). menu_back, Close or the
-## command_map action closes it; the battle keeps running, as in the originals.
+## command_map action closes it; the battle keeps running, as in the originals. In an extraction raid the side panel also lists
+## the call-ins: pick one, click its point (and direction) on the map (CommandMapCallins).
 
 signal closed
 
 const LAYER := 80
 const LAYER_NAME := "CommandMapLayer"
 const MAP_SIZE := Vector2(560, 560)
+const SIDE_WIDTH := 260.0
+const SIDE_SCROLLBAR := 16.0
 const TOGGLE_ACTION := "command_map"
 
 var battle: Node3D
@@ -20,13 +23,14 @@ var viewer: Node3D
 var orders: CommandOrders
 var view: CommandMapView
 var pick: Dictionary = {}
-var _units: VBoxContainer
 var _orders_box: VBoxContainer
 var _target_label: Label
 var _status: Label
 var _markers_box: VBoxContainer
 var _hidden: Array = []
-var _unit_boxes := {}               # net id -> CheckBox
+var _unit_panel: CommandUnitPanel
+## Extraction raid: ordering call-ins on the map (null in every other battle).
+var callin_order: CommandMapCallins
 
 
 ## Opens the command map for the local player's `unit` (his soldier or vehicle).
@@ -69,10 +73,12 @@ func _build() -> void:
 	box.add_child(row)
 	view = CommandMapView.new()
 	view.custom_minimum_size = MAP_SIZE
+	view.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	row.add_child(view)
 	view.setup(battle, viewer)
 	view.picked.connect(_on_picked)
-	row.add_child(_build_side())
+	view.cancelled.connect(func() -> void: if callin_order != null: callin_order.apply_cancel())
+	row.add_child(_build_side_scroll())
 	_status = Widgets.label("Pick a place, a unit or yourself on the map, then an order.", "DimLabel")
 	box.add_child(_status)
 	var buttons := Widgets.row([Widgets.button("Close", close)])
@@ -89,13 +95,27 @@ func _apply_first_pick() -> void:
 		_on_picked(me)
 
 
+## The side panel in a scroll box as tall as the map: a long list of orders and call-ins scrolls, it never stretches the map.
+func _build_side_scroll() -> ScrollContainer:
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(SIDE_WIDTH + SIDE_SCROLLBAR, MAP_SIZE.y)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.add_child(_build_side())
+	return scroll
+
+
 func _build_side() -> VBoxContainer:
 	var side := VBoxContainer.new()
-	side.custom_minimum_size = Vector2(260, 0)
+	side.custom_minimum_size = Vector2(SIDE_WIDTH, 0)
 	side.add_child(Widgets.section("Units"))
-	_units = VBoxContainer.new()
-	side.add_child(_units)
+	_unit_panel = CommandUnitPanel.new()
+	_unit_panel.selection_changed.connect(func(ids: Array) -> void: view.selected = ids)
+	side.add_child(_unit_panel)
 	_fill_units()
+	callin_order = CommandMapCallins.make_for(self)
+	if callin_order != null:
+		view.callin_order = callin_order
+		callin_order.build_panel(side)
 	side.add_child(Widgets.section("My waypoints"))
 	side.add_child(Widgets.button("Mark this spot  (P)", place_marker))
 	_markers_box = VBoxContainer.new()
@@ -128,28 +148,28 @@ func _fill_markers() -> void:
 
 
 func _fill_units() -> void:
-	for v in orders.make_commandable(viewer):
-		var cb := Widgets.check_box(str(v.display_name), false)
-		cb.toggled.connect(func(_on: bool) -> void: _sync_selection())
-		_units.add_child(cb)
-		_unit_boxes[int(v.net_id)] = cb
-	if _unit_boxes.is_empty():
-		_units.add_child(Widgets.label("Nobody to command.", "DimLabel"))
-	else:
-		(_unit_boxes.values()[0] as CheckBox).button_pressed = true      # the first unit is preselected
-		_sync_selection()
+	_unit_panel.setup(orders.make_commandable(viewer))      # the first unit is preselected
 
 
-func _sync_selection() -> void:
-	view.selected = _unit_boxes.keys().filter(func(id: int) -> bool: return (_unit_boxes[id] as CheckBox).button_pressed)
-
-
-## The units the order goes to: those ticked, else all.
+## The units the order goes to: those selected in the unit panel, else all.
 func make_recipients() -> Array:
-	return view.selected if not view.selected.is_empty() else _unit_boxes.keys()
+	return view.selected if not view.selected.is_empty() else _unit_panel._rows.keys()
+
+
+func _process(delta: float) -> void:
+	if callin_order != null:
+		callin_order.apply_frame(delta)
+
+
+## The status line under the map.
+func set_status(text: String) -> void:
+	_status.text = text
 
 
 func _on_picked(p: Dictionary) -> void:
+	if callin_order != null and callin_order.is_ordering():
+		callin_order.apply_click(view.to_world(view.cursor))
+		return
 	pick = p
 	_target_label.text = "Target: %s" % str(p.name)
 	for c in _orders_box.get_children():
@@ -199,9 +219,15 @@ func close() -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if UiActions.is_back(event) and callin_order != null and callin_order.apply_cancel():
+		get_viewport().set_input_as_handled()
+		return
 	if UiActions.is_back(event) or event.is_action_pressed(TOGGLE_ACTION):
 		get_viewport().set_input_as_handled()
 		close()
+		return
+	if _apply_unit_step(event):
+		get_viewport().set_input_as_handled()
 		return
 	var key := event as InputEventKey
 	if key and key.pressed and not key.echo and key.unicode > 0:
@@ -211,6 +237,27 @@ func _unhandled_input(event: InputEvent) -> void:
 		if letter == "p":
 			get_viewport().set_input_as_handled()
 			place_marker()
+
+
+## Pad: the shoulder buttons step through the units (select only that one), Y selects them all; keys: Page Up / Down.
+func _apply_unit_step(event: InputEvent) -> bool:
+	var pad := event as InputEventJoypadButton
+	var key := event as InputEventKey
+	var dir := 0
+	if pad and pad.pressed:
+		if pad.button_index == JOY_BUTTON_RIGHT_SHOULDER:
+			dir = 1
+		elif pad.button_index == JOY_BUTTON_LEFT_SHOULDER:
+			dir = -1
+		elif pad.button_index == JOY_BUTTON_Y:
+			_unit_panel.apply_all()
+			return true
+	elif key and key.pressed and not key.echo:
+		dir = 1 if key.keycode == KEY_PAGEDOWN else (-1 if key.keycode == KEY_PAGEUP else 0)
+	if dir == 0:
+		return false
+	_unit_panel.step(dir)
+	return true
 
 
 ## The original's order letter for the current pick (true when one matched).

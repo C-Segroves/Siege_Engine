@@ -27,7 +27,7 @@ const TRIBES2_METHODS := ["setvisible", "setactive", "push", "pop", "bindcmd", "
 	"stopthread", "scopetoclient", "setfrozenstate", "setmovestate", "setwhiteout", "settime", "play2d", "play3d",
 	"setpilotpitchrange", "aimat", "settargetobject", "setengagetarget", "clearstep", "stop", "clientdetected",
 	"setinventoryhuditem", "setinventoryhudclearall", "setweightfreq", "setmonitorfreq", "setweight", "preload",
-	"setskin", "setcloaked", "setenergylevel", "setrechargerate", "setdamagestate", "playaudio", "stopaudio",
+	"setskin", "setenergylevel", "setrechargerate", "setdamagestate", "playaudio", "stopaudio",
 	"setselectedcategory", "setscopealways", "setcontrolobject", "registerentrytype", "resetfields",
 	"settransformcompound", "clearbackpackicon"]
 ## Of those, the ones that answer a query: their result.

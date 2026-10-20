@@ -1,8 +1,9 @@
 class_name PlayerProfile
 ## The local player's own choices, kept in user://settings.json (Assets.settings, key "player"): the name shown
 ## in the lobby, chat and nameplates; the infantry game played when both Tribes games are installed; the armour,
-## body and skin the soldier starts in; a skin per Herc. Edited in Options and the lobby; the lobby announces
-## them in the roster entry (make_roster_fields), the battle spawns from there.
+## body and skin the soldier started in; a skin per Herc. Since Operator Setup the active character slot
+## (OperatorProfile) holds the build; these are the older settings, kept for the one-time migration into slot 1
+## (ProfileMigration) and the roster keys.
 
 const SETTINGS_KEY := "player"
 const DEFAULT_NAME := "Pilot"
@@ -42,8 +43,7 @@ static func load_infantry_pack() -> String:
 	return str(installed[0]) if not installed.is_empty() else ""
 
 
-static func apply_infantry_pack(pack: String) -> void:
-	_store(PACK_KEY, pack)
+
 
 
 ## The saved armour / body / skin ("" = default).
@@ -60,56 +60,18 @@ static func load_herc_skin(vehicle_id: String) -> String:
 	return str((_data().get(HERC_SKINS_KEY, {}) as Dictionary).get(vehicle_id, ""))
 
 
-static func apply_herc_skin(vehicle_id: String, skin_id: String) -> void:
-	var skins: Dictionary = (_data().get(HERC_SKINS_KEY, {}) as Dictionary).duplicate()
-	skins[vehicle_id] = skin_id
-	_store(HERC_SKINS_KEY, skins)
 
 
-## The player's armour in infantry game `pack`: the saved armour's size in that game, else light armour.
-static func make_armor_for(pack: String) -> String:
-	var armors := CatalogBridge.make_armors(pack)
-	if armors.is_empty():
-		return ""
-	var saved := load_value(ARMOR_KEY)
-	var size := saved.get_slice(":", 1).to_lower()
-	for a in armors:
-		if str(a.id) == saved or str(a.size).to_lower() == size:
-			return str(a.id)
-	return str(armors[0].id)
 
 
-## The player's body for `armor_id`: the saved one when that armour offers it, else the default ("").
-static func make_body_for(armor_id: String) -> String:
-	var saved := load_value(BODY_KEY)
-	for b in CatalogBridge.make_bodies(armor_id):
-		if str(b.id) == saved:
-			return saved
-	return ""
 
-
-## The player's skin for body `body_id` ("" = default) when that body offers it.
-static func make_skin_for(body_id: String) -> String:
-	var saved := load_value(SKIN_KEY)
-	for s in CatalogBridge.make_skins(body_id):
-		if str(s.id) == saved:
-			return saved
-	return ""
-
-
-## The roster fields of the player's choices in a match whose soldiers come from infantry game `pack` and whose
-## Herc is `vehicle_id`: {infantry_armor, infantry_body, infantry_skin, herc_skin} ("" = default).
-static func make_roster_fields(pack: String, vehicle_id: String) -> Dictionary:
-	var armor := make_armor_for(pack) if pack != "" else ""
-	var body := make_body_for(armor)
-	var shown_body := body if body != "" else make_default_body(armor)
-	return {ARMOR_KEY: armor, BODY_KEY: body, SKIN_KEY: make_skin_for(shown_body), HERC_SKIN_KEY: load_herc_skin(vehicle_id)}
 
 
 ## The body armour `armor_id` is drawn with by default (its first body, else its own shape).
 static func make_default_body(armor_id: String) -> String:
 	var bodies := CatalogBridge.make_bodies(armor_id)
 	return str(bodies[0].id) if not bodies.is_empty() else str(InfantryCatalog.armor(armor_id).get("shape", ""))
+
 
 
 static func _data() -> Dictionary:

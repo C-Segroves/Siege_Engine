@@ -167,11 +167,29 @@ func _check_map(battle: Battle, me: Node3D, label: String) -> void:
 	var bg := map.view.background
 	_expect(bg != null and _has_relief(bg.get_image()), "the background shows the battlefield (%s)" % (bg.get_image().get_size() if bg else "none"))
 	_expect(map.view.area.has_point(Vector2(me.global_position.x, me.global_position.z)), "the player is on the map")
-	var listed := map._unit_boxes.size()
+	var listed := map._unit_panel.count()
 	print("    units listed: %d, ticked %s" % [listed, map.view.selected])
 	if label in ["es1", "es2"]:
 		_expect(listed >= 1, "the campaign wingmen are listed (%d; the mission's squad slots)" % listed)
 	_expect(listed == 0 or map.view.selected.size() == 1, "the first unit is preselected")
+	var panel: CommandUnitPanel = map._unit_panel
+	if listed >= 2:
+		var ids: Array = panel._rows.keys()
+		panel.apply_click(int(ids[1]), false)
+		_expect(map.view.selected == [int(ids[1])] and map.make_recipients() == [int(ids[1])], "a click selects only that unit; orders go to it")
+		panel.apply_click(int(ids[0]), true)
+		_expect(map.view.selected.size() == 2, "shift / ctrl-click adds a unit")
+		panel.apply_click(int(ids[0]), true)
+		_expect(map.view.selected == [int(ids[1])], "shift / ctrl-click again removes it")
+		panel.apply_all()
+		_expect(panel.is_all_selected() and map.view.selected.size() == listed, "All selects every unit")
+		panel.step(1)
+		_expect(map.view.selected.size() == 1, "the pad's shoulder button steps to one unit")
+	if listed >= 1:
+		var r: Dictionary = panel._rows.values()[0]
+		_expect((r.armour as ProgressBar).value > 0.0 and str((r.button as Button).text).contains("-"), "a unit row shows name, vehicle and an armour bar")
+		_expect(map._unit_panel.get_child(1) is ScrollContainer, "the unit list scrolls")
+		panel.apply_click(int(panel._rows.keys()[0]), false)
 	_expect(map._status.text != "No orders for that target.", "opening says nothing about a target (%s)" % map._status.text)
 	_expect(map.view.icons.is_empty() == not (label in ["tribes", "tribes2", "starsiege"]),
 		"the game's own map icons (%s)" % ("none" if map.view.icons.is_empty() else "loaded"))
@@ -212,7 +230,20 @@ func _check_known(battle: Battle, view: CommandMapView, me: Node3D) -> void:
 		_expect(not view.make_units().has(foe), "an enemy beyond the radar's range is not on the map")
 		RadarContacts.apply_range(me, 1e7)
 		_expect(view.make_units().has(foe) == RadarContacts.is_shown(me, foe), "within its range he is")
+		var dist: float = (me.global_position - foe.global_position).length()
+		RadarContacts.apply_range(me, dist * 2.0)
+		RadarMode.apply_emitting(me, false)
+		RadarMode.apply_emitting(foe, false)
+		_expect(not view.make_units().has(foe) and not RadarContacts.is_shown(me, foe),
+			"passive radar: a silent enemy beyond a third of the range is not on the map or radar")
+		RadarMode.apply_emitting(foe, true)
+		_expect(RadarContacts.is_shown(me, foe), "passive radar: an emitting enemy still shows")
+		RadarMode.apply_emitting(me, true)
+		RadarMode.apply_emitting(foe, false)
+		_expect(RadarContacts.is_shown(me, foe), "active radar sees a silent enemy in range")
+		RadarMode.apply_emitting(foe, true)
 		RadarContacts.apply_range(me, saved)
+		_check_towers_and_targeting(battle, view, me, foe)
 	var known := CommandMapKnowledge.make_mission_targets(battle)
 	var shown := view.make_structures()
 	var others := shown.filter(func(s: Node) -> bool:
@@ -226,6 +257,37 @@ func _check_known(battle: Battle, view: CommandMapView, me: Node3D) -> void:
 		_expect(enemy_base.all(func(o: Node) -> bool: return shown.has(o)), "the enemy base is shown, as on the original's map")
 	_expect(get_tree().get_nodes_in_group(CommandMapView.NAV_GROUP).all(func(n: Node) -> bool: return battle.is_ancestor_of(n)),
 		"nav points are the mission's own")
+
+
+## Playtest 2026-10-18: T locks only what is on the radar; a com tower reveals units in its range on the radar and the map and
+## is itself a radar contact, as is a turret.
+func _check_towers_and_targeting(_battle: Battle, view: CommandMapView, me: Node3D, foe: Node) -> void:
+	var saved := RadarContacts.make_range(me)
+	if me is Herc:
+		RadarContacts.apply_range(me, 1.0)
+		_expect(not Targeting.make_candidates(me as Herc).has(foe), "T: a unit beyond the radar's range cannot be locked")
+		RadarContacts.apply_range(me, 1e7)
+		_expect(Targeting.make_candidates(me as Herc).has(foe) == RadarContacts.is_on_scope(me, foe), "T: a unit on the radar can be")
+	RadarContacts.apply_range(me, 1.0)
+	var tower := Structure.new()
+	tower.display_name = "Radar tower"
+	tower.team = int(me.team)
+	tower.name = "TestComTower"
+	me.get_parent().add_child(tower)
+	tower.add_to_groups()
+	SensorTowers.apply_register(tower)
+	tower.global_position = foe.global_position + Vector3(SensorTowers.DEFAULT_RANGE_M * 3.0, 0, 0)
+	_expect(not RadarContacts.is_on_scope(me, foe), "a com tower out of reach reveals nobody")
+	tower.global_position = foe.global_position + Vector3(10, 0, 0)
+	_expect(RadarContacts.is_on_scope(me, foe) and view.make_units().has(foe), "a com tower in reach puts the unit on the radar and the map")
+	if me is Herc:
+		_expect(Targeting.make_candidates(me as Herc).has(foe), "and it can be locked with T")
+	_expect(SensorTowers.make_radar_structures(me).has(tower), "the tower is a radar contact itself")
+	tower.alive = false
+	_expect(not RadarContacts.is_on_scope(me, foe), "a destroyed tower reveals nothing")
+	tower.get_parent().remove_child(tower)
+	tower.free()
+	RadarContacts.apply_range(me, saved)
 
 
 static func _has_relief(img: Image) -> bool:

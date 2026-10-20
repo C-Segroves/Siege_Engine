@@ -9,7 +9,7 @@ extends RefCounted
 ##   kind repair_kit: repair (ES points); "mapped": false = recorded only (beacons, flares, cameras).
 ## Packs: effect energy (recharge_bonus_per_s) | repair (repair_per_s, energy_per_s) | shield
 ##   (energy_per_damage, energy_per_s, weak_types) | jammer (jam_radius, energy_per_s) | ammo (extra_rounds)
-##   | unmapped (deployables, cloak, satchel); "toggled": pack_use turns it on and off.
+##   | cloak (cloak_profile: a CloakProfile id, engine/stealth) | unmapped (satchel); "toggled": pack_use turns it on and off.
 ## Throw rules per pack ("throw"): T1 GameBase::throw strength, T2 HandInventory::onUse impulse.
 ## Seats per vehicle id: [{seat, role (pilot / gunner / armed / passenger), node (seat node in the shape)}].
 

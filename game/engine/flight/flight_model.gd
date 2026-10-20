@@ -88,10 +88,39 @@ func make_ceiling() -> float:
 	return INF
 
 
-## Stick inputs that steer towards a goal (the AI autopilot): `heading_error` rad (+ = goal to
-## the left), `climb_error` m (+ = goal above), `throttle` 0..1.
-func make_steering(_heading_error: float, _climb_error: float, throttle: float) -> FlightControls:
-	return FlightControls.make(throttle, 0.0, Vector2.ZERO, 0.0)
+## Throttle (0..1) that holds `speed_mps`.
+func make_throttle_for(speed_mps: float) -> float:
+	return clampf(inverse_lerp(make_idle_speed(), float(params.max_speed), speed_mps), 0.0, 1.0)
+
+
+## Speed (m/s) at zero throttle.
+func make_idle_speed() -> float:
+	return 0.0
+
+
+## Speed (m/s) a flight path angle is measured at when the craft is slow: the pitch that makes a climb of a given rate.
+func make_flying_speed() -> float:
+	return float(params.max_speed)
+
+
+## Vertical speed (m/s) the craft can make without its nose (lift of a hover craft), 0 for a jet.
+func make_vertical_rate() -> float:
+	return 0.0
+
+
+## The rate (m/s) a climb demand of 1 means: a jet climbs along its nose (its speed), a hover craft by its lift (its vertical speed).
+func make_climb_scale() -> float:
+	return float(params.max_speed)
+
+
+## How fast (m/s^2) the craft can change its vertical speed: its lift, or its pitch turning the flight path.
+func make_climb_accel() -> float:
+	return 10.0
+
+
+## Stick inputs that fly the attitude and vertical speed an autopilot asked for (FlightPilot).
+func make_controls(c: FlightCommand) -> FlightControls:
+	return FlightControls.make(c.throttle, 0.0, Vector2.ZERO, 0.0)
 
 
 # ------------------------------------------------------------------ subclass hooks

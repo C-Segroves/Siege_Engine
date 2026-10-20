@@ -52,6 +52,9 @@ var water_drag := 0.0
 var inherited_velocity := Vector3.ZERO   # share of the shooter's velocity (Tribes velInheritFactor)
 ## The pilot's MissileSteering when this is a player's EO missile: it flies by the pilot's stick, not by homing.
 var steering: MissileSteering = null
+## A fast shot of a human pilot is tested against the units as his screen showed them (LagCompensation.rewind
+## description); empty: against the units as they are.
+var rewind := {}
 
 var guided: bool:
 	get:
@@ -63,6 +66,9 @@ var lobbed: bool:
 var _age := 0.0
 var _travelled := 0.0
 var _velocity := Vector3.ZERO
+## The flight's ray query, reused by every step (a plain shot allocates none per tick).
+var _ray: PhysicsRayQueryParameters3D
+var _no_exclude: Array[RID] = []
 
 
 func _ready() -> void:
@@ -70,7 +76,8 @@ func _ready() -> void:
 	_velocity = direction * speed + inherited_velocity
 	if lifetime <= 0.0:
 		lifetime = (max_range / maxf(speed, 1.0)) * (1.6 if lobbed else 1.05) if not is_mine else INF
-	add_child(FxProjectileLook.create(weapon_def, color, lifetime))
+	if not ServerProfile.is_collision_only():   # what the projectile looks like in flight: nobody sees it on a server
+		add_child(FxProjectileLook.create(weapon_def, color, lifetime))
 
 
 func _physics_process(delta: float) -> void:
@@ -92,11 +99,10 @@ func _physics_process(delta: float) -> void:
 	if water_drag > 0.0 and MapWater.is_in_water(get_tree(), global_position):
 		_velocity -= _velocity * minf(water_drag * delta, 1.0)
 	var step := _velocity * delta
-	var ex := []
-	if is_instance_valid(shooter) and shooter is CollisionObject3D and _travelled < SHOOTER_CLEARANCE:
-		ex.append((shooter as CollisionObject3D).get_rid())
-	var q := PhysicsRayQueryParameters3D.create(global_position, global_position + step, 0xFFFFFFFF, ex)
-	var hit := get_world_3d().direct_space_state.intersect_ray(q)
+	var ex: Array = _no_exclude
+	if _travelled < SHOOTER_CLEARANCE and is_instance_valid(shooter) and shooter is CollisionObject3D:
+		ex = [(shooter as CollisionObject3D).get_rid()]
+	var hit := _cast_step(step, ex)
 	if hit:
 		_impact(hit.position, hit.collider)
 		return
@@ -104,9 +110,41 @@ func _physics_process(delta: float) -> void:
 		_impact(global_position, null)
 		return
 	global_position += step
-	if step.length() > 0.001:
+	var step_length := step.length()
+	if step_length > 0.001 and not ServerProfile.is_collision_only():   # nobody sees a shot fly on a server
 		look_at(global_position + step, Vector3.UP if absf(step.normalized().y) < 0.99 else Vector3.RIGHT)
-	_travelled += step.length()
+	_travelled += step_length
+
+
+## What the flight of this step meets. A fast shot of a compensated pilot (`rewind`) meets the units as his screen
+## showed them: the view time he fired at plus the flight time so far (LagCompensation).
+func _cast_step(step: Vector3, exclude: Array) -> Dictionary:
+	var length := step.length()
+	if length < 1e-6:
+		return {}
+	if rewind.is_empty():   # LagCompensation.cast_ray without a rewind is one ray against the world
+		return _cast_plain(step, length, exclude)
+	var view := {}
+	if not rewind.is_empty():
+		view = rewind.duplicate()
+		view.view_tick = minf(float(rewind.view_tick) + _age * float(rewind.history.tick_hz), float(rewind.history.newest_tick()))
+	return LagCompensation.cast_ray(self, global_position, step / length, length, view, exclude)
+
+
+func _cast_plain(step: Vector3, length: float, exclude: Array) -> Dictionary:
+	if _ray == null:
+		_ray = PhysicsRayQueryParameters3D.new()
+		_ray.collision_mask = LagCompensation.ALL_LAYERS
+	var from := global_position
+	_ray.from = from
+	_ray.to = from + step / length * length
+	if exclude.is_empty():
+		_ray.exclude = _no_exclude
+	else:
+		var rids: Array[RID] = []
+		rids.assign(exclude)
+		_ray.exclude = rids
+	return get_world_3d().direct_space_state.intersect_ray(_ray)
 
 
 func _guide(delta: float) -> void:

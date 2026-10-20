@@ -20,6 +20,8 @@ const PLAYER_START_HEIGHT := 40.0
 ## Ground probe when the map has no height field: ray length below the flyer (m).
 const GROUND_PROBE := 2000.0
 const NO_HEIGHT_FIELD := -100000.0
+## An obstacle ray skips terrain and bodies that are not buildings this many times before it gives up.
+const OBSTACLE_RAY_RETRIES := 6
 
 var altitude := 22.0          # AI cruise height above the ground (m)
 var cruise := 30.0            # AI cruise speed (m/s)
@@ -27,11 +29,17 @@ var patrol: Array[Vector3] = []
 var patrol_i := 0
 var skill := 0.5
 var flight: FlightModel
+## The autopilot both AI pilots and tests fly by (engine/flight/flight_pilot.gd).
+var pilot: FlightPilot
 var ai: FlyerAI = null
 var yaw_input := 0.0
 var pitch_input := 0.0
 var lift_input := 0.0
 var _started := false
+var _pilot_has_world := false
+## The Starsiege dropship sequences (DropshipAnimation), looked for once; null on every other flyer.
+var _dropship: DropshipAnimation = null
+var _dropship_checked := false
 
 
 func _configure() -> void:
@@ -41,6 +49,8 @@ func _configure() -> void:
 		super._configure()
 	var pack := String(def.get("pack", vehicle_id.split(":")[0]))
 	flight = FlightModel.create(FlightPresets.make_params(def, Packs.metres_per_unit(pack)))
+	pilot = FlightPilot.new(flight, FlightProfile.make_for(vehicle_id, flight.params))
+	_pilot_has_world = false
 	cruise = float(flight.params.cruise_speed)
 	max_speed = float(flight.params.max_speed)
 	_started = false
@@ -89,8 +99,13 @@ func apply_controls(c: FlightControls) -> void:
 
 ## Throttle (0..1) that holds `speed_mps`.
 func make_throttle_for(speed_mps: float) -> float:
-	var lo := float(flight.params.min_speed) if flight is JetFlightModel else 0.0
-	return clampf(inverse_lerp(lo, float(flight.params.max_speed), speed_mps), 0.0, 1.0)
+	return flight.make_throttle_for(speed_mps)
+
+
+## Writes the controls that fly towards `goal` at `speed_mps` for one frame (the AI pilots' only way to steer).
+func apply_flight(goal: FlightGoal, speed_mps: float, delta: float) -> void:
+	_ensure_pilot_world()
+	apply_controls(pilot.steer(global_position, make_altitude(), goal, speed_mps, delta))
 
 
 func make_controls() -> FlightControls:
@@ -114,6 +129,8 @@ func _physics_process(delta: float) -> void:
 		_puppet_update(delta)
 		return
 	capacitor = minf(capacitor_max, capacitor + capacitor_rate * delta)
+	cloak.apply_follow(cloak_input, self)
+	cloak.apply_step(self, delta)
 	if not alive:
 		_crash(delta)
 		return
@@ -163,7 +180,7 @@ func _apply_hard_landing() -> void:
 
 ## Shot down: falls spinning and explodes on the ground.
 func _crash(delta: float) -> void:
-	velocity.y -= gravity * delta
+	velocity.y = minf(velocity.y, 0.0) - gravity * delta   # a wreck has no lift left: a climbing craft does not keep climbing
 	rotate_z(delta * CRASH_SPIN)
 	move_and_slide()
 	if (is_on_floor() or make_altitude() <= 0.0) and visible:
@@ -192,6 +209,45 @@ func _make_ground_height() -> float:
 	return float(hit.position.y) if not hit.is_empty() else 0.0
 
 
+# ------------------------------------------------------------------ the pilot's world
+
+## Gives the pilot the map's ground, the solid obstacles and the playable area, once the flyer is in a battle.
+func _ensure_pilot_world() -> void:
+	if _pilot_has_world or not is_inside_tree():
+		return
+	_pilot_has_world = true
+	pilot.apply_world(_make_ground_at, _make_free_run, _make_play_area())
+
+
+## Height field under (x, z); NAN where the map has none.
+func _make_ground_at(x: float, z: float) -> float:
+	var h := MapBuilder.ground_height(get_parent(), Vector3(x, NO_HEIGHT_FIELD, z))
+	return h if h != NO_HEIGHT_FIELD else NAN
+
+
+## How far a ray from `from` along `dir` goes before it hits a building or interior (terrain, vehicles and soldiers are
+## not obstacles here: the terrain scan reads the ground, and a strafing run flies at its target).
+func _make_free_run(from: Vector3, dir: Vector3, length: float) -> float:
+	var space := get_world_3d().direct_space_state
+	var skip: Array[RID] = [get_rid()]
+	for i in OBSTACLE_RAY_RETRIES:
+		var q := PhysicsRayQueryParameters3D.create(from, from + dir * length)
+		q.exclude = skip
+		var hit := space.intersect_ray(q)
+		if hit.is_empty():
+			return length
+		var body: Object = hit.collider
+		if body is StaticBody3D and not (body as Node).is_in_group("terrain"):
+			return from.distance_to(hit.position)
+		skip.append(hit.rid)
+	return length
+
+
+func _make_play_area() -> Rect2:
+	var battle_bounds = get_parent().get("bounds")
+	return battle_bounds.bounds.area if battle_bounds is BattleBounds and battle_bounds.bounds.has_area else Rect2()
+
+
 # ------------------------------------------------------------------ aim / visuals
 
 ## Gunner: his turret aim; AI: straight at its target; player: along the nose.
@@ -200,8 +256,15 @@ func aim_basis() -> Basis:
 	if crew and crew.is_manned():   # a gunner works the belly turret (Thundersword)
 		return crew.make_aim_basis()
 	if ai and is_instance_valid(target) and target.alive:
-		return Basis.looking_at(target.global_position + Vector3.UP * FlyerAI.TARGET_AIM_HEIGHT - global_position, Vector3.UP)
+		return Basis.looking_at(target.global_position + Vector3.UP * FlyerAI.make_aim_height(target) - global_position, Vector3.UP)
 	return global_basis * Basis(Vector3.RIGHT, pitch)
+
+
+## The AI pilot's lead (FlyerAI.make_lead_direction) while it has a living target.
+func make_lead_direction(weapon: Weapon, muzzle: Vector3) -> Vector3:
+	if ai and is_instance_valid(target) and target.alive:
+		return ai.make_lead_direction(weapon, muzzle)
+	return Vector3.ZERO
 
 
 ## The view rides the pitched and banked model; the bank rolls about the nose, so the crosshair stays on aim_basis.
@@ -214,6 +277,11 @@ func cockpit_node() -> Node3D:
 
 
 ## Pitch and bank on the visual model (the torso slot carries the bank).
-func _animate(_delta: float) -> void:
+func _animate(delta: float) -> void:
 	if shape:
 		shape.quaternion = FlightModel.make_attitude(pitch, torso_yaw).get_rotation_quaternion()
+	if not _dropship_checked:
+		_dropship_checked = true
+		_dropship = DropshipAnimation.make(self)
+	if _dropship != null:
+		_dropship.update(make_altitude(), delta)

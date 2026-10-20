@@ -25,7 +25,14 @@ func open(_args: Dictionary) -> void:
 
 ## The campaign's debriefing movies, then its talking heads under the headline.
 func _present_result(c: Object, context: Dictionary) -> void:
-	await MoviePlayer.play_all(self, CampaignPresentation.make_movies(c, CampaignPresentation.MOMENT_DEBRIEF, context))
+	var movies := CampaignPresentation.make_movies(c, CampaignPresentation.MOMENT_DEBRIEF, context)
+	if not movies.is_empty():
+		var box := MediaBox.new()
+		content.add_child(box)
+		content.move_child(box, TALK_INDEX)
+		await MoviePlayer.play_all_in(box, movies)
+		if is_instance_valid(box):
+			box.queue_free()
 	if is_inside_tree():
 		ShellTalkPanel.add_to(content, CampaignPresentation.make_talks(c, CampaignPresentation.MOMENT_DEBRIEF, context), TALK_INDEX)
 
@@ -34,7 +41,7 @@ func _continue() -> void:
 	var next := MatchFlow.make_next_after_debrief()
 	if next.screen == "end":
 		router.replace("end", {"text": next.text, "replay": next.get("replay", false)})
-	elif next.screen == "lobby":
+	elif next.screen == "lobby" and Net.is_online():
 		router.replace("lobby")
 	else:
 		launcher().show_campaign()

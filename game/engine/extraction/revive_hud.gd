@@ -21,6 +21,7 @@ var font: Font
 func _init(p_revive: ExtractionRevive) -> void:
 	revive = p_revive
 	name = "ReviveHud"
+	ServerProfile.apply_client_only(self)
 
 
 func _ready() -> void:

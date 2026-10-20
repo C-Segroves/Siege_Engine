@@ -28,7 +28,6 @@ const REPAIR_PATCH_SHARE := 0.19
 const TOUCH_CLASSES := ["staticshape", "sensor", "turret", "moveable"]
 
 var _ai_by_name := {}           # lower AI name -> client id
-var _respawns := []             # [client, sim time]
 
 
 func _make_dialect() -> int:
@@ -103,14 +102,7 @@ func on_player_killed(player: int, _killer: int) -> void:
 		if vm.has_function("ai::ondronekilled"):
 			vm.call_script("ai::ondronekilled", [ai_name])
 		return
-	_respawns.append([client, sim_time + RESPAWN_SECONDS])
-
-
-func _update_game(_delta: float) -> void:
-	for r in _respawns.duplicate():
-		if sim_time >= float(r[1]):
-			_respawns.erase(r)
-			vm.call_fn("game::playerspawn", [r[0], 1])
+	schedule_game(RESPAWN_SECONDS, func() -> void: vm.call_fn("game::playerspawn", [client, 1]))
 
 
 # ------------------------------------------------------------------ AI

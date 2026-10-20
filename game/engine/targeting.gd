@@ -25,11 +25,12 @@ const BLOCKED_PENALTY := 2.0
 const CENTRE_HEIGHT := 4.0
 
 
-## Living units `viewer` may target: not itself, not allied, not dormant (mission units waiting off stage).
+## Living units `viewer` may target: not itself, not allied, not dormant (mission units waiting off stage), and on
+## the viewer's radar right now (RadarContacts.is_on_scope).
 static func make_candidates(viewer: Herc) -> Array:
 	var out := []
 	var seen := {}
-	for group in [VEHICLES, TARGETABLES]:
+	for group in [VEHICLES, RadarProxy.GROUP, TARGETABLES]:
 		for n in viewer.get_tree().get_nodes_in_group(group):
 			if seen.has(n) or not _is_candidate(viewer, n):
 				continue
@@ -40,7 +41,7 @@ static func make_candidates(viewer: Herc) -> Array:
 
 static func _is_candidate(viewer: Herc, n: Node) -> bool:
 	return n != viewer and n is Node3D and bool(n.get("alive")) and not n.has_meta("dormant") \
-		and not TeamRelations.is_allied(viewer.team, int(n.get("team")))
+		and not TeamRelations.is_allied(viewer.team, int(n.get("team"))) and RadarContacts.is_on_scope(viewer, n)
 
 
 ## The point a target is aimed at and ranked by.
@@ -94,7 +95,7 @@ static func make_front_set(viewer: Herc) -> Array:
 ## target_nearest: the best candidate, null when there is none.
 static func pick_best(viewer: Herc) -> Node3D:
 	var ranking := make_ranking(viewer)
-	return ranking[0] if not ranking.is_empty() else null
+	return promote(viewer, ranking[0]) if not ranking.is_empty() else null
 
 
 ## target_next: the candidate after `current` in the front cone, nearest first, wrapping round (all candidates, nearest
@@ -106,4 +107,15 @@ static func pick_next(viewer: Herc, current: Node3D) -> Node3D:
 	if pool.is_empty():
 		return null
 	var i := pool.find(current)
-	return pool[(i + 1) % pool.size()]
+	return promote(viewer, pool[(i + 1) % pool.size()])
+
+
+## A far bot's radar contact becomes a full node when targeted (BattleFarUnits.restore, where its proxy stands; the
+## receiver keeps a targeted bot's node); anything else is returned as it is.
+static func promote(viewer: Herc, t: Node3D) -> Node3D:
+	if not (t is RadarProxy):
+		return t
+	var battle := viewer.get_parent()
+	var units = battle.get("far_units") if battle else null
+	var h: Herc = units.promote((t as RadarProxy).net_id) if units else null
+	return h if h else t

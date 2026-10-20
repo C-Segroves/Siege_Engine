@@ -9,6 +9,8 @@ const INDOOR_SPAWN_GAP := 3.0
 ## Explicit "above_terrain" beyond this keeps the spawn's own height.
 const RAISED_SPAWN_HEIGHT := 2.0
 const SPAWN_LIFT := 0.5
+## How far above the bilinear height a spawn is lifted so it starts above the collision triangles of a steep square.
+const MAX_TRIANGLE_RISE := 3.0
 ## Herc spawns closer than this are duplicates; infantry fallbacks use the wider spacing.
 const SPAWN_MERGE_DISTANCE := 3.0
 ## Group of the map's buildings (the "interiors" list): surfaces a Tribes deployable may be placed on.
@@ -29,10 +31,17 @@ static func list_maps() -> Array:
 				e["pack"] = p
 				e["id"] = "%s:%s" % [p, m.id]
 				out.append(e)
+	if VarunaMap.is_available() and Packs.is_enabled(VarunaMap.PACK, "arenas"):
+		var v := VarunaMap.make_index_row()
+		v["pack"] = VarunaMap.PACK
+		v["id"] = VarunaMap.MAP_ID
+		out.append(v)
 	return out
 
 
 static func load_map(map_id: String) -> Dictionary:
+	if VarunaMap.is_varuna(map_id):
+		return VarunaMap.make_map()   # generated at load time (Tribes 2 pack only)
 	var sp := Assets.split_id(map_id)
 	var j = Assets.load_json("maps/%s/map.json" % sp[1], sp[0])
 	if j is Dictionary:
@@ -64,6 +73,7 @@ static func build(parent: Node3D, map_id: String) -> Dictionary:
 		_build_ground(parent, m)
 	for list_key in ["interiors", "statics"]:
 		for o in m.get(list_key, []):
+			LoadKeepAlive.pump()
 			var placed := _place(parent, o, pal, bool(o.get("collide", true)))
 			if placed and list_key == "interiors":
 				placed.add_to_group(INTERIOR_GROUP)
@@ -101,6 +111,7 @@ static func _build_flat_ground(parent: Node3D, height := 0.0) -> void:
 static func _build_stations(parent: Node3D, m: Dictionary, pal: String) -> Array:
 	var stations := []
 	for s in m.get("stations", []):
+		LoadKeepAlive.pump()
 		var body: Node3D = null
 		if s.get("shape") != null and String(s.shape) != "":
 			body = _place(parent, s, pal, true)
@@ -120,7 +131,7 @@ static func _make_spawns(parent: Node3D, m: Dictionary) -> Dictionary:
 	var infantry: Array[Transform3D] = []
 	var clearance := SpawnClearance.make(parent)
 	for s in m.get("spawns", []):
-		var xf := _spawn_transform(parent, s)
+		var xf := make_spawn_transform(parent, s)
 		match String(s.get("kind", "herc")):
 			"vehicle_pad":
 				xf.origin = clearance.make_clear_origin(xf.origin)
@@ -149,7 +160,7 @@ static func _make_team_spawns(parent: Node3D, m: Dictionary) -> Dictionary:
 		for s in m.get("spawns", []):
 			var kind := String(s.get("kind", "herc"))
 			if s.get("team") != null and int(s.team) == team and by_kind.has(kind):
-				by_kind[kind].append(_spawn_transform(parent, s))
+				by_kind[kind].append(make_spawn_transform(parent, s))
 		var points: Array[Transform3D] = []
 		for xf in by_kind.herc:
 			_append_unique(points, Transform3D(xf.basis, clearance.make_clear_origin(xf.origin)), SPAWN_MERGE_DISTANCE)
@@ -196,7 +207,7 @@ static func _append_unique(list: Array[Transform3D], xf: Transform3D, merge_dist
 
 ## Spawns on raised pads / inside bases keep their original height; others sit on the terrain.
 ## Without explicit fields, a spawn well above/below the terrain is in a base (raised or underground).
-static func _spawn_transform(parent: Node3D, s: Dictionary) -> Transform3D:
+static func make_spawn_transform(parent: Node3D, s: Dictionary) -> Transform3D:
 	var xf := _xf(s)
 	var gh := ground_height(parent, xf.origin)
 	var keep := bool(s.get("indoor", false)) or absf(float(s.get("above_terrain", 0.0))) > RAISED_SPAWN_HEIGHT
@@ -204,8 +215,13 @@ static func _spawn_transform(parent: Node3D, s: Dictionary) -> Transform3D:
 		keep = true
 	if keep:
 		xf.origin.y += SPAWN_LIFT
+	elif gh == xf.origin.y:
+		# Over a terrain hole (a base's entrance) or off the terrain: the nearest solid ground, never the open pit.
+		var solid := MapTerrain.make_nearest_solid_ground(parent, xf.origin)
+		xf.origin = (solid if solid != Vector3.INF else xf.origin) + Vector3.UP * SPAWN_LIFT
 	else:
-		xf.origin.y = gh + SPAWN_LIFT
+		# Above the collision triangles too, which on a steep square rise over the bilinear height.
+		xf.origin.y = minf(maxf(gh, MapTerrain.make_highest_corner(parent, xf.origin)), gh + MAX_TRIANGLE_RISE) + SPAWN_LIFT
 	return xf
 
 

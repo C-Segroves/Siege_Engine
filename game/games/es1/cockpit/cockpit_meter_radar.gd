@@ -9,8 +9,6 @@ extends CockpitMeterPainter
 const RANGES_M := [500.0, 1000.0, 2000.0]
 const DOT := 3.0
 const SPEED_GAP := 2.0
-const DEFAULT_FRIEND := 249
-const DEFAULT_ENEMY := 242
 const DEFAULT_TARGET := 248
 
 
@@ -47,17 +45,14 @@ func _draw_contacts(m: Dictionary, art: Vector2, range_m: float) -> void:
 	var centre := scope.get_center()
 	var colors: Dictionary = m.get("colors", {})
 	RadarContacts.apply_range(herc, range_m)
-	for v in vehicles():
+	for v in vehicles() + SensorTowers.make_radar_structures(herc):
 		if v == herc or not v.alive or not RadarContacts.is_shown(herc, v):
 			continue
 		var p := make_scope_share(v.global_position, range_m)
 		if p.length() > 1.0:
 			continue
-		var col_i := int(colors.get("team_0", DEFAULT_FRIEND)) if TargetInfo.is_friendly(herc, v) else int(colors.get("enemy", DEFAULT_ENEMY))
+		var col := RadarColors.make_unit_color(herc, v)
 		if v == herc.target:
-			col_i = int(colors.get("arc", DEFAULT_TARGET))
-		var col := canvas.color(col_i)
-		if MapTeams.shows_team_colors and v != herc.target and TargetInfo.is_hostile(herc, v):
-			col = TargetInfo.make_iff_color(herc, v)   # more than two teams: each opposing team in its colour
+			col = canvas.color(int(colors.get("arc", DEFAULT_TARGET)))
 		var q := (centre + p * half).round()
 		canvas.fill(Rect2(q - Vector2.ONE, Vector2(DOT, DOT)), col)

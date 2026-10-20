@@ -78,7 +78,7 @@ def _batches(d):
     return out
 
 
-def _textures(d):
+def _textures(d, keep_dups=False):
     """(names in order of first appearance, offset where the list is repeated or len(d)): a shape that stores a second
     copy (its damaged state) repeats the texture list; only the first state is used."""
     names, repeat = [], len(d)
@@ -88,8 +88,9 @@ def _textures(d):
             if t == names[0]:
                 repeat = m.start()
                 break
-        else:
-            names.append(t)
+            if not keep_dups:
+                continue
+        names.append(t)                    # keep_dups: a texture listed twice keeps both slots (the transport's indices count them)
     return names, repeat
 
 
@@ -104,7 +105,7 @@ def primary_texture(textures):
     return 0 if textures else -1
 
 
-def _materials(d):
+def _materials(d, loose=False):
     """[(offset, name, (r, g, b, a), base index, lum index)]: records are recognised by their layout - four colour floats
     ending in 1.0, a word whose low byte is 0x0c, the count 1, then the base and the lum texture indices."""
     mats = []
@@ -116,8 +117,12 @@ def _materials(d):
         if not (0.0 <= r <= 1.0 and 0.0 <= g <= 1.0 and 0.0 <= b <= 1.0):
             continue
         flags, cnt, base, lum, neg = struct.unpack_from('<5I', d, p + 16)
-        if (flags & 0xFF) != 0x0C or cnt != 1 or base > 63 or lum > 63 or neg != 0xFFFFFFFF:
+        if (flags & 0xFF) != 0x0C or base > 63:
             continue
+        if cnt != 1 or lum > 63 or neg != 0xFFFFFFFF:
+            if not (loose and lum == 0xFFFFFFFF):        # loose: records with no lum texture (-1), any count (the transport)
+                continue
+        lum = -1 if lum == 0xFFFFFFFF else lum
         mats.append((p, 'material%d' % len(mats), (r, g, b, 1.0), base, lum))
     return mats
 
@@ -177,6 +182,19 @@ def mirrored_nodes(boxes, tol=0.03):
     return out
 
 
+def lateral_axis(boxes):
+    """Axis (0 X or 2 Z) a shape's left/right parts mirror across: X unless the main hull (the first node) is clearly
+    off-centre in X and centred in Z (the scout flies along X and is mirrored in Z)."""
+    if not boxes:
+        return 0
+    b = np.array(boxes[0][1])
+    ext = np.maximum(b[3:] - b[:3], 1e-3)
+    off = np.abs(b[:3] + b[3:]) / 2 / ext
+    if off[0] <= 0.05:
+        return 0
+    return 2 if off[2] <= 0.05 else 0
+
+
 def _quat_matrix(q):
     x, y, z, w = q
     n = (x * x + y * y + z * z + w * w) ** 0.5 or 1.0
@@ -186,23 +204,38 @@ def _quat_matrix(q):
                      [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]])
 
 
+def _find_all(d, needle, start):
+    """Offsets (any alignment) of `needle` in `d` from `start` on."""
+    out, at = [], d.find(needle, start)
+    while at >= 0:
+        out.append(at)
+        at = d.find(needle, at + 1)
+    return out
+
+
 def bones(d):
     """[(quaternion x y z w, translation)] of a skinned shape's bones (soldiers), local to the parent, in the node default pose.
-    The record list follows the "<name>_root" string: ... 30.0 (frames per second), 1, 0, count, then 0x30-byte records
-    (-0.0, 1.0, 1, quaternion, 1, translation, 0). [] when the shape has none."""
+    The record list follows the "<name>_root" string: ... fps (30.0, or 10.0 in the medium bioderm), 1, 0, count, then
+    0x30-byte records (-0.0, 1.0, 1, quaternion, 1, translation, 0). [] when the shape has none."""
     try:
         p = d.index(b'_root', 0x1000)
-        q = d.index(struct.pack('<f', 30.0), p)
     except ValueError:
         return []
-    count = struct.unpack_from('<I', d, q + 12)[0]
-    if not 1 <= count <= 64 or q + 16 + 0x30 * count > len(d):
-        return []
-    out = []
-    for k in range(count):
-        f = struct.unpack_from('<ffI4fI3f', d, q + 16 + 0x30 * k)
-        out.append((f[3:7], f[8:11]))
-    return out
+    hits = sorted(h for fps in (10.0, 30.0) for h in _find_all(d, struct.pack('<f', fps), p))
+    for q in hits:
+        if q + 16 > len(d):
+            break
+        fps, one, zero, count = struct.unpack_from('<fIII', d, q)
+        if one != 1 or zero != 0 or not 1 <= count <= 64 or q + 16 + 0x30 * count > len(d):
+            continue
+        if struct.unpack_from('<fII', d, q + 16)[1:] != (0x3F800000, 1):
+            continue
+        out = []
+        for k in range(count):
+            f = struct.unpack_from('<ffI4fI3fI', d, q + 16 + 0x30 * k)
+            out.append((f[3:7], f[8:11]))
+        return out
+    return []
 
 
 def batch_groups(d, first=0x40):
@@ -225,21 +258,46 @@ def batch_groups(d, first=0x40):
 
 
 SOLDIER_PARENTS = (-1, 0, 1, 2, 2, 4, 5, 2, 7, 8, 0, 10, 11, 0, 13, 14)     # pelvis, spine, head, two arms, two legs
+# The bioderms' skeletons have another bone order (alien, hunched, reverse-jointed): light and medium (16 bones) = pelvis, spine,
+# chest, head, two arms of two bones (hanging from the chest), two legs of four (hip, thigh, ankle, foot); heavy (15) = pelvis,
+# three spine bones, head, two arms of two, two legs of three. The heavy shape has 14 parts for 15 bones: the part list skips the
+# third bone (a pivot between belly and chest; the others skipped or not assemble the same, this keeps each part at the origin of the
+# bone its children hang from).
+BIODERM_PARENTS = (-1, 0, 1, 2, 2, 4, 2, 6, 0, 8, 9, 10, 0, 12, 13, 14)
+HEAVY_BIODERM_PARENTS = (-1, 0, 1, 2, 3, 3, 5, 3, 7, 0, 9, 10, 0, 12, 13)
+HEAVY_PART_BONES = (0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14)
 
 
-def skeleton_pose(bone_list):
-    """World (rotation, translation) of every bone of a 16-bone soldier. The parents are not stored; this order (a pelvis root,
-    two spine bones and the head, then two arm chains of three hanging from the chest and two leg chains from the pelvis) was
-    read off the translations and confirmed by the assembled shape. None for other bone counts."""
-    if len(bone_list) != len(SOLDIER_PARENTS):
+def skeleton_of(d, count):
+    """Parent table of the bones of shape bytes `d` with `count` bones (a bioderm is told by the name at the head of the file)."""
+    name = d[8:d.index(b'\x00', 8)].lower()
+    if name.startswith(b'bioderm'):
+        return HEAVY_BIODERM_PARENTS if count == len(HEAVY_BIODERM_PARENTS) else BIODERM_PARENTS
+    return SOLDIER_PARENTS
+
+
+def part_bones(parents, parts):
+    """Bone of every part, in part order: bone order, except the heavy bioderm (one part fewer than bones)."""
+    if parts == len(parents):
+        return list(range(parts))
+    if parents == HEAVY_BIODERM_PARENTS and parts == len(HEAVY_PART_BONES):
+        return list(HEAVY_PART_BONES)
+    return []
+
+
+def skeleton_pose(bone_list, parents=SOLDIER_PARENTS):
+    """World (rotation, translation) of every bone of a skeleton given its parent table. The soldiers' parents are not stored; this
+    order (a pelvis root, two spine bones and the head, then two arm chains of three hanging from the chest and two leg chains
+    from the pelvis) was read off the translations and confirmed by the assembled shape. None for other bone counts."""
+    if len(bone_list) != len(parents):
         return None
     world = []
     for k, (q, t) in enumerate(bone_list):
         rot, t = _quat_matrix(q), np.array(t, float)
-        if SOLDIER_PARENTS[k] < 0:
+        if parents[k] < 0:
             world.append((rot, t))
         else:
-            rp, tp = world[SOLDIER_PARENTS[k]]
+            rp, tp = world[parents[k]]
             world.append((rp @ rot, tp + rp @ t))
     return world
 
@@ -256,9 +314,12 @@ def strips_to_triangles(pos):
     return tris
 
 
-def decode(data):
+def decode(data, assemble=True, loose=False):
     """-> {'name', 'textures': [str], 'materials': [{'base', 'lum', 'colour'}], 'meshes': [{'material', 'pos' (n,3) float,
-    'uv' (n,2) float, 'normal' (n,3) float | None, 'tris' [(i, j, k)]}]}. Raises ValueError when no geometry is found."""
+    'uv' (n,2) float, 'normal' (n,3) float | None, 'tris' [(i, j, k)]}]}. Raises ValueError when no geometry is found.
+    `assemble` puts the mirrored (stored inverted) parts in place by a half turn; a shape with a node-pose record
+    (aa_turret) is built with assemble=False and the records place every part. `loose`: also read material records of the
+    looser layout when the strict one finds none (only checked on the transport)."""
     if len(data) < 0x100:
         raise ValueError('shape too short')
     name = data[8:data.index(b'\0', 8)].decode('latin-1')
@@ -267,6 +328,10 @@ def decode(data):
         raise ValueError('no vertex batches')
     mats = [m for m in _materials(data) if m[0] < 0xFFFFFFF]
     textures, limit = _textures(data)
+    if not mats and loose:                 # records in the looser layout (the transport); their indices count repeated textures
+        mats = [m for m in _materials(data, loose=True) if m[0] < 0xFFFFFFF]
+        if mats:
+            textures, limit = _textures(data, keep_dups=True)
     bb = np.array(struct.unpack_from('<6f', data, 0x44)) if len(data) > 0x5c else None
     scale = _scale(data)
     if scale is None:
@@ -274,8 +339,11 @@ def decode(data):
         scale = 32767.0 / ext
     meshes = []
     kept = [i for i, b in enumerate(batches) if b[0] < limit] or list(range(len(batches)))
-    pose, starts = skeleton_pose(bones(data)), batch_groups(data)
-    if pose is not None and len(starts) != len(pose):
+    bone_list = bones(data)
+    parents = skeleton_of(data, len(bone_list))
+    pose, starts = skeleton_pose(bone_list, parents), batch_groups(data)
+    owner_bones = part_bones(parents, len(starts))
+    if pose is not None and not owner_bones:
         pose = None
     for bi in kept:
         off, uv, nrm, pos = batches[bi]
@@ -284,7 +352,9 @@ def decode(data):
                 'uv': uv.astype('f4') / 4096.0, 'normal': None if nrm is None else nrm.astype('f4') / 127.0,
                 'tris': strips_to_triangles(pos)}
         if pose is not None:                           # a soldier part: bone-local -> shape space in the default pose
-            rot, trans = pose[max(k for k, s0 in enumerate(starts) if s0 <= bi)]
+            bone = owner_bones[max(k for k, s0 in enumerate(starts) if s0 <= bi)]
+            rot, trans = pose[bone]
+            mesh['bone'] = bone
             mesh['pos'] = (mesh['pos'] @ rot.T + trans).astype('f4')
             if mesh['normal'] is not None:
                 mesh['normal'] = (mesh['normal'] @ rot.T).astype('f4')
@@ -292,16 +362,42 @@ def decode(data):
     if not meshes:
         raise ValueError('no vertex batches in the first state')
     boxes = node_boxes(data)
-    flipped = mirrored_nodes(boxes)
-    for m in meshes:                       # a mirror copy: undo the stored inversion (a half turn about X)
+    flipped = mirrored_nodes(boxes) if assemble else set()    # assemble=False: node-local parts, a rig places them (aa_turret)
+    half_turn = np.array([-1, -1, -1], 'f4')
+    half_turn[lateral_axis(boxes)] = 1     # a half turn about the axis the shape is mirrored across
+    for m in meshes:                       # a mirror copy: undo the stored inversion
         lo, hi = m['pos'].min(0), m['pos'].max(0)
-        near = [k for k, (_p, b) in enumerate(boxes) if np.allclose(b, np.r_[lo, hi], atol=0.04 + 0.01 * abs(hi - lo).max())]
-        if near and near[0] in flipped:
-            m['pos'] = m['pos'] * np.array([1, -1, -1], 'f4')
+        tol = 0.04 + 0.01 * abs(hi - lo).max()      # the part's batches lie inside its node's box (a batch is only a piece of it)
+        near = sorted((float(np.prod(np.array(b[3:]) - np.array(b[:3]) + 1e-3)), k) for k, (_p, b) in enumerate(boxes)
+                      if np.all(lo >= np.array(b[:3]) - tol) and np.all(hi <= np.array(b[3:]) + tol))
+        if near and near[0][1] in flipped:
+            m['pos'] = m['pos'] * half_turn
             if m['normal'] is not None:
-                m['normal'] = m['normal'] * np.array([1, -1, -1], 'f4')
+                m['normal'] = m['normal'] * half_turn
+        if 'bone' in m:                        # the part in its bone's own space (animated export)
+            rot, trans = pose[m['bone']]
+            m['local'] = ((m['pos'] - trans) @ rot).astype('f4')
     return {'name': name, 'textures': textures, 'scale': scale,
             'materials': [{'name': m[1], 'colour': m[2], 'base': m[3], 'lum': m[4]} for m in mats], 'meshes': meshes}
+
+
+def face_nose(sh, nose):
+    """Turn a decoded shape about the up axis (file Y) so that its nose, the file (X, Z) direction `nose`, points along file +X,
+    which to_json maps to the engine's forward. A proper rotation, so the winding is kept."""
+    nx, nz = nose
+    for m in sh['meshes']:
+        for key in ('pos', 'normal'):
+            a = m.get(key)
+            if a is None:
+                continue
+            x, z = a[:, 0].copy(), a[:, 2].copy()
+            if (nx, nz) == (-1, 0):
+                a[:, 0], a[:, 2] = -x, -z
+            elif (nx, nz) == (0, 1):
+                a[:, 0], a[:, 2] = z, -x
+            elif (nx, nz) == (0, -1):
+                a[:, 0], a[:, 2] = -z, x
+    return sh
 
 
 def to_json(sh, texture_path):
@@ -321,10 +417,14 @@ def to_json(sh, texture_path):
 
     fallback = primary_texture(sh['textures'])
     polys, allp = [], []
+    by_bone = {}
     for m in sh['meshes']:
         mat = sh['materials'][m['material']] if m['material'] >= 0 else None
         mi = material_of(mat['base'] if mat and mat['base'] >= 0 else fallback)
         p, uv, nr = m['pos'], m['uv'], m['normal']
+        if 'local_override' in m:
+            p = m['local_override']
+        target = by_bone.setdefault(m['bone'], []) if 'bone' in m and 'local_override' in m else polys
         for t in m['tris']:
             v = [[round(float(p[i][2]), 5), round(float(p[i][0]), 5), round(float(p[i][1]), 5)] for i in t]
             n = np.cross(p[t[1]] - p[t[0]], p[t[2]] - p[t[0]])
@@ -332,7 +432,7 @@ def to_json(sh, texture_path):
             if ln < 1e-12:
                 continue
             n = n / ln
-            polys.append({'v': v, 'n': [round(float(n[2]), 5), round(float(n[0]), 5), round(float(n[1]), 5)],
+            target.append({'v': v, 'n': [round(float(n[2]), 5), round(float(n[0]), 5), round(float(n[1]), 5)],
                           'm': {'kind': 'rgba', 'index': mi}, 't': 'tri',
                           'uv': [[round(float(uv[i][0]), 5), round(float(uv[i][1]), 5)] for i in t]})
         allp.append(p)
@@ -340,10 +440,13 @@ def to_json(sh, texture_path):
     lo, hi = allp.min(0), allp.max(0)
     centre = (lo + hi) / 2
     radius = float(np.linalg.norm(hi - lo) / 2)
+    pieces = [{'node': 0, 'id': 1000, 'name': sh['name'], 'cell': -1, 'state': 0, 'polys': polys}]
+    if by_bone:                            # a rigged soldier: one piece per bone (see aa_soldier.py)
+        pieces = [{'node': b, 'id': 1000 + b, 'name': 'bone%d' % b, 'cell': -1, 'state': 0, 'polys': by_bone[b]}
+                  for b in sorted(by_bone)]
     return {'name': sh['name'], 'texset': None, 'source': 'inevitable_shp', 'units': 'metres',
             'lods': [{'radius': radius, 'center': [float(centre[2]), float(centre[0]), float(centre[1])], 'size': 128.0,
-                      'name': 'Detail128', 'pieces': [{'node': 0, 'id': 1000, 'name': sh['name'], 'cell': -1, 'state': 0,
-                                                       'polys': polys}], 'cells': []}],
+                      'name': 'Detail128', 'pieces': pieces, 'cells': []}],
             'nodes': [{'parent': -1, 'default': 0, 'name': 'Shape'}], 'transforms': [[0, 0, 0, 0, 0, 0]],
             'ds_sequences': [],
             'bounds': {'header': [[float(lo[2]), float(lo[0]), float(lo[1])], [float(hi[2]), float(hi[0]), float(hi[1])]]},

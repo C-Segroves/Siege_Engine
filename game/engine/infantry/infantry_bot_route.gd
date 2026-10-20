@@ -6,6 +6,8 @@ extends RefCounted
 ## of the base instead. Past the path's end (a goal on a roof, a ledge the walkable surface doesn't reach), while
 ## its tiles are still baking, or when following the path stops shortening the way left (STUCK_SECONDS: a ledge
 ## too high, a jet that falls short) he goes straight again for a while, as before navigation existed.
+## Paths are asked for through BattleNavigation.request_path (answered a few ticks later, off the main loop): he keeps
+## the path he has, or goes straight if none, until the new one arrives.
 
 ## A new path is asked for when the goal moved this far, or this often.
 const REPATH_DISTANCE := 4.0
@@ -33,6 +35,7 @@ var _age := 0.0
 var _straight_left := 0.0
 var _watch_t := 0.0
 var _watch_best := INF
+var _awaiting := false   # a path request is out
 
 
 ## The point to head for now on the way from `at` to `goal` (`battle`: the navigation's owner).
@@ -41,10 +44,12 @@ func make_next_point(battle: Node3D, at: Vector3, goal: Vector3, delta: float) -
 	if Vector2(goal.x - at.x, goal.z - at.z).length() < DIRECT_DISTANCE or _straight_left > 0.0:
 		return goal
 	_age += delta
+	_apply_arrived_path(battle)
 	if _path.is_empty() and _age < SPENT_REPATH_SECONDS:
 		return goal
 	if _path.is_empty() and not is_building_ahead(battle, at, goal) and not _goal_inside(battle, goal):
 		_age = 0.0
+		_apply_request_dropped(battle)
 		return goal   # open ground: straight, as the Tribes bots ran and skied
 	var spent := _index >= _path.size()
 	if _goal.distance_to(goal) > REPATH_DISTANCE or _age > (SPENT_REPATH_SECONDS if spent else REPATH_SECONDS):
@@ -71,6 +76,7 @@ static func is_building_ahead(battle: Node3D, at: Vector3, goal: Vector3) -> boo
 ## Forgets the path (a new task).
 func clear() -> void:
 	_path = PackedVector3Array()
+	_awaiting = false
 	_index = 0
 	_goal = Vector3.INF
 
@@ -80,11 +86,36 @@ func make_path() -> PackedVector3Array:
 	return _path
 
 
+## Asks for a path, or drops the path when the way ahead is open; the path he has stays until the answer comes.
 func _apply_new_path(battle: Node3D, at: Vector3, goal: Vector3) -> void:
 	_age = 0.0
 	_goal = goal
-	_path = BattleNavigation.of(battle).make_path(at, goal) if is_building_ahead(battle, at, goal) or _goal_inside(battle, goal) \
-		else PackedVector3Array()
+	var nav := BattleNavigation.of(battle)
+	if is_building_ahead(battle, at, goal) or _goal_inside(battle, goal):
+		nav.request_path(get_instance_id(), at, goal)
+		_awaiting = true
+		return
+	_apply_request_dropped(battle)
+	_path = PackedVector3Array()
+	_index = 0
+
+
+## Forgets the request that is out (the way ahead is open).
+func _apply_request_dropped(battle: Node3D) -> void:
+	if _awaiting:
+		BattleNavigation.of(battle).apply_path_cancel(get_instance_id())
+		_awaiting = false
+
+
+## Takes the answer to the last request, when it has come.
+func _apply_arrived_path(battle: Node3D) -> void:
+	if not _awaiting:
+		return
+	var nav := BattleNavigation.of(battle)
+	if not nav.has_path_answer(get_instance_id()):
+		return
+	_awaiting = false
+	_path = nav.take_path_answer(get_instance_id())
 	_index = 0
 
 

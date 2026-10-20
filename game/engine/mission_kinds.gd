@@ -10,17 +10,35 @@ extends RefCounted
 ## Callers (Session, BattleSetup) never branch on the game themselves.
 
 
-## The MissionRuntime script that plays `mission` (Earthsiege 1 when no other game claims it).
+## Registered runtimes in claim order: [{claims: Callable(mission) -> bool, script: GDScript}]. The games fill it in
+## (games/games_boot.gd); engine/ names no game class.
+static var _kinds: Array[Dictionary] = []
+## The runtime of a mission no registered game claims.
+static var _default_script: GDScript = null
+
+
+## A game registers the runtime that plays the missions `claims` accepts. The first registration that claims wins.
+static func register(claims: Callable, script: GDScript) -> void:
+	_kinds.append({"claims": claims, "script": script})
+
+
+## The runtime for missions nobody claims.
+static func register_default(script: GDScript) -> void:
+	_default_script = script
+
+
+## Forgets every registration.
+static func clear() -> void:
+	_kinds.clear()
+	_default_script = null
+
+
+## The MissionRuntime script that plays `mission`: the first registered game that claims it, else the default.
 static func runtime_script(mission: Dictionary) -> GDScript:
-	if TribesMissionRuntime.is_tribes(mission):
-		return Tribes2MissionRuntime if String(mission.get("pack", "")) == "tribes2" else Tribes1MissionRuntime
-	if String(mission.get("pack", "")) == MissionRuntimeES2.PACK:
-		return MissionRuntimeES2
-	if AAMissionRuntime.is_aa(mission):
-		return AAMissionRuntime
-	if StarsiegeMissionRuntime.is_starsiege(mission):
-		return StarsiegeMissionRuntime
-	return MissionRuntime
+	for kind in _kinds:
+		if bool((kind.claims as Callable).call(mission)):
+			return kind.script
+	return _default_script
 
 
 ## A new runtime node for `mission`.

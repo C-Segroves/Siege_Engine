@@ -47,6 +47,7 @@ static func load_for(pilot_name: String) -> ExtractionProfile:
 	else:
 		p.apply_dict(d)
 		p.pilot = pilot_name
+	p.apply_slot_armor(OperatorProfile.load_for(pilot_name))
 	return p
 
 
@@ -109,6 +110,18 @@ func apply_kit_armor(armor_id: String) -> bool:
 	stash.apply_take(item_id, 1)
 	_wear_armor(armor_id)
 	return true
+
+
+## The raid kit wears the armour of the operator's active character slot (docs/design/lobby_loadout_economy.md section 4.2): the
+## slot's own armour when a raider may field it (free in a raid, or bought and not lost), else free light armour. The stash is
+## not touched: a bought armour is an unlock of the operator now, not an item.
+func apply_slot_armor(operator: OperatorProfile) -> void:
+	var armor_id := operator.make_active_slot().armor
+	var unlock_id := UnlockId.make("armor", armor_id)
+	var usable := not InfantryCatalog.armor(armor_id).is_empty() and (FreeUnlocks.is_free_in_raid(unlock_id) or operator.unlocks.owned.has(unlock_id))
+	var wanted := armor_id if usable else make_free_armor_id()
+	if wanted != kit_armor:
+		_wear_armor(wanted)
 
 
 ## Puts on `armor_id` without touching the stash: the kit takes its capacity, the overflow goes to the stash.
@@ -194,6 +207,28 @@ func apply_insure(id: String) -> bool:
 	return true
 
 
+## Insures the at-risk unlock `id` (a paid skin, body, armour or vehicle of OperatorProfile.at_risk) instead of a kit
+## item: the one insured slot holds either (docs/design/lobby_loadout_economy.md section 4.1). False when `id` is not a
+## look unlock or is not among `at_risk`.
+func apply_insure_unlock(id: String, at_risk: Array) -> bool:
+	if not UnlockId.LOOK_KINDS.has(UnlockId.kind_of(id)) or not at_risk.has(id):
+		return false
+	insured = [id, 1]
+	return true
+
+
+## The insured unlock id ("" when the slot holds nothing or a kit item).
+func make_insured_unlock_id() -> String:
+	var id := make_insured_id()
+	return id if id != "" and is_unlock_id(id) else ""
+
+
+## True when `id` is a look unlock other than armour (kit armour stays on the stash path of apply_insure).
+static func is_unlock_id(id: String) -> bool:
+	var kind := UnlockId.kind_of(id)
+	return kind != ExtractionItems.ARMOR_KIND and UnlockId.LOOK_KINDS.has(kind)
+
+
 func apply_uninsure() -> void:
 	insured = []
 
@@ -222,6 +257,8 @@ func _apply_insured_fit() -> void:
 		if id != ExtractionItems.make_armor_id(kit_armor):
 			insured = []
 		return
+	if is_unlock_id(id):
+		return   # an unlock, not a kit item: it stays insured while it is at risk
 	if kit.count(id) <= 0:
 		insured = []
 	else:

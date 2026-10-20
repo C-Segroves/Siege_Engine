@@ -34,6 +34,7 @@ var _tops := {}                       # unit -> bounding box top above its origi
 func _init(p_source: Node) -> void:
 	source = p_source
 	name = "Nameplates"
+	ServerProfile.apply_client_only(self)
 	layer = LAYER
 	_canvas = Control.new()
 	_canvas.mouse_filter = Control.MOUSE_FILTER_IGNORE

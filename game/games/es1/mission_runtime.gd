@@ -19,6 +19,8 @@ const DEFAULT_BASE_HP := 15000.0
 const RULES_INTERVAL := 0.25
 ## Distance at which a nav point counts as reached.
 const NAV_REACH_RADIUS := 40.0
+const NAV_REACHED_TEXT := "Nav point %d reached."
+const NAV_MESSAGE_SECONDS := 4.0
 ## Region circles smaller than this (e.g. radius 10) mean "at the nav point".
 const MIN_REGION_RADIUS := 30.0
 ## Player damage levels for the debriefing code: integrity above these is "light" / "medium".
@@ -35,8 +37,23 @@ const CODE_LEFT_MAP := 8
 ## Seconds outside the map before it counts as left: the original's warning time is not traced [L]; the remake
 ## uses Earthsiege 2's auto-end grace (DBSIM 0x4131ac, es2.md 10.4).
 const LEFT_MAP_GRACE := 4.9
+## Region areas with corners (boxes) test the ground plane only, whatever the height.
+const BOX_HEIGHT_SLACK := INF
+## Mission var changes by op code (SIM@d77c, mission.md section 5): 2 = +1, 1 = 0, 13..16 = 1..4. The MissionVars table
+## names the change, the operand table gives its value; decoded MSN strings ("var+=1", "var=N") use the same changes.
+const OP_ADD := "add"
+const OP_SET := "set"
+const VAR_OPS := {2: OP_ADD, 1: OP_SET, 13: OP_SET, 14: OP_SET, 15: OP_SET, 16: OP_SET}
+const VAR_OPERANDS := {2: 1, 1: 0, 13: 1, 14: 2, 15: 3, 16: 4}
+const VAR_OP_INCREMENT := "var+=1"
+const VAR_OP_SET_PREFIX := "var="
+## The end texts of the losses and the win.
+const TEXT_HERC_LOST := "Your Herc has been destroyed."
+const TEXT_LEFT_AREA := "You have left the mission area."
+const TEXT_GUARDED_LOST := "The unit you were guarding has been lost."
+const TEXT_WON := "Mission objectives complete."
 
-var regions := []                 # [{def, fired}]
+var regions := []                 # [{def, fired, triggers: Array[AreaTrigger]}]
 var group_units := {}             # group index -> Array[Node] (Herc or Structure)
 var dormant_groups := {}          # group index -> true until its region fires
 var unit_index := {}              # "herc:<i>" / "flyer:<i>" -> spawned Node (MissionTargets)
@@ -44,7 +61,19 @@ var player_unit := -1             # herc record index of the player's Herc (-1: 
 var targets: MissionTargets
 ## Earthsiege 1 objective tests (set up by MissionRuntime.setup; the other games have their own rules).
 var win_rules: ES1WinRules
-var _elapsed := 0.0
+## Seconds of simulation time since the mission started (MissionClock; Earthsiege 2 advances it itself).
+var _elapsed: float:
+	get: return kit.clock.elapsed
+	set(value): kit.clock.elapsed = value
+
+
+## Builds the mission vars (their op table is this game's).
+func _init() -> void:
+	kit.vars = MissionVars.new(MISSION_VAR_COUNT, VAR_OPS, {})
+
+
+## The end door and the losses, in the order of the original end check (setup).
+var _sink: BattleMissionSink = null
 ## Lazily built check of the battlefield's solids for unit spawns (make_clear_spawn).
 var _clearance: SpawnClearance = null
 ## Host: the wingmen's radio chatter (null until the squad spawned, or when the pack has no pilot tables).
@@ -102,12 +131,14 @@ func setup(p_battle: Node3D, mission: Dictionary, vars := PackedInt32Array()) ->
 	super.setup(p_battle, mission, vars)
 	EsDamageModel.ai_damage_scale = EsDamageModel.make_ai_damage_scale(mission.get("header", {})) if radio_pack() == "es1" else 1.0
 	targets = MissionTargets.new(self)
-	win_rules = ES1WinRules.new(self)
 	for wp in _arr(m.get("player_start", {}).get("waypoints")):
 		nav_points.append(to_godot(wp))
 	_build_nav_markers()
 	_init_regions()
 	_build_structures()
+	win_rules = ES1WinRules.new(self)
+	kit.fail_rules = _make_fail_rules()
+	kit.ender = MissionEnder.new(end_mission, win_rules.world.sink.is_voice_playing)
 
 
 ## The first waypoint is the drop zone; navigation starts at the next one, which gets a marker.
@@ -121,9 +152,37 @@ func _build_nav_markers() -> void:
 		battle.add_child(n)
 
 
+## Each region is one-shot triggers, one per area; the first entry fires the region.
 func _init_regions() -> void:
 	for r in _arr(m.get("regions")):
-		regions.append({"def": r, "fired": false})
+		var ri := regions.size()
+		regions.append({"def": r, "fired": false, "triggers": _make_region_triggers(ri, r)})
+
+
+func _make_region_triggers(ri: int, region: Dictionary) -> Array[AreaTrigger]:
+	var out: Array[AreaTrigger] = []
+	for a in _arr(region.get("areas")):
+		var shape := _make_area_shape(a)
+		if shape == null:
+			continue
+		var trigger := AreaTrigger.new(shape)
+		trigger.one_shot = true
+		trigger.entered.connect(_on_region_entered.bind(ri))
+		out.append(trigger)
+	return out
+
+
+## A region area {shape: circle, center, radius} or {corner1, corner2}, in original units, as a volume of the battle.
+func _make_area_shape(a: Dictionary) -> AreaShape:
+	if a.get("shape") == "circle":
+		return AreaShape.make_circle(to_godot(a.center), float(a.get("radius", 0)) * Assets.UNIT, MIN_REGION_RADIUS)
+	if a.has("corner1") and a.has("corner2"):
+		var lo := to_godot(a.corner1)
+		var hi := to_godot(a.corner2)
+		var size := (hi - lo).abs()
+		size.y = 0.0
+		return AreaShape.make_box((lo + hi) * 0.5, size, BOX_HEIGHT_SLACK)
+	return null
 
 
 # ------------------------------------------------------------------ structures (all peers)
@@ -180,6 +239,7 @@ func _add_structure(i: int, shape_id: String, xf: Transform3D, team: int, hp: fl
 	var st := Structure.create(battle, shape_id, xf, battle.palette_id, team, hp)
 	st.net_id = i
 	st.display_name = display_name
+	SensorTowers.apply_register(st)
 	st.health_scale(float(s.get("health", 100)))
 	st.destroyed.connect(_on_structure_destroyed.bind(i))
 	structures.append(st)
@@ -309,24 +369,65 @@ func _spawn_group(gi: int) -> void:
 func _physics_process(delta: float) -> void:
 	if _over or not multiplayer.is_server():
 		return
-	_elapsed += delta
-	var dt := make_rules_step(delta, RULES_INTERVAL)
+	kit.clock.apply_advance(delta)
+	var dt := kit.clock.make_step(delta, RULES_INTERVAL)
 	if dt <= 0.0:
 		return
 	_check_regions()
 	win_rules.update_alerts()
 	win_rules.update_objective_flags(dt)
 	_update_nav()
-	_check_end()
+	get_announcer().apply_tick(dt)
+	_check_end(dt)
 
 
+## The mission blocks' output over this battle (messages, nav).
+func get_sink() -> BattleMissionSink:
+	if _sink == null:
+		_sink = BattleMissionSink.new(battle)
+	return _sink
+
+
+## The mission's radio: a new message cuts the one before (Earthsiege 1 has one message line).
+func get_announcer() -> MissionAnnouncer:
+	if kit.announcer == null:
+		kit.announcer = MissionAnnouncer.new(get_sink(), MissionAnnouncer.Discipline.CUT)
+	return kit.announcer
+
+
+## Scans the not yet fired regions for what each reacts to (`_region_candidates`).
 func _check_regions() -> void:
 	for ri in regions.size():
 		var r: Dictionary = regions[ri]
-		if r.fired:
+		if r.fired or r.triggers.is_empty():
 			continue
-		if _region_occupied(r.def):
-			fire_region(ri)
+		var candidates := _make_candidate_positions(_region_candidates(r.def))
+		for trigger in r.triggers:
+			if not r.fired:
+				trigger.apply_scan(candidates)
+
+
+func _on_region_entered(_who: Variant, ri: int) -> void:
+	fire_region(ri)
+
+
+## What a region reacts to: the living vehicles of its type.
+func _region_candidates(d: Dictionary) -> Array:
+	var who := String(d.get("type_name", "player"))
+	var out := []
+	for v in get_tree().get_nodes_in_group("vehicles"):
+		if _region_counts(who, v):
+			out.append(v)
+	return out
+
+
+## Node -> position of the living, valid `nodes`: what AreaTrigger.apply_scan takes.
+static func _make_candidate_positions(nodes: Array) -> Dictionary:
+	var out := {}
+	for v in nodes:
+		if is_instance_valid(v) and v.alive:
+			out[v] = v.global_position
+	return out
 
 
 func fire_region(ri: int) -> void:
@@ -353,17 +454,6 @@ func _spawn_dormant_group(gi: int, _arrival: int) -> void:
 	_spawn_group(gi)
 
 
-func _region_occupied(d: Dictionary) -> bool:
-	var who := String(d.get("type_name", "player"))
-	for v in get_tree().get_nodes_in_group("vehicles"):
-		if not v.alive or not _region_counts(who, v):
-			continue
-		for a in _arr(d.get("areas")):
-			if _in_area(v.global_position, a):
-				return true
-	return false
-
-
 ## Which vehicles a region type reacts to (ES1 region type names, tools/mission.py).
 static func _region_counts(who: String, v: Node) -> bool:
 	match who:
@@ -376,32 +466,25 @@ static func _region_counts(who: String, v: Node) -> bool:
 	return true
 
 
-func _in_area(p: Vector3, a: Dictionary) -> bool:
-	if a.get("shape") == "circle":
-		var c := to_godot(a.center)
-		var r := maxf(float(a.get("radius", 0)) * Assets.UNIT, MIN_REGION_RADIUS)
-		return Vector2(p.x - c.x, p.z - c.z).length() <= r
-	if a.has("corner1") and a.has("corner2"):
-		var lo := to_godot(a.corner1)
-		var hi := to_godot(a.corner2)
-		return p.x >= minf(lo.x, hi.x) and p.x <= maxf(lo.x, hi.x) and p.z >= minf(lo.z, hi.z) and p.z <= maxf(lo.z, hi.z)
-	return false
-
-
 ## Mission variable update: codes 2 (+=1), 1 (=0), 13..16 (=1..4), or decoded strings "var+=1"/"var=N".
 func _var_op(v: int, op) -> void:
-	if v < 0 or v >= mission_vars.size():
+	var change := _decode_var_op(op)
+	if change.is_empty():
 		return
+	kit.vars.values = mission_vars
+	if kit.vars.apply_op(change[0], v, change[1]):
+		mission_vars = kit.vars.values
+
+
+## [opcode of VAR_OPS, operand] of a change, or [] for one the original does not know.
+static func _decode_var_op(op) -> Array:
 	if op is String:
-		if op == "var+=1":
-			mission_vars[v] += 1
-		elif op.begins_with("var="):
-			mission_vars[v] = int(op.substr(4))
-		return
-	match int(op):
-		2: mission_vars[v] += 1
-		1: mission_vars[v] = 0
-		13, 14, 15, 16: mission_vars[v] = int(op) - 12
+		if op == VAR_OP_INCREMENT:
+			return [2, 1]
+		if op.begins_with(VAR_OP_SET_PREFIX):
+			return [1, int(op.substr(VAR_OP_SET_PREFIX.length()))]
+		return []
+	return [int(op), VAR_OPERANDS[int(op)]] if VAR_OPS.has(int(op)) else []
 
 
 func _update_nav() -> void:
@@ -409,12 +492,11 @@ func _update_nav() -> void:
 		return
 	for v in get_tree().get_nodes_in_group("vehicles"):
 		if _is_human_player(v) and v.alive:
-			var p: Vector3 = v.global_position
-			var n := nav_points[nav_index]
-			if Vector2(p.x - n.x, p.z - n.z).length() < NAV_REACH_RADIUS:
-				battle.fx("message", ["Nav point %d reached." % nav_index, 4.0], true)
+			if AreaShape.make_circle(nav_points[nav_index], NAV_REACH_RADIUS).is_inside(v.global_position):
+				var message := MissionMessage.make_message(NAV_REACHED_TEXT % nav_index, NAV_MESSAGE_SECONDS, MissionMessage.CHANNEL_INFO)
+				get_announcer().apply_say(message)
 				nav_index += 1
-				battle.fx("nav_index", [nav_index], true)   # co-op: the clients' compass and objectives follow
+				get_sink().apply_nav(str(nav_index), true)
 				return
 
 
@@ -422,10 +504,11 @@ static func _is_human_player(v: Node) -> bool:
 	return v.team == 0 and not v.has_meta("ai")
 
 
-## The first living human player vehicle, or null.
+## The first living human player vehicle, or null. The pilot's soldier does not count: Earthsiege has no pilot on
+## foot, a destroyed Herc is a killed pilot (DBSIM 0xf4e8, status 3).
 func _living_player() -> Node3D:
 	for v in get_tree().get_nodes_in_group("vehicles"):
-		if _is_human_player(v) and v.alive:
+		if _is_human_player(v) and v.alive and not v is Infantry:
 			return v
 	return null
 
@@ -519,19 +602,33 @@ func _on_structure_destroyed(_s: Structure, _killer: Node, i: int) -> void:
 		battle.fx("structure_down", [i], true)
 
 
-func _check_end() -> void:
-	if _living_player() == null:
-		end_mission(false, _failure_code(DAMAGE_HERC_LOST), "Your Herc has been destroyed.")
-		return
-	if make_player_out_seconds() >= LEFT_MAP_GRACE:
-		end_mission(false, CODE_LEFT_MAP, "You have left the mission area.")
-		return
-	if win_rules.guarded_target_lost():
-		end_mission(false, _failure_code(_player_damage_level()), "The unit you were guarding has been lost.")
-		return
-	if win_rules.objective_met() and win_rules.players_safe():
-		var code := CODE_SUCCESS_BASE + _player_damage_level()
-		end_mission(not _is_failure_code(code), code, "Mission objectives complete.")
+## The end check, in the order of the original: the Herc lost, the map left, the guarded unit lost, then the win.
+func _check_end(dt := RULES_INTERVAL) -> void:
+	var verdict := FailRule.make_first_verdict(kit.fail_rules, win_rules.world, dt)
+	kit.ender.apply_verdict(verdict if verdict != null else _make_win_verdict())
+	kit.ender.apply_tick(dt)
+
+
+## The losses of the end check, first to last. The codes follow the player's damage when the original's do.
+func _make_fail_rules() -> Array:
+	var herc_lost := PlayerKilledRule.new(0, TEXT_HERC_LOST)
+	herc_lost.code_source = func() -> int: return _failure_code(DAMAGE_HERC_LOST)
+	var rules: Array = [herc_lost, LeftAreaRule.new(CODE_LEFT_MAP, TEXT_LEFT_AREA, LEFT_MAP_GRACE)]
+	if win_rules.is_squad_guarding():
+		var guarded_lost := ProtectedLostRule.new(0, TEXT_GUARDED_LOST, [ES1MissionWorld.ORDER_TARGET] as Array[String])
+		guarded_lost.code_source = func() -> int: return _failure_code(_player_damage_level())
+		rules.append(guarded_lost)
+	return rules
+
+
+## The win: the mission type's objective is met and the players are safe; the debriefing code follows the damage.
+func _make_win_verdict() -> MissionVerdict:
+	if not (win_rules.objective_met() and win_rules.players_safe()):
+		return null
+	var code := CODE_SUCCESS_BASE + _player_damage_level()
+	if _is_failure_code(code):
+		return MissionVerdict.make_loss(code, TEXT_WON)
+	return MissionVerdict.make_win(code, TEXT_WON)
 
 
 ## The campaign counts a mission as failed when its debriefing code exceeds the mission type's threshold

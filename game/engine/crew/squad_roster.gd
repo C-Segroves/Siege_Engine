@@ -82,6 +82,48 @@ static func apply_toggle_wingman(g: Garage, i: int, limit: int) -> void:
 	g.squad_auto = false
 
 
+## The wingman slots as Herc indices, -1 for a free slot: [2, -1, 5] (always `limit` entries).
+static func make_slots(g: Garage, limit: int) -> Array:
+	var out: Array = []
+	if g.squad_auto:
+		out = make_squad(g, limit)
+	else:
+		for k in mini(limit, g.squad.size()):
+			var i := g.find_uid(int(g.squad[k]))
+			out.append(i if i >= 0 and is_eligible(g, i) else -1)
+	while out.size() < limit:
+		out.append(-1)
+	return out
+
+
+## Puts Herc `herc_i` (-1 = nobody) into wingman slot `slot`; it leaves any other slot, and a Herc taken by the
+## slot's old occupant frees it. The player's choice counts from now on.
+static func apply_slot(g: Garage, slot: int, limit: int, herc_i: int) -> void:
+	var slots := make_slots(g, limit)
+	if slot < 0 or slot >= slots.size():
+		return
+	if herc_i >= 0 and not is_eligible(g, herc_i):
+		return
+	var at := slots.find(herc_i)
+	if herc_i >= 0 and at >= 0:
+		slots[at] = -1
+	slots[slot] = herc_i
+	var uids: Array = []
+	for i in slots:
+		uids.append(int(g.vehicles[i].uid) if int(i) >= 0 else -1)
+	g.squad = uids
+	g.squad_auto = false
+
+
+## Hercs a wingman slot can take: eligible ones (built, flown by a living pilot, not the player's own).
+static func make_slot_candidates(g: Garage) -> Array:
+	var out: Array = []
+	for i in g.vehicles.size():
+		if is_eligible(g, i):
+			out.append(i)
+	return out
+
+
 ## Living pilots without a Herc take the Hercs nobody flies (not the player's own), in roster order:
 ## the start of a campaign and replacements after losses.
 static func apply_auto_assign(g: Garage) -> void:

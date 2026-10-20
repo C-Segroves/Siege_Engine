@@ -40,6 +40,7 @@ func _ready() -> void:
 	_check_torso_control()
 	await _check_ai_line_of_sight()
 	_check_team_marking()
+	_check_radar_modes()
 	await _check_radars()
 	_check_compasses()
 	await _check_spider()
@@ -204,6 +205,29 @@ func _ai_fires(walled: bool) -> bool:
 
 
 # ------------------------------------------------------------------ A5 team marking
+
+func _check_radar_modes() -> void:
+	var me := _spawn(VIEWER_ID, Vector3.ZERO, 0)
+	var foe := _spawn(ENEMY_ID, Vector3(0, 0, -300), 1)
+	_expect(RadarMode.is_emitting(me) and RadarMode.make_label(me) == "ACT", "radar starts active (ACT)")
+	_expect(not RadarMode.toggle(me) and RadarMode.make_label(me) == "PASS", "toggle goes passive (PASS)")
+	_expect(RadarMode.can_see(me, foe, 300.0, 1000.0), "passive: a silent... emitting enemy shows")
+	RadarMode.apply_emitting(foe, false)
+	_expect(RadarMode.can_see(me, foe, 300.0, 1000.0) and not RadarMode.can_see(me, foe, 300.0, 700.0),
+		"passive: a silent enemy shows only inside a third of the range")
+	_expect(RadarMode.make_signature(me) == 0.5, "a passive unit is harder for the AI to detect")
+	_expect(RadarMode.make_signature(foe) == 0.5, "silent enemy signature halves")
+	_expect(CockpitHdd.make_face_frame(1, false, 0.0, 24) == 0 and CockpitHdd.make_face_frame(1, false, 0.5, 24) in [0, 1],
+		"idle comm face: frame 0 (blink 1)")
+	var seen := {}
+	for k in 60:
+		var f := CockpitHdd.make_face_frame(1, true, float(k) / CockpitHdd.TALK_FPS, 24)
+		_expect(f >= CockpitHdd.TALK_FIRST and f < 24, "talking face frame in range")
+		seen[f] = true
+	_expect(seen.size() >= 6, "a talking comm face animates through many frames (%d)" % seen.size())
+	me.free()
+	foe.free()
+
 
 func _check_team_marking() -> void:
 	var me := _spawn(VIEWER_ID, Vector3.ZERO, 0)

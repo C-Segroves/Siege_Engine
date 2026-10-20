@@ -15,6 +15,8 @@ const SNAP_DAMAGE := 14
 ## Index 15 is a soldier's extra state (Infantry.SNAP_INFANTRY; null for vehicles). Then the pilot's missile
 ## steering stick (MissileSteering.stick, Vector2): other peers' copies of a steered EO missile follow it.
 const SNAP_MISSILE_STEER := 16
+## Then whether the unit is cloaked in effect (CloakState.make_flag).
+const SNAP_CLOAK := 17
 ## Interval assumed until the second snapshot arrives.
 const DEFAULT_INTERVAL := 0.05
 const MIN_INTERVAL := 0.001

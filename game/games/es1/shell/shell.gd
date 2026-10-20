@@ -52,6 +52,7 @@ const CANCEL_ID := 99
 const MULTIPLAYER_CMD := 9001
 const LAUNCHER_CMD := 9002
 const REPLAY_CMD := 9003               # remake: REPLAY on the killed-in-action warning (MENU1250)
+const CLASSIC_CMD := 9004              # remake: CLASSIC on/off toggle on the career registration (MENU1210)
 const LAUNCHER_SCENE := "res://launcher.tscn"
 ## SM_<type> single missions on the disc (ZONES/MSN), grouped like the SINGLE MISSION list:
 ## [label, file code, commander briefing line].
@@ -91,6 +92,7 @@ var subtitle := ""
 var list_providers := {}                # list id -> Callable(menu, ctl) -> Array
 var gadget_handlers := {}               # gadget id -> Callable(menu, ctl, img)
 var briefing_text := ""
+var pending_classic := false           # the registration menu CLASSIC toggle (stored with the new career)
 var debrief_text := ""
 var music: AudioStreamPlayer
 var voice: AudioStreamPlayer

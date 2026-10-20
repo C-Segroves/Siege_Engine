@@ -113,7 +113,7 @@ tables unused.
 | Game | Briefing | Debrief / killed | Distance from the original |
 |---|---|---|---|
 | ES1 shell (`games/es1/shell`) | Commander text + voice, lip-synced TTM talking head (`shell_sequences.gd:125`) | Officer talking head, death / won / lost scenes | Close to shell.md; career briefing line `slot % 9` vs "mission type" comment (`shell_missions.gd:73`), commander/officer index clamp 0..3 unverified |
-| ES1 launcher | Plain text (`engine/ui/screens/briefing_screen.gd`) | Text + debriefing by code | No talking heads |
+| ES1 launcher | Plain text (the campaign lobby (`engine/ui/screens/lobby_screen.gd`)) | Text + debriefing by code | No talking heads |
 | ES2 | Plain text (`es2_mission_resolver.gd:217`) | Debrief re-compiled with final vars (es2.md:595) | None of the 86 AVI clips play (es2_campaign_flow.md:28); `intel` resolved but not shown |
 | Starsiege | short + long brief (`starsiege/campaign_provider.gd:42`) | Runtime `debrief()`; failed missions replay | `texts.debriefings` unused; .smk movies not played |
 | Tribes | `training_screen.gd` | MatchResults only | Not a saga provider |

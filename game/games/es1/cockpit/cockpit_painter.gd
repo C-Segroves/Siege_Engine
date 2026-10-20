@@ -46,7 +46,7 @@ func skin_color(section: String, key: String, fallback: int) -> Color:
 
 
 func vehicles() -> Array:
-	return herc.get_tree().get_nodes_in_group("vehicles") if herc and herc.is_inside_tree() else []
+	return RadarContacts.make_units(herc.get_tree()) if herc and herc.is_inside_tree() else []
 
 
 func nav_points() -> Array:

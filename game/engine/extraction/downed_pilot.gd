@@ -8,7 +8,7 @@ extends Node
 ## Radians of body turn per pixel of mouse motion (a crawl turns slowly whatever the look sensitivity).
 const MOUSE_TURN := 0.003
 const BLOCKED_ACTIONS := ["interact", "vehicle_enter_exit", "seat_next", "grenade_throw", "mine_drop", "pack_use",
-	"repair_kit_use", "weapon_next", "inventory_toggle", "exfil_call"]
+	"repair_kit_use", "weapon_next", "scope_zoom", "scope_level", "inventory_toggle", "exfil_call"]
 
 var battle: Battle
 var soldier: Infantry

@@ -107,8 +107,8 @@ func _check_data() -> void:
 	var light := InfantryCatalog.armor("tribes2:LIGHT")
 	_expect(int(light.hand_items.get("tribes2:GRENADE", 0)) == 5 and (light.default_items as Dictionary).has("tribes2:REPAIR_KIT"),
 		"T2 scout: 5 grenades, spawn kit has a repair kit")
-	_expect(InfantryGear.packs_of(light).has("tribes2:SHIELD_PACK") and not InfantryGear.packs_of(light).has("tribes2:CLOAKING_PACK"),
-		"offered packs: the modelled ones (shield yes, cloak recorded only)")
+	_expect(InfantryGear.packs_of(light).has("tribes2:SHIELD_PACK") and InfantryGear.packs_of(light).has("tribes2:CLOAKING_PACK"),
+		"offered packs: the modelled ones (shield and cloak; the cloak's rules are tests/cloak_check)")
 	_expect(is_equal_approx(float(light.fall_min_speed), 45.0) and is_equal_approx(float(light.fall_damage_per_mps), 12.0),
 		"T2 fall: minImpactSpeed 45, speedDamageScale 0.004 x 3000")
 	_expect(is_equal_approx(float(InfantryCatalog.armor("tribes:LIGHT").fall_min_speed), 25.0), "T1 fall: minDamageSpeed 25")

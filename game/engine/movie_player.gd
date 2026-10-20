@@ -6,6 +6,8 @@ extends Control
 signal finished
 
 var player: VideoStreamPlayer
+var box: MediaBox          # set: embedded in this media area instead of covering the screen
+var _aspect_set := false
 
 
 static func play(parent: Node, rel_path: String) -> MoviePlayer:
@@ -28,8 +30,22 @@ static func play_all(parent: Node, files: Array) -> void:
 		await play_file(parent, str(f)).finished
 
 
+## Plays `files` one after another inside `box` (a MediaBox): fitted, letterboxed, clipped; awaitable.
+static func play_all_in(box: MediaBox, files: Array) -> void:
+	for f in files:
+		if not is_instance_valid(box):
+			return
+		var m := MoviePlayer.new()
+		m.box = box
+		box.add_child(m)
+		m._start(str(f))
+		await m.finished
+
+
 func _start(abs_path: String) -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
+	if box:
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var bg := ColorRect.new()
 	bg.color = Color.BLACK
 	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -42,10 +58,22 @@ func _start(abs_path: String) -> void:
 	vs.file = abs_path
 	player.stream = vs
 	player.expand = true
-	player.set_anchors_preset(Control.PRESET_FULL_RECT)
-	add_child(player)
+	if box:
+		add_child(player)
+		box.fit(player, 1.6)
+	else:
+		player.set_anchors_preset(Control.PRESET_FULL_RECT)
+		add_child(player)
 	player.finished.connect(_done)
 	player.play()
+
+
+func _process(_delta: float) -> void:
+	if box and player and not _aspect_set:
+		var t := player.get_video_texture()
+		if t and t.get_height() > 0:
+			_aspect_set = true
+			box.fit(player, float(t.get_width()) / t.get_height())
 
 
 func _input(event: InputEvent) -> void:

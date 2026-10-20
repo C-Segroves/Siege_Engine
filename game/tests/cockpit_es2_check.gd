@@ -32,6 +32,7 @@ const SIDE_CAMERA_SIZE := 0.36
 var _layer: CanvasLayer
 var _cam: Camera3D
 var _failures := 0
+var _headless := DisplayServer.get_name() == "headless"
 
 
 func _ready() -> void:
@@ -53,6 +54,11 @@ func _ready() -> void:
 	if es1_reference != "":
 		await _check_es1_unchanged(es1_reference)
 	_check_resolution()
+	if _headless:   # the dummy renderer has no viewport pixels to read: the pixel checks need a window
+		print("  (headless: the rendered-pixel checks and the screenshots are skipped)")
+		print("cockpit_es2_check: %s (%d failures)" % ["OK" if _failures == 0 else "FAILED", _failures])
+		get_tree().quit(1 if _failures > 0 else 0)
+		return
 	await _check_states()
 	await _check_side_views()
 	if shots != "":
@@ -81,7 +87,10 @@ func _spawn(id: String, at: Vector3) -> Herc:
 
 func _settle() -> void:
 	for i in SETTLE_FRAMES:
-		await RenderingServer.frame_post_draw
+		if _headless:
+			await get_tree().process_frame   # frame_post_draw never fires without a window
+		else:
+			await RenderingServer.frame_post_draw
 
 
 ## A cockpit frozen in a fixed state (no _process: time, clock and engine flicker stay put).

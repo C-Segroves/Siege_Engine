@@ -64,6 +64,7 @@ var _settings_t := 0.0
 func _init(p_log: ChatLog) -> void:
 	chat_log = p_log
 	name = "ChatPanel"
+	ServerProfile.apply_client_only(self)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	focus_mode = Control.FOCUS_NONE
 

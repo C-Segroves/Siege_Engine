@@ -1,0 +1,5 @@
+# Only game/ is copied into the image; keep the (huge, copyrighted) rest out of the build context.
+*
+!game/
+game/.godot/
+**/__pycache__

@@ -24,13 +24,14 @@ static func build(parent: Node3D, e: Dictionary, dir := "") -> void:
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = make_color(e.get("horizon_color", e.get("sky_color", DEFAULT_SKY)))
+	var draws := not ServerProfile.is_collision_only()
 	var faces = e.get("skybox_faces")
-	if faces is Dictionary and dir != "":
+	if draws and faces is Dictionary and dir != "":
 		var sky := _skybox(faces, dir)
 		if sky:
 			env.sky = sky
 			env.background_mode = Environment.BG_SKY
-	if e.get("darkstar_sky") is Dictionary:
+	if draws and e.get("darkstar_sky") is Dictionary:
 		_apply_darkstar_sky(env, e, dir)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = make_color(e.get("ambient", DEFAULT_AMBIENT))
@@ -45,7 +46,8 @@ static func build(parent: Node3D, e: Dictionary, dir := "") -> void:
 	env_node.environment = env
 	parent.add_child(env_node)
 	_add_sun(parent, e)
-	_add_weather(parent, e)
+	if draws:
+		_add_weather(parent, e)
 
 
 ## Darkstar panel sky; it draws its own haze toward the fog colour, so depth fog leaves it alone.
@@ -95,6 +97,7 @@ static func _add_sun(parent: Node3D, e: Dictionary) -> void:
 	sun.shadow_enabled = true
 	sun.directional_shadow_max_distance = SUN_SHADOW_DISTANCE
 	SceneLighting.apply_sun_direction(sdir)
+	SceneLighting.apply_scene_light(sun.light_color, make_color(e.get("ambient", DEFAULT_AMBIENT)), true)
 
 
 ## Map colour [r, g, b]: 0..255 unless every component is a fraction in 0..1 (e.g. Tribes 2);

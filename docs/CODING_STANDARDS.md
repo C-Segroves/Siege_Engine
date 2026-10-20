@@ -73,6 +73,13 @@ touches cleaner than it found it.
 | `ui_click` | mouse left | — | click the control under the cursor (position-based widgets: original shell, cockpit buttons) |
 | `menu_back` | Esc | B | leave the current screen |
 | `menu_pause` | Esc (in battle) | Start | pause / in-game menu (frees the mouse) |
+| `menu_secondary` | mouse right | X | menus: remove / alternate action on the focused item (rename a slot tab). Handlers ask with `exact_match` (`UiActions.is_pressed`) |
+| `menu_info` | F1 | Y | menus: pin / unpin the detail tooltip (`ItemTooltip`) of the focused item |
+| `menu_tab_prev` / `menu_tab_next` | Ctrl+PgUp / Ctrl+PgDn | LB / RB | menus: slot tabs, pane tabs, carousel cards, store categories |
+| `menu_zone_prev` / `menu_zone_next` | Shift+Tab / Tab | LT / RT | menus: jump between the zones of a screen (Tab and Shift+Tab are two controls: bindings keep their modifiers) |
+| `menu_switch_kind` | V | View/Back | menus: infantry <-> vehicle |
+| `menu_primary` | Ctrl+Enter | Start | menus: press the footer / sheet primary action |
+| `callin_menu` | L | LB + RB together (`ChordAction`) | extraction raid, on foot: open the call-in menu (`CallinMenu`) |
 | `menu_scroll_up` / `menu_scroll_down` | wheel up / down | — | scroll a list (original shell) |
 | `throttle_up` / `throttle_down` | W / S | right trigger / left trigger | Herc throttle (analog on the triggers); on foot run forward / back |
 | `throttle_stop` | X | left stick click | all stop |
@@ -100,11 +107,12 @@ touches cleaner than it found it.
 | `missile_cam_toggle` | M | — | battle: show / hide the missile-cam window (Earthsiege 1/2 player missiles) |
 | `cockpit_mode_1`…`cockpit_mode_6` | F1–F6 (original) | — | cockpit display modes; in Starsiege F1–F3 call up squadmate 1–3 and F4 the squad, then 1–7 order (`SquadKeys`, the original keys) |
 | `cockpit_mode_next` | — | d-pad right | next cockpit display mode |
+| `cloak_toggle` | Ctrl+X (Starsiege IDACTION_CAMOUFLAGE; plain X stays `throttle_stop`) | — | battle: switch a vehicle's cloak on / off (`CloakState`; a soldier's cloaking pack is `pack_use`) |
 | `hdd_page_1` / `hdd_page_2` | F7 / F8 (original) | — | damage display pages |
 | `look_up` / `look_down` | PgUp / PgDn, keypad 8 / 2 | d-pad up / down | cockpit view tilt |
 | `look_left` / `look_right` | keypad 4 / 6 (original F9 / F10; F10 is `debug_toggle`) | — | Earthsiege 2 cockpit side views (toggle; again the other one, `look_up` / `look_down` or an MFD page key: front view) |
 | `orbit` (held + drag) | mouse left / right | — | hangar and shape viewer |
-| `orbit_left` / `orbit_right` / `orbit_up` / `orbit_down` | — | right stick | hangar and shape viewer |
+| `orbit_left` / `orbit_right` / `orbit_up` / `orbit_down` | Q / E / R / F | right stick | hangar, shape viewer and the menus (the lobby carousel stage) |
 | `zoom_in` / `zoom_out` | wheel up / down | right / left trigger | hangar and shape viewer |
 | `viewer_next_lod` / `viewer_cell_state` / `viewer_interpolation` | L / C / I | — | shape viewer tools |
 | `chat_all` / `chat_team` | Enter (keypad Enter) / Y | — | battle and on foot: type a chat line to everybody / to the team (`BattleChat`) |
@@ -120,7 +128,9 @@ touches cleaner than it found it.
 X interact (tap) - inventory (hold, raid), Y next weapon, LB jet, RB fire, LT / RT run back / forward, left stick
 strafe and run, right stick look, left stick click repair kit, right stick click level the view (tap) - call exfil
 (hold, raid), d-pad up grenade, down mine, right pack, left next seat, View/Back view toggle, Start pause, Share
-quick chat. "Tap = the button's own action, hold = another" is `HeldAction` (`engine/input/held_action.gd`): the
+quick chat. "Two buttons together = one action" is `ChordAction` (`engine/input/chord_action.gd`, `SiegeInput.CHORD_ACTIONS`): no single pad
+button is free on foot, so `callin_menu` is the LB + RB chord (LB and RB still act on their own: jet, fire).
+"Tap = the button's own action, hold = another" is `HeldAction` (`engine/input/held_action.gd`): the
 tap still acts on press, so a hold only goes on a button whose tap is harmless when held (interact with nothing in
 reach, level the view). Saved bindings of version 1 are migrated (`SiegeInput.make_migrated_v1`: `loot_pickup` ->
 `interact`, the moved pad defaults replace the saved pad events of those actions).
@@ -143,9 +153,11 @@ binds one control twice inside a context: the options screen offers Swap / Clear
   hangar overlay), `engine/ui/siege_theme.gd`, which builds `siege_theme.tres`. It is set as the
   project's default theme. Screens never call `add_theme_*_override` for colours, fonts or sizes;
   they use the theme's named variations: `HeaderLabel`, `SectionLabel`, `DimLabel`,
-  `StatusLabel`, `PrimaryButton`, `DangerButton`, `TitleBar`, `FooterBar`, `ModalPanel` …
+  `StatusLabel`, `PrimaryButton`, `DangerButton`, `TitleBar`, `FooterBar`, `ModalPanel`, and the lobby / loadout kit
+  `CreditsLabel`, `CardPanel`, `CardPanelSelected`, `BadgeNotAllowed`, `BadgeAtRisk`, `BadgeLost`, `TabButton`,
+  `ReadyDot` / `ReadyDotOff`, `Tooltip` …
   (built-in types such as `Panel`/`PanelContainer` can't be variations; the theme styles them
-  directly as cards). Constants live under the theme type `Siege`.
+  directly as cards). Constants live under the theme type `Siege` (including `narrow_width` = 900, the content width below which screens use their narrow layout).
 - **Shared widgets** live in `engine/ui/`:
   - `ScreenFrame`: title bar, content area and footer with Back / primary action;
   - `OptionRow`: label plus control;
@@ -163,8 +175,13 @@ binds one control twice inside a context: the options screen offers Swap / Clear
   - `MatchResults`: the results screen after every match (winner, pilots' kills / deaths / score,
     time, salvage; Continue, Rematch);
   - `ItemRow`: one item in a list (name, dim detail line, action buttons): the raid inventory, the stash, the shop.
+  - `CreditsBadge`: the wallet readout "CR 1,240" (plain number or a Callable; never focusable);
+  - `ItemTooltip`: one detail plate per screen, `watch(control, provider)`: shows on hover, on focus after 0.4 s, pinned by `menu_info`;
+  - `ModalSheet`: a full-screen modal (title row, body, Back left / primary bottom-right); `menu_back` closes, `menu_primary` presses
+    the primary action, focus is trapped inside and returns on close; used by Operator Setup and the lobby's dialogs;
+  - `OptionRow.make_readonly(label, text)`: a setting only the host may change, shown as text (a Label, not a control);
   - `NameRow`: the player's name (saved by `PlayerProfile`, used in the lobby, chat and nameplates);
-  - `PilotPicker`: the player's soldier - infantry game, starting armour, body (Tribes 2 Bioderm), skin;
+  - `OperatorSetup` (`engine/ui/operator/`): the one loadout screen (soldier, Herc, store, look) of the lobby and Options;
   - `TeamList`: the teams of a team match (colour, name, pilots and bots; pilots pick, the host assigns);
   - `ObjectivesPanel`: the translucent in-battle objectives side panel (`MissionObjectives` gathers the lines);
   - `CatalogBridge`: the front end's one door to other catalogs (infantry choices, game modes, map teams,
@@ -178,3 +195,21 @@ binds one control twice inside a context: the options screen offers Swap / Clear
   - The primary action is always bottom-right.
 - **The original Earthsiege shell** keeps its original look; only its input goes through actions.
 - **Text sizes and spacing** come from the theme constants (`margin`, `gap`, `font_size_*`).
+
+## 4. Game mechanics: one engine, original feel per game
+
+Every game runs on the same mechanics code. Rendering was unified first (`docs/RENDER_UNIFICATION.md`);
+missions and the other mechanics follow the same rule (`docs/MECHANICS_UNIFICATION.md`).
+
+- **One set of building blocks:** timers, waypoint and area checks, objectives (destroy, protect, reach,
+  datalink/recon, survive, escort), spawn waves, fail rules, messages and voice prompts, mission end, damage,
+  sensors, targeting and AI orders live once, in `engine/`.
+- **Games are data adapters:** a game's importer or `games/<pack>/` code translates the original data
+  (ELF scripts, UnrealScript actors, ES1 mission files, Torque scripts …) into those shared blocks. It never
+  adds a separate runtime with its own timers, triggers or objective logic.
+- **Original feel stays in data:** timings, messages, voice lines, ranges and rules come from the original
+  game (cited as in section 1), so each game plays like the original while the code is shared.
+- **Extend, don't fork:** when a game needs behaviour the shared blocks lack, add it to the shared block
+  (configurable through data) so every game can use it.
+- **Clean Code applies throughout** (section 1, Robert C. Martin): small single-purpose classes, the
+  `build_`/`load_`/`make_`/`apply_` naming, no duplication across games, and a test with every block.

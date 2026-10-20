@@ -14,7 +14,7 @@ Status markers: **[MVP]** built and tested, **[later]** designed, not built.
 
 ## 1. The loop
 
-1. **Prepare** (stash screen, `launcher -> Extraction raid`, or the LAN lobby's "Stash, shop and loadout"):
+1. **Prepare** (the standard lobby, solo from `launcher -> Extraction raid (solo)` or hosted over LAN, and its Operator Setup with the stash tab; docs/design/lobby_loadout_economy.md sections 5 and 6):
    pick an armour (any installed Tribes / Tribes 2 armour), move items from the stash into the raid kit (limited by
    the armour's slots and kilograms), buy and sell. **[MVP]**
 2. **Drop in**: the raid starts; the kit leaves the profile (it is now at risk). Players ride an AI transport to the
@@ -84,7 +84,7 @@ host sends the table in the raid setup. AI target searches (AIPilot, FlyerAI, In
 `TeamRelations.is_hostile`; a neutral who is shot at still answers fire (AIPilot). **[MVP]**
 
 Presets (the raid host picks one: config / lobby setting `extraction_relations`, `ExtractionFactions.CONFIG_KEY`;
-`make_preset_list()` -> [{id, label}] for the host screen's "Faction relations" row; default `story`):
+`make_preset_list()` -> [{id, label}] for the lobby's "Faction relations" row; default `story`):
 
 | preset | human pairs |
 |---|---|
@@ -144,7 +144,7 @@ the HUD; Bioderm animations once the Tribes 2 .dsq sequences are decoded (the ma
   (at most one inventory slot of it, e.g. one weapon or one stack of rounds) or the worn paid armour. It travels in the
   roster kit (`insured: [id, units]`); on death the host splits what he carried (`ExtractionLoadout.make_insured_split`):
   the insured units he still carries go home to his stash, everything else goes in the bag. Dropped or sold during the
-  raid = not carried = not kept. The stash screen marks it (Insure / Uninsure per kit row, "Insured slot:" line), the
+  raid = not carried = not kept. Operator Setup's stash tab marks it (Insure / Uninsure per kit row, "Insured slot:" line), the
   inventory panel shows `[INSURED]` on it, the KIA banner names what was kept. **[MVP]**
 - **Death**: everything carried (inventory + loaded rounds + kit), the worn paid armour and the money go into a bag
   where the soldier fell, except the insured stack. Bots drop their weapons, rounds, kit and a little money;
@@ -170,7 +170,7 @@ the HUD; Bioderm animations once the Tribes 2 .dsq sequences are decoded (the ma
 
 ## 5. Economy, shop and vehicle call-ins
 
-- **Shop** (`ExtractionShop`, stash screen): buys weapons, ammunition (by the load), gear, backpacks and call-ins;
+- **Shop** (`ExtractionShop`, the Operator Setup store): buys weapons, ammunition (by the load), gear, backpacks and call-ins;
   everything sells back for `sell_fraction` (50 %). New profiles start with `start_money` (3000) and a starter kit
   (the light armour's spawn weapons, two loads, grenades, a repair kit). **[MVP]**
 - **Vehicle call-ins**: a bought token is an item; carried into the raid, the inventory panel's **Use** puts that
@@ -190,7 +190,7 @@ the HUD; Bioderm animations once the Tribes 2 .dsq sequences are decoded (the ma
   HUD, the ModalPanel is centred, rows wrap their names in a column clear of the buttons (`InventoryPanel.make_row`).
 - **Equip** (X4): the inventory panel's Equip takes a carried weapon in hand / wears a pack (moved to the front of the
   inventory, which the loadout reads in order); rows show `[IN HAND]`, `[READY]`, `[WORN]`, `[INSURED]`.
-- **Raid tasks** (X8; rules `tasks`, `RaidTaskBoard`, `RaidTasks`): the stash screen's board offers `board_size` tasks
+- **Raid tasks** (X8; rules `tasks`, `RaidTaskBoard`, `RaidTasks`): the lobby's task list offers `board_size` tasks
   (kill N of a faction's soldiers / vehicles, blow up the generator of its base, steal its flag), a pilot takes up to
   `max_picked`; reward = `reward_per` x count x the faction kind's `difficulty`. In the raid the task factions are
   placed first, the host counts the player's kills (on foot or from his vehicle), binds the generator nearest the
@@ -207,7 +207,7 @@ the HUD; Bioderm animations once the Tribes 2 .dsq sequences are decoded (the ma
 
 `ExtractionProfile` per pilot name: `user://saves/profiles/extraction_<pilot>.json` written with
 `SaveGames.write_profile` (a folder the campaign save lists never read). Format version 2. Fields: money, stash
-(paid armours as `armor/` items), kit (armour + items + `insured` [id, units] or []), last kit (the stash screen's
+(paid armours as `armor/` items), kit (armour + items + `insured` [id, units] or []), last kit (Operator Setup's
 "Re-equip last raid's kit", with its insured slot), stats (raids, extracted, died, earned). **Migration** from version 1
 (armour was free to pick): the armour worn stays worn (owned); the last raid's armour, when another paid one, is put in
 the stash; the insured slot starts empty (`ExtractionProfile._apply_migration_v1`). The kit is spent
@@ -256,12 +256,12 @@ new `ItemRow`); lists are paged so the focus chain stays short for keyboard and 
 | `loot_container.gd`, `extraction_hud.gd`, `inventory_panel.gd` | world objects, HUD, panel |
 | `extraction_revive.gd`, `downed_state.gd`, `downed_pilot.gd`, `revive_hud.gd` | downed, bleed-out, revive |
 | `extraction_station.gd`, `station_shop_panel.gd`, `exit_safety.gd`, `raid_task_board.gd`, `raid_tasks.gd` | supply stations, safe drop, raid tasks |
-| `extraction_profile.gd`, `extraction_shop.gd`, `extraction_screen_text.gd`, `engine/ui/screens/extraction_screen.gd`, `engine/ui/item_row.gd` | between raids |
+| `extraction_profile.gd`, `extraction_shop.gd`, `extraction_screen_text.gd` (text helpers of Operator Setup), `engine/ui/item_row.gd` | between raids |
 
 Tests: `game/tests/extraction_check.tscn` (catalog, loot per pack set, inventory limits, shop, profile, relation
 presets and the bots' targets under each, owned armour / insured slot / v1 migration, a solo raid with drop-in / loot /
 panel / exfil / stash, a raid in paid armour ending in death (armour in the bag, insured weapon home), a raid with a
-teammate: downed, revived both ways, interrupted, bled out; the stash screen; `--shots` writes
+teammate: downed, revived both ways, interrupted, bled out; the solo raid lobby and its stash; `--shots` writes
 `renders/extraction_*.png` and `extraction2_*.png`; `-- --only-revive` skips the first two raids); LAN: `tests/e2e_driver.tscn` flows `extraction_host` / `extraction_join` with
 `-- --extraction-fast` (short timers, also config `extraction_fast`).
 

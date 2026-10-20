@@ -9,7 +9,7 @@ import re
 KEYWORDS = {
     'MISSION', 'MUSIC', 'ENVIRONMENT', 'SUN', 'FOG', 'SKY', 'CAMERA', 'BOUNDS', 'TERRAIN', 'EMPTYSQUARES',
     'BUILDING', 'SCENERY', 'GENERATOR', 'INVEN', 'TURRET', 'SENSOR', 'FORCEFIELD', 'FLIPFLOP', 'PROJECTOR',
-    'WAYPOINT', 'NEXUS', 'VEHICLEPAD', 'POWER', 'SWITCH', 'SPAWN', 'FLAG_HOME', 'PICKUP', 'WATERMARK',
+    'WAYPOINT', 'NEXUS', 'TAG', 'VEHICLEPAD', 'POWER', 'SWITCH', 'SPAWN', 'FLAG_HOME', 'PICKUP', 'WATERMARK',
 }
 _TOK = re.compile(r'"[^"]*"|[^\s"]+')
 _LISTS = {'GENERATOR': 'generators', 'INVEN': 'inventories', 'VEHICLEPAD': 'vehicle_pads', 'TURRET': 'turrets',
@@ -24,7 +24,7 @@ def _num(t):
 
 
 def tokenize(text):
-    text = re.sub(r'//[^\n]*', '', text.replace('\r', ''))
+    text = re.sub(r'//[^\n]*', '', text.replace('\r', '')).replace('#TAG', 'TAG')
     return _TOK.findall(text)
 
 
@@ -83,8 +83,12 @@ def parse(text):
          'generators': [], 'inventories': [], 'turrets': [], 'sensors': [], 'forcefields': [], 'flipflops': [],
          'projectors': [], 'waypoints': [], 'nexus': [], 'vehicle_pads': [], 'empty_squares': [],
          'power': [], 'switch': []}
+    pending = None
     for kw, v in _groups(tokenize(text)):
-        if kw == 'MISSION':
+        before = {k: len(lst) for k, lst in m.items() if isinstance(lst, list)}
+        if kw == 'TAG':
+            pending = _strip(v[0]) if v else None
+        elif kw == 'MISSION':
             m['name'] = _strip(v[0])
         elif kw in ('MUSIC', 'ENVIRONMENT'):
             m[kw.lower()] = v[0]
@@ -137,4 +141,9 @@ def parse(text):
         elif kw == 'PICKUP':
             f = _floats(v, 3)
             m['pickups'].append({'pos': f, 'kind': v[3]})
+        if kw != 'TAG' and pending is not None:
+            for k, lst in m.items():
+                if isinstance(lst, list) and len(lst) > before.get(k, 0) and isinstance(lst[-1], dict):
+                    lst[-1]['tag'] = pending
+            pending = None
     return m

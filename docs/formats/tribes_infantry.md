@@ -295,7 +295,8 @@ commented out.
 | Shield | `pack_use` on: energy absorbs hits (T1 shieldStrength 0.012, shrapnel and mortar x0.75; T2 energyPerDamagePoint), spends 9 /s | player.cs Player::onDamage, staticShape.cs checkShields |
 | Sensor jammer | `pack_use` on: bots don't see the wearer beyond the jam radius (T1 sensor suppression 20, T2 jamRadius 30); homing missiles turn off by the Earthsiege 2 ECM pod's angle (a stand-in) | item.cs, packs/sensorjammerpack.cs |
 | Ammo | extra rounds per weapon and hand item ($AmmoPackMax, AmmoPack max[]) | item.cs, packs/ammopack.cs |
-| not modelled | deployables (inventory / ammo stations, sensors, cameras, turrets, turret barrels), the T2 cloaking pack, the satchel charge | recorded with `"mapped": false` |
+| Cloak (T2, light armour only) | `pack_use` on: cloaked, 12 energy/s, a shot (above 20 energy) or a hit over 0.1 breaks it for 0.5 s; enemies lose him on radar, T-targeting, turrets and bot search unless within 8 m or a motion sensor sees him moving; wearing it jams sensors | packs/cloakingpack.cs, projectiles.cs, player.cs, ai.cs; docs/formats/cloaking.md |
+| not modelled | deployables (inventory / ammo stations, sensors, cameras, turrets, turret barrels), the satchel charge | recorded with `"mapped": false` |
 
 A toggled pack switches off when the energy falls below its minEnergy. Repairing other players or vehicles with the
 repair gun, the T2 "large pack" seat rule (hasLargePack: no deployable packs in sitting seats) and dropping or

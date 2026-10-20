@@ -60,12 +60,20 @@ def decode(data):
 
 
 def _triangles(w):
+    """Strips: the first two vertices of a strip carry the ADC flag (bit 15, they draw nothing); every later vertex
+    kicks a triangle whose winding alternates along the strip. Bit 14 of the word is NOT a winding hint here (the
+    words are floats whose low bits are noise: it fell on one triangle per strip and left the rest inconsistent,
+    which shaded and culled the faces at random: the "shredded" buildings)."""
     tris = []
-    for i in range(2, len(w)):
-        flags = int(w[i])
-        if flags & 0x8000:
+    last_adc = -1
+    for i in range(len(w)):
+        if int(w[i]) & 0x8000:
+            last_adc = i
             continue
-        tris.append((i - 1, i - 2, i) if flags & 0x4000 else (i - 2, i - 1, i))
+        k = i - last_adc + 1                    # position in the strip: 0 and 1 were the ADC vertices
+        if last_adc < 0 or k < 2:
+            continue
+        tris.append((i - 2, i - 1, i) if k % 2 == 0 else (i - 1, i - 2, i))
     return tris
 
 

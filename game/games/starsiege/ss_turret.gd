@@ -124,7 +124,8 @@ func keeps_target() -> bool:
 		return false
 	if not SSTeams.is_hostile(team, target.team) or target.has_meta("dormant"):
 		return false
-	return global_position.distance_to(target.global_position) <= engage_range + deactivate_buffer
+	var distance := global_position.distance_to(target.global_position)
+	return distance <= engage_range + deactivate_buffer and not CloakRules.is_hidden_from_sensor(target, {}, distance)
 
 
 ## The nearest live vehicle of a hostile team within range; null when there is none.

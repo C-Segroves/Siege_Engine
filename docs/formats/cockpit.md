@@ -658,3 +658,18 @@ Tests: `chat_check` (history / scrollback, filters, typing holds the controls an
 chat, team routing, flood guard and length cap, radio, settings persist), `cockpit_coverage_check` (the default
 panel is clear of every cockpit's windows), the LAN pair `e2e_driver --flow=lan_host` / `lan_join` (all and team
 lines both ways). Screenshots: `renders/chat_*.png` (`tests/chat_shots.tscn`).
+
+### 9.5b Radar pages, active / passive radar, comm faces (remake, 2026-10-16)
+* **ES1 F4 SCANNER** (class 0x35298, draw 0x355a4): a rotating scope, bearings rotated by the view yaw (heading up), RANGE
+  steps 30000 / 80000 / 120000; shows the page's ACT / PASS label (STRINGS0 group 25) and the RNG distance of the target.
+  **F3 NAV MAP** (0x36b18) is not a scope: it renders the terrain from straight above (camera 200000 up, view angles).
+  The remake draws the command map's top-down render under a north-up scope for F3 (`CockpitMfd._draw_nav_terrain`)
+  and titles F4 "SCANNER HDG UP".
+* **Active / passive:** per-unit "emitting" byte (unit + 0x90); toggled by 0x157f4 only on units with radar gear (+0x9d),
+  cue sound 0x1a / 0x1b; the EMCON wingman order and an AI target criterion ("emitting", 0x1c950) read it. Decoded: the
+  flag, its toggle, its label. NOT decoded (remake numbers, L): passive hides non-emitting hostiles beyond a third of
+  the range (`RadarMode.PASSIVE_NEAR_SHARE`), the AI sees passive units from half the sensor range
+  (`SIGNATURE_PASSIVE`), key `;` (`radar_mode_toggle`) and the click on the SCANNER's first option button.
+* **Comm faces:** PILOTn.DBA has 24 face frames (mouth / brow positions); the remake plays frames 2..23 at 10 fps in a
+  fixed pseudo-random order while the wingman's radio line plays (`CockpitHdd.make_face_frame`; the original's frame
+  order is not traced, L), frames 0 / 1 (blink) when idle.

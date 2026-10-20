@@ -143,6 +143,15 @@ func _check_squad() -> void:
 	_expect(str(SquadRoster.pilot_of(g, 2).name) == "RAMIREZ", "RAMIREZ assigned to Herc 3")
 	SquadRoster.apply_assign(g, 3, str(g.crew.pilots[5].id))
 	_expect(SquadRoster.pilot_of(g, 2).is_empty() and str(SquadRoster.pilot_of(g, 3).name) == "RAMIREZ", "a pilot flies one Herc")
+	var cands := SquadRoster.make_slot_candidates(g)
+	_expect(not cands.is_empty() and not cands.has(g.selected), "slot candidates: eligible Hercs, not the player's")
+	SquadRoster.apply_slot(g, 0, 3, int(cands[cands.size() - 1]))
+	_expect(SquadRoster.make_slots(g, 3).size() == 3 and SquadRoster.make_slots(g, 3)[0] == int(cands[cands.size() - 1]), "slot 0 takes the chosen Herc")
+	SquadRoster.apply_slot(g, 1, 3, int(cands[cands.size() - 1]))
+	_expect(SquadRoster.make_slots(g, 3)[0] == -1 and SquadRoster.make_slots(g, 3)[1] == int(cands[cands.size() - 1]), "a Herc sits in one slot")
+	var panel := CrewPanel.new(g, 3, "ME")
+	_expect(panel.get_child_count() > 6, "the crew panel builds its wingman slot rows")
+	panel.free()
 
 
 func _check_report() -> void:

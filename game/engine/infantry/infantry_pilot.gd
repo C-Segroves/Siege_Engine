@@ -10,6 +10,7 @@ extends PlayerPilot
 ##   fire_group_1                  fire the weapon in hand
 ##   weapon_next                   next carried weapon (Q, the original nextWeapon)
 ##   torso_center                  level the view
+##   scope_zoom / scope_level      the Laser Rifle's zoom (held) and its magnification (RifleScope)
 ## vehicle_enter_exit, seat_next and the jump out of a Tribes vehicle are handled by the OccupancyDirector;
 ## grenade_throw, mine_drop, pack_use and repair_kit_use by the InfantryGearDirector.
 
@@ -31,6 +32,8 @@ func _apply_command(event: InputEvent) -> void:
 		if raid is ExtractionDirector and (raid as ExtractionDirector).apply_next_weapon():
 			return   # a raid: Q cycles every usable weapon in the inventory
 		soldier.apply_weapon_slot(soldier.make_next_slot())
+	elif event.is_action_pressed("scope_level"):
+		soldier.scope.cycle_level()
 	else:
 		super._apply_command(event)
 
@@ -41,8 +44,9 @@ func _apply_drive(delta: float) -> void:
 	soldier.turn = SiegeInput.make_turn_axis()
 	soldier.torso_target = aim_yaw
 	soldier.pitch_target = aim_pitch
+	soldier.scope.apply_frame(soldier, _may_use_mouse_buttons() and Input.is_action_pressed("scope_zoom"), delta)
 	soldier.jump_input = Input.is_action_pressed("ascend")
-	soldier.jet_input = _may_use_mouse_buttons() and Input.is_action_pressed("jet")
+	soldier.jet_input = _may_use_mouse_buttons() and Input.is_action_pressed("jet") and not CallinDesignator.is_raised(soldier)
 
 
 ## Looks round: yaw is unlimited on foot (within the view arc in an armed passenger seat), pitch within the
@@ -50,6 +54,7 @@ func _apply_drive(delta: float) -> void:
 func _apply_aim(look: Vector2) -> void:
 	if look == Vector2.ZERO:
 		return
+	look *= soldier.scope.make_look_scale()
 	aim_yaw = soldier.make_allowed_yaw(wrapf(aim_yaw - look.x, -PI, PI))   # an armed seat's arc
 	aim_pitch = clampf(aim_pitch - look.y, soldier.pitch_min, soldier.pitch_max)
 
@@ -58,9 +63,10 @@ func _center_aim() -> void:
 	aim_pitch = 0.0
 
 
-## Only the weapon in hand fires (Tribes carries one weapon at a time).
+## Only the weapon in hand fires (Tribes carries one weapon at a time). Not while the Targeting Laser is up: fire designates
+## then (CallinDesignator).
 func _apply_triggers() -> void:
-	var pulled := _autofire or (_may_use_mouse_buttons() and Input.is_action_pressed("fire_group_1"))
+	var pulled := (_autofire or (_may_use_mouse_buttons() and Input.is_action_pressed("fire_group_1"))) and not CallinDesignator.is_raised(soldier)
 	var in_hand := soldier.current_weapon()
 	for w in soldier.weapons:
 		w.trigger = pulled and w == in_hand

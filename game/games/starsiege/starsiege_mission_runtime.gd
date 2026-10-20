@@ -14,7 +14,9 @@ extends MissionRuntimeBase
 ## Collaborators: SSObjectTree (ids, paths, groups), SSScenery (structures, markers),
 ## SSStartPositions (where vehicles start), SSUnitDirector (AI units and order()),
 ## SSSensors (triggers, scan), SSScriptEvents (engine -> script callbacks),
-## SSEngineFunctions (the script-callable engine functions).
+## SSEngineFunctions (the script-callable engine functions). The mission logic runs on the shared blocks
+## (engine/mission/): MissionTimers (schedule), AreaTrigger and ScanObjective (SSSensors), MissionAnnouncer (say),
+## ScriptObjective (the brief objectives), PlayerKilledRule and MissionEnder (the debriefing).
 ##
 ## Turrets fire (SSTurret), interiors are placed by the map (map.json "interiors"), camera paths and
 ## object cameras are shown by SSCutscene (host screen). Approximations: scan (onScan) = player keeping
@@ -28,11 +30,11 @@ const TEAM_TAGS := {"yellow": "IDSTR_TEAM_YELLOW", "red": "IDSTR_TEAM_RED", "blu
 const CHECK_INTERVAL := 0.25
 ## Seconds after the player's death before the failed debriefing.
 const PLAYER_DEATH_DEBRIEF_DELAY := 8.0
+const PLAYER_DEATH_TEXT := "Your vehicle has been destroyed."
+## How long the "Objective <status>: <text>" line stays up when a script changes an objective's status.
+const OBJECTIVE_MESSAGE_SECONDS := 5.0
 ## Darkstar player manager: player numbers are object ids starting here.
 const FIRST_PLAYER_NUM := 2049
-## Debriefing codes stored in mission var 0 (as the ES runtimes do).
-const CODE_SUCCESS := 1
-const CODE_FAILED := 6
 const STARTUP_SCRIPTS := ["scripts/missionStdLib.cs", "scripts/datFormation.cs"]
 
 ## Inventory calls of the last finished mission (read by the campaign provider).
@@ -46,12 +48,14 @@ var events: SSScriptEvents
 var starts: SSStartPositions
 var engine_functions: SSEngineFunctions
 var cutscene: SSCutscene
-var timers := []          # [time_left, code]
+var player_dead := false
 var inventory_changes := []
 var sim_time := 0.0
 var damage_factor := 3.0   # Starsiege damage -> ES scale (export_starsiege_gameplay.py)
 var debug := false
-var _player_dead_t := -1.0
+var _world: SSMissionWorld
+var _brief := {}           # script object id -> ScriptObjective (MissionBriefObjective)
+var _timer_seq := 0
 
 ## Views onto the object tree (kept for scripts and tests that read them directly).
 var objs: Dictionary:
@@ -66,6 +70,10 @@ var root_id: int:
 	get: return tree.root_id
 var formations: Dictionary:
 	get: return units.formations
+## The schedule() timers as [time_left, code] (tests read them).
+var timers: Array:
+	get: return kit.timers.make_ids().map(func(id) -> Array:
+		return [kit.timers.make_time_left(id), kit.timers.get_timer(id).payload])
 
 
 func _init() -> void:
@@ -74,6 +82,9 @@ func _init() -> void:
 	events = SSScriptEvents.new(self)
 	starts = SSStartPositions.new(self)
 	engine_functions = SSEngineFunctions.new(self)
+	_world = SSMissionWorld.new(self)
+	kit.announcer = MissionAnnouncer.new(SSMissionSink.new(self), MissionAnnouncer.Discipline.CUT)
+	kit.ender = MissionEnder.new(_end_from_ender, _is_voice_busy)
 
 
 static func load_mission(id: String) -> Dictionary:
@@ -134,6 +145,7 @@ func setup(p_battle: Node3D, mission: Dictionary, vars := PackedInt32Array()) ->
 	var w = Assets.load_json("gameplay/weapons_engine.json", PACK)
 	if w is Dictionary and w.has("damage_factor"):
 		damage_factor = float(w.damage_factor)
+	kit.fail_rules = [PlayerKilledRule.new(CODE_FAILED, make_debrief_message(false, PLAYER_DEATH_TEXT), PLAYER_DEATH_DEBRIEF_DELAY)]
 	tree.build(m)
 	SSScenery.build(self)
 	refresh_nav()
@@ -251,7 +263,7 @@ func raise_object_callback(id: int, kind: String, event: String, args: Array) ->
 
 ## The player's vehicle was destroyed: the failed debriefing follows PLAYER_DEATH_DEBRIEF_DELAY later.
 func note_player_death() -> void:
-	_player_dead_t = sim_time
+	player_dead = true
 
 
 ## Unit deaths are reported to the script through the Herc signals instead (see watch_unit).
@@ -275,8 +287,8 @@ func _physics_process(delta: float) -> void:
 	units.update()
 	sensors.check_triggers()
 	sensors.check_scan(dt)
-	if _player_dead_t >= 0.0 and sim_time - _player_dead_t > PLAYER_DEATH_DEBRIEF_DELAY:
-		debrief(false, "Your vehicle has been destroyed.")
+	kit.ender.apply_verdict(FailRule.make_first_verdict(kit.fail_rules, _world, dt))
+	kit.ender.apply_tick(dt)
 	flush_errors()
 
 
@@ -290,16 +302,16 @@ func is_mission_over() -> bool:
 	return _over
 
 
-## schedule() timers: runs the code of every timer that ran out (stops once the mission ended).
+## schedule(code, seconds): the script code runs once `seconds` of simulation time have passed.
+func schedule(code: String, seconds: float) -> void:
+	_timer_seq += 1
+	kit.timers.apply_add(_timer_seq, MissionTimer.make_timer(seconds, MissionTimer.Mode.ONE_SHOT, code))
+
+
+## Runs the code of every schedule() timer that ran out (stops once the mission ended).
 func _run_due_timers(delta: float) -> void:
-	var due := []
-	for t in timers:
-		t[0] -= delta
-		if t[0] <= 0.0:
-			due.append(t)
-	for t in due:
-		timers.erase(t)
-		vm.eval_string(String(t[1]))
+	for code in kit.timers.apply_tick(delta):
+		vm.eval_string(String(code))
 		if _over:
 			return
 
@@ -308,25 +320,33 @@ func _run_due_timers(delta: float) -> void:
 
 ## True when every primary MissionBriefObjective has the "completed" status (and there is one).
 func objectives_done() -> bool:
-	var primary := _brief_objectives().filter(func(k) -> bool: return SSScript.truthy(vm.get_field(k, "isprimary")))
-	return not primary.is_empty() and primary.all(_is_objective_completed)
+	var set := ObjectiveSet.new()
+	for o in _sync_brief_objectives():
+		set.apply_add(o)
+	return set.is_complete()
 
 
 ## The objectives panel's lines: every MissionBriefObjective's short text, done when its status reads completed.
 func make_objective_lines() -> Array:
+	return [] if vm == null else _sync_brief_objectives().map(func(o: ScriptObjective) -> Dictionary: return o.make_line())
+
+
+## The script's MissionBriefObjective objects as ScriptObjectives (required = primary), in script order, with the
+## text and state the script holds now.
+func _sync_brief_objectives() -> Array:
 	var out := []
-	if vm == null:
-		return out
-	for k in _brief_objectives():
-		var ob: Dictionary = vm.objects[k]
-		out.append({"text": SSScript.to_str(ob.get("shorttxt", k)), "done": _is_objective_completed(k)})
+	for k in vm.objects.keys():
+		if String((vm.objects[k] as Dictionary).get("__type", "")).to_lower() != "missionbriefobjective":
+			continue
+		if not _brief.has(k):
+			_brief[k] = ScriptObjective.new(str(k))
+		var o: ScriptObjective = _brief[k]
+		o.primary = SSScript.truthy(vm.get_field(k, "isprimary"))
+		o.required = o.primary
+		o.apply_text(SSScript.to_str(vm.objects[k].get("shorttxt", k)))
+		o.apply_state(Objective.State.DONE if _is_objective_completed(k) else Objective.State.ACTIVE)
+		out.append(o)
 	return out
-
-
-## Ids of the script's MissionBriefObjective objects.
-func _brief_objectives() -> Array:
-	return vm.objects.keys().filter(func(k) -> bool:
-		return String((vm.objects[k] as Dictionary).get("__type", "")).to_lower() == "missionbriefobjective")
 
 
 ## True when objective `k`'s status is the campaign's "completed" string (IDSTR_OBJ_COMPLETED).
@@ -335,14 +355,27 @@ func _is_objective_completed(k: Variant) -> bool:
 	return SSScript.to_str(vm.get_field(k, "status")).to_lower() == done
 
 
+## The mission ends now with the script's own debriefing (it takes over a death debriefing still waiting).
 func debrief(success: bool, why := "") -> void:
-	if _over:
-		return
-	log_debug("DEBRIEF success=%s %s" % [success, why])
+	var text := make_debrief_message(success, why)
+	kit.ender.apply_override(MissionVerdict.make_win(CODE_SUCCESS, text) if success else MissionVerdict.make_loss(CODE_FAILED, text))
+	kit.ender.apply_tick(0.0)
+
+
+## The debriefing `why` heads the mission's own success / fail text.
+func make_debrief_message(success: bool, why := "") -> String:
 	var txt := String(m.get("debrief_success" if success else "debrief_fail", ""))
-	if why != "":
-		txt = why + "\n" + txt
-	end_mission(success, CODE_SUCCESS if success else CODE_FAILED, txt)
+	return why + "\n" + txt if why != "" else txt
+
+
+func _end_from_ender(success: bool, code: int, text: String) -> void:
+	log_debug("DEBRIEF success=%s code=%d" % [success, code])
+	end_mission(success, code, text)
+
+
+## The campaign radio does not hold the end back: no voice is waited for.
+func _is_voice_busy() -> bool:
+	return false
 
 
 ## Starsiege: the campaign provider reads the mission's inventory calls after the battle.
@@ -400,7 +433,8 @@ func ss_get_field(_k: String, _f: String):
 func ss_field_changed(k: String, f: String, v) -> void:
 	if f == "status" and vm and vm.objects.has(k):
 		var short := SSScript.to_str(vm.objects[k].get("shorttxt", k))
-		battle.fx("message", ["Objective %s: %s" % [SSScript.to_str(v), short], 5.0], true)
+		kit.announcer.apply_say(MissionMessage.make_message("Objective %s: %s" % [SSScript.to_str(v), short],
+			OBJECTIVE_MESSAGE_SECONDS, MissionMessage.CHANNEL_INFO))
 
 
 ## Deprecated: use tree.position_of (kept for tests/test_starsiege_mission.gd).

@@ -54,9 +54,10 @@ func open_hangar(tab := HangarScreen.TAB_HERCS) -> void:
 	var campaign := career_campaign()
 	_router = HangarRouter.new()
 	shell.add_child(_router)
-	_router.go("hangar", {"garage": campaign.garage, "availability": campaign.availability_context,
+	_router.go("hangar", {"garage": campaign.garage, "availability": career_availability,
 		"wingman_slots": campaign.wingman_slots({}), "tab": tab, "player_name": str(EsShell.career.get("name", "")),
-		"heading": "Career of %s  -  campaign %d" % [EsShell.career.get("name", ""), int(EsShell.career.get("campaign", 0)) + 1],
+		"heading": "Career of %s  -  campaign %d%s" % [EsShell.career.get("name", ""), int(EsShell.career.get("campaign", 0)) + 1,
+			"  -  Classic" if bool(EsShell.career.get("classic", false)) else ""],
 		"done_text": "Back to the service bay", "on_done": close_hangar, "on_changed": _save_career})
 
 
@@ -141,3 +142,11 @@ func _draw_plate(m: ShellMenu, lines: Array) -> void:
 	for l in lines:
 		f.draw(shell.screen.image, r.position.x + 5, y, l)
 		y += f.height + 1
+
+
+## The career's availability context; a Classic career (career.classic) gets the Classic weapon rules.
+func career_availability() -> Dictionary:
+	var ctx := career_campaign().availability_context()
+	if bool(EsShell.career.get("classic", false)):
+		ctx["classic"] = true
+	return ctx

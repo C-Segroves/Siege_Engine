@@ -131,6 +131,7 @@ func _check_map(map_id: String) -> void:
 		await _check_inventory(battle)
 		await _check_vehicle_station(battle)
 		_check_neutral(battle, base)
+		_check_owners(base)
 	Engine.time_scale = 1.0
 	battle.queue_free()
 	await _frames(4)
@@ -362,6 +363,21 @@ func _clear_pads(battle: Battle, stations: TribesStations) -> void:
 
 
 ## A free-for-all makes the base neutral (turrets fire at everyone; GameModes.is_free_for_all).
+## Factions own base objects (raids): a turret in an owner's area takes its team, so the faction's soldiers are no targets.
+func _check_owners(base: TribesBase) -> void:
+	var o := base.objects[0]
+	var before := o.team
+	base.apply_owners([{"pos": o.global_position, "radius": 5.0, "team": 777}, {"pos": o.global_position + Vector3(900, 0, 0), "radius": 5.0, "team": 778}])
+	_expect(o.team == 777, "a base object inside a faction's area belongs to that faction")
+	var far := base.objects.filter(func(x: TribesBaseObject) -> bool: return x.global_position.distance_to(o.global_position) > 100.0)
+	if not far.is_empty():
+		var t: int = far[0].team
+		base.apply_owners([{"pos": o.global_position, "radius": 5.0, "team": 777}])
+		_expect(far[0].team == t, "one outside every area keeps its team")
+	_expect(not TeamRelations.is_hostile(777, o.team), "its faction's soldiers are not its enemies")
+	o.team = before
+
+
 func _check_neutral(battle: Battle, base: TribesBase) -> void:
 	var teams = battle.config.get("teams")
 	battle.config["teams"] = false

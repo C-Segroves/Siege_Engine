@@ -64,10 +64,10 @@ SITE_DIR/app/<build>/index.html, index.wasm, index.pck ... ──►  SITE_DIR/a
   version therefore plays solo:
   - campaigns, the original Earthsiege shell, skirmish/training/extraction and the shape viewer all work;
   - **Arena / versus** runs as a local session against AI (`Net.host()` uses a local peer on the web);
-  - *Host / Join LAN game* and *Co-op missions* are disabled, with a note.
-
-  Browser multiplayer would need a WebSocket or WebRTC transport and a relay or dedicated server. That is
-  possible future work, not part of this setup.
+  - *Host LAN game* and *Co-op missions* are disabled, with a note;
+  - *Join online game* joins a game server over WebSocket and lists the matches of the server that served the
+    page. The server is optional (`GAME_SERVER="yes"` in `siege.conf`, or the container profiles): see
+    [SERVER_DEPLOY.md](SERVER_DEPLOY.md).
 - **Disabled in the browser.** Importing discs, adding soundtrack folders, removing packs and choosing a data
   folder all happen on the server. The buttons are disabled and say why.
 

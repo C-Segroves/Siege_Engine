@@ -27,6 +27,8 @@ func customize(m: ShellMenu) -> void:
 			var e := m.find(103, ShellMenu.T_EDIT)
 			if not e.is_empty():
 				m.focus = m.controls.find(e)
+			shell.pending_classic = false
+			m.add_button(classic_label(false), EsShell.CLASSIC_CMD, Rect2i(24, 66, 80, 11))
 		EsShell.OVERWRITE_BACKUP_MENU:
 			m.find(ShellBackups.NAME_TEXT_ID, ShellMenu.T_TEXT).label = shell.backups.pending_name.to_upper()
 		EsShell.KILLED_MENU:
@@ -37,6 +39,11 @@ func customize(m: ShellMenu) -> void:
 		EsShell.BRIEFING_MENU, EsShell.SINGLE_BRIEFING_MENU:
 			shell.briefing_text = shell.missions.make_briefing_with_herc(
 				shell.briefing_text if m.id == EsShell.SINGLE_BRIEFING_MENU else shell.missions.make_career_briefing(), m.id == EsShell.BRIEFING_MENU)
+
+
+## Label of the CLASSIC toggle on the registration menu.
+static func classic_label(on: bool) -> String:
+	return "CLASSIC: ON" if on else "CLASSIC: OFF"
 
 
 ## MULTIPLAYER sits in the original grid next to a re-centred EXIT TO DOS.

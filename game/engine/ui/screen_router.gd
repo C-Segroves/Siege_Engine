@@ -119,8 +119,14 @@ func save_shot_and_quit(path: String, delay := 2.0) -> void:
 	get_tree().quit()
 
 
-## Value of command-line user argument `--name=value` ("" when absent).
+## Arguments tests set instead of passing them on the command line: name -> value.
+static var arg_overrides := {}
+
+
+## Value of command-line user argument `--name=value` ("" when absent); arg_overrides wins.
 static func arg_value(name: String) -> String:
+	if arg_overrides.has(name):
+		return str(arg_overrides[name])
 	var prefix := "--%s=" % name
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with(prefix):

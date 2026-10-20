@@ -36,6 +36,7 @@ var target_view: TargetView
 
 
 func _ready() -> void:
+	ServerProfile.apply_client_only(self)
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	font = ThemeDB.fallback_font
@@ -64,7 +65,8 @@ func _draw() -> void:
 		return
 	var s := size
 	var by := s.y - BAR_BOTTOM_MARGIN
-	_draw_crosshair(s * 0.5)
+	if not (herc is Infantry and InfantryHud.is_scope_shown(herc.get_parent(), herc)):
+		_draw_crosshair(s * 0.5)   # the zoomed Laser Rifle draws its own reticle (InfantryHud)
 	var on_foot := herc is Infantry   # a soldier has InfantryHud's energy / health bars instead of the vehicle's
 	if not on_foot:
 		_draw_throttle(30.0, by)
@@ -193,13 +195,13 @@ func _draw_radar(center: Vector2, r: float) -> void:
 	for a in [-0.5, 0.5]:
 		draw_line(center, center + Vector2(sin(a), -cos(a)) * r, Color(GREEN, 0.3), 1.0)
 	RadarContacts.apply_range(herc, RADAR_RANGE)
-	for v in herc.get_tree().get_nodes_in_group("vehicles"):
+	for v in RadarContacts.make_units(herc.get_tree()) + SensorTowers.make_radar_structures(herc):
 		if v == herc or not v.alive or not RadarContacts.is_shown(herc, v):
 			continue
 		var p := make_radar_point(v.global_position, r)
 		if p.length() > r:
 			continue
-		var col := TargetInfo.make_iff_color(herc, v)
+		var col := RadarColors.make_unit_color(herc, v)
 		if v == herc.target:
 			draw_rect(Rect2(center + p - Vector2(5, 5), Vector2(10, 10)), AMBER, false, 1.5)
 		if TeamRelations.is_allied(herc.team, v.team):
@@ -211,15 +213,15 @@ func _draw_radar(center: Vector2, r: float) -> void:
 		var p := make_radar_point(nav.global_position, r)
 		if p.length() > r:
 			p = p.normalized() * r
-		draw_string(font, center + p - Vector2(4, -5), str(nav.get_meta("label", "N")), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, AMBER)
+		draw_string(font, center + p - Vector2(4, -5), str(nav.get_meta("label", "N")), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, RadarColors.OTHER)
 
 	var ex = herc.get_parent().get("extraction")
 	if ex is ExtractionDirector:
 		var marks := []
 		for i in ex.zones.size():
-			marks.append({"pos": ex.zones[i], "label": "EXFIL %s" % ExtractionTransports.make_zone_name(i), "color": GREEN})
+			marks.append({"pos": ex.zones[i], "label": "EXFIL %s" % ExtractionTransports.make_zone_name(i), "color": RadarColors.OTHER})
 		for m in ex.tasks.make_markers():
-			marks.append({"pos": m.pos, "label": str(m.label), "color": AMBER})
+			marks.append({"pos": m.pos, "label": str(m.label), "color": RadarColors.OTHER})
 		for m in marks:
 			var p := make_radar_point(m.pos, r)
 			if p.length() > r:

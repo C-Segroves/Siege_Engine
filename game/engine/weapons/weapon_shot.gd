@@ -7,7 +7,8 @@ extends RefCounted
 ## hit by its own beam.
 ##
 ## shot: {shooter: Node3D (CollisionObject3D), def: weapon definition, from: Vector3, dir: Vector3 (unit),
-##        target: Node3D or null (projectiles), scale: damage factor (beams; default 1)}
+##        target: Node3D or null (projectiles), scale: damage factor (beams; default 1),
+##        rewind: LagCompensation description of a human's compensated hitscan shot (default none: units as they are now)}
 
 
 ## Fires an instant beam; returns the ray hit ({} when it hit nothing).
@@ -17,8 +18,7 @@ static func fire_beam(shot: Dictionary) -> Dictionary:
 	var from: Vector3 = shot.from
 	var reach := float(d.get("range", 0.0))
 	var scale := float(shot.get("scale", 1.0))
-	var q := PhysicsRayQueryParameters3D.create(from, from + (shot.dir as Vector3) * reach, 0xFFFFFFFF, [shooter.get_rid()])
-	var hit := shooter.get_world_3d().direct_space_state.intersect_ray(q)
+	var hit := LagCompensation.cast_ray(shooter, from, shot.dir, reach, shot.get("rewind", {}), [shooter.get_rid()])
 	var end: Vector3 = hit.position if hit else from + (shot.dir as Vector3) * reach
 	var shield := float(d.get("shield_damage", 0.0)) * scale
 	# the impact look depends on the target's shield before this shot lands (FxSurface)
@@ -38,6 +38,8 @@ static func launch_projectile(shot: Dictionary) -> Projectile:
 	var shooter: Node3D = shot.shooter
 	var target: Node3D = shot.get("target")
 	var p := Weapon.make_projectile(shot.def, shooter, shot.from, shot.dir, target)
+	if not (shot.get("rewind", {}) as Dictionary).is_empty() and LagCompensation.is_compensated(p, shot.rewind, str((shot.def as Dictionary).get("id", ""))):
+		p.rewind = shot.rewind
 	shooter.get_parent().add_child(p)
 	p.global_position = shot.from
 	var message := [shot.from, shot.dir, str((shot.def as Dictionary).get("id", "")), target.net_id if target is Herc else 0]

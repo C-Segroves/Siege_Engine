@@ -54,6 +54,9 @@ def keep_burst_fx(pack, gear):
 
 def write(pack, gear, seats):
     keep_burst_fx(pack, gear)
+    cloak = gear.pop('cloak', None)
+    if cloak:
+        V.wjson(P.pack(pack, 'gameplay', 'cloak.json'), {'pack': pack, 'engine_schema': 1, 'profiles': cloak})
     V.wjson(P.pack(pack, 'gameplay', 'infantry_gear.json'), dict(gear, pack=pack, engine_schema=1))
     V.wjson(P.pack(pack, 'gameplay', 'vehicle_seats.json'), {'pack': pack, 'engine_schema': 1, 'vehicles': seats})
     print('%s: %d hand items, %d packs, %d vehicles with seats' % (pack, len(gear['items']), len(gear['packs']),
@@ -233,13 +236,12 @@ T2_UNMAPPED_HAND = (('FlareGrenade', 'FLARE_GRENADE', 'Flare Grenade', 'Missile 
                     ('CameraGrenade', 'CAMERA_GRENADE', 'Deployable Camera', 'Deployable camera: no remote views.'),
                     ('Beacon', 'BEACON', 'Beacon', 'Target beacon: no targeting system to feed.'))
 T2_PACKS = (('EnergyPack', 'energy'), ('RepairPack', 'repair'), ('ShieldPack', 'shield'),
-            ('SensorJammerPack', 'jammer'), ('AmmoPack', 'ammo'), ('CloakingPack', 'unmapped'),
+            ('SensorJammerPack', 'jammer'), ('AmmoPack', 'ammo'), ('CloakingPack', 'cloak'),
             ('SatchelCharge', 'unmapped'), ('InventoryDeployable', 'deploy'), ('TurretIndoorDeployable', 'deploy'),
             ('TurretOutdoorDeployable', 'deploy'), ('MotionSensorDeployable', 'deploy'),
             ('PulseSensorDeployable', 'deploy'), ('AABarrelPack', 'unmapped'), ('ELFBarrelPack', 'unmapped'),
             ('MissileBarrelPack', 'unmapped'), ('MortarBarrelPack', 'unmapped'), ('PlasmaBarrelPack', 'unmapped'))
-T2_UNMAPPED_NOTES = {'CloakingPack': 'Cloak: the remake renders no cloaked shapes.',
-                     'SatchelCharge': 'Large pack: a remote charge (not modelled).'}
+T2_UNMAPPED_NOTES = {'SatchelCharge': 'Large pack: a remote charge (not modelled).'}
 
 
 def t2_type(text):
@@ -279,7 +281,47 @@ def t2_gear(resolve, armors, weapon_items):
         a['fall_damage_above_min'] = False
         a['shield_energy_per_damage'] = r(float(b['energyPerDamagePoint']) / DAMAGE_SCALE, 5)
         a['damage_scale'] = t2_damage_scale(block)
-    return {'throw': throw, 'items': items, 'packs': packs}
+    return {'throw': throw, 'items': items, 'packs': packs, 'cloak': t2_cloak(resolve)}
+
+
+T2_CLOAK_ID = 'tribes2:cloaking_pack'
+T2_TIMED_ID = 'tribes2:timed_cloak'
+
+
+def t2_cloak(resolve):
+    """The Tribes 2 cloaking pack's rules (scripts/packs/cloakingpack.cs, projectiles.cs, player.cs, ai.cs, defaultGame.cs,
+    station.cs, vehicles/serverVehicleHud.cs), keyed by CloakProfile id. Values come from the scripts, not from memory."""
+    S = V.T2_SCRIPTS
+    pack_cs, proj_cs, player_cs = (read(os.path.join(S, 'packs', 'cloakingpack.cs')), read(os.path.join(S, 'projectiles.cs')),
+                                   read(os.path.join(S, 'player.cs')))
+    ai_cs, game_cs, hud_cs = (read(os.path.join(S, 'ai.cs')), read(os.path.join(S, 'defaultGame.cs')),
+                              read(os.path.join(S, 'vehicles', 'serverVehicleHud.cs')))
+    img = resolve('CloakingPackImage')
+    sound = V.copy_sound('tribes2', os.path.join(V.T2_AUDIO, *str(resolve('CloakingPackActivateSound')['filename']).split('/')))
+    timed = {'id': T2_TIMED_ID, 'name': 'Timed cloak', 'kind': 'script', 'source': 'scripts/defaultGame.cs, station.cs',
+             'recloak_delay_s': float(find(r'reCloak = %obj.schedule\( (\d+), "setCloaked", true', proj_cs)) / 1000.0,
+             'recloak_min_energy': float(find(r'getEnergyLevel\(\) > ([\d.]+)', proj_cs)),
+             'breaks_on': ['fire', 'damage'],
+             'damage_break_min': r(float(find(r'else if \( %amount > ([\d.]+) \)', player_cs)) * DAMAGE_SCALE, 1),
+             'respawn_cloak_s': float(find(r'\$InvincibleTime = (\d+);', player_cs)),
+             'vehicle_pad_cloak_s': float(find(r'schedule\((\d+), "setCloaked", false\)', hud_cs)) / 1000.0,
+             'reveal_range_m': float(find(r'\(!%clIsCloaked \|\| %distance < (\d+)\)', ai_cs)),
+             'note': 'The cloak the scripts switch on with setCloaked: a respawn, a station, a new vehicle.'}
+    return {T2_TIMED_ID: timed, T2_CLOAK_ID: {
+        'id': T2_CLOAK_ID, 'name': 'Cloaking Pack', 'kind': 'pack', 'source': 'scripts/packs/cloakingpack.cs',
+        'energy_per_s': float(img['stateEnergyDrain[1]']), 'min_energy': float(img['minEnergy']),
+        'recloak_delay_s': float(find(r'reCloak = %obj.schedule\( (\d+), "setCloaked", true', proj_cs)) / 1000.0,
+        'recloak_min_energy': float(find(r'getEnergyLevel\(\) > ([\d.]+)', proj_cs)),
+        'breaks_on': ['fire', 'damage'],
+        'damage_break_min': r(float(find(r'else if \( %amount > ([\d.]+) \)', player_cs)) * DAMAGE_SCALE, 1),
+        'reveal_range_m': float(find(r'\(!%clIsCloaked \|\| %distance < (\d+)\)', ai_cs)),
+        'jams_sensors_when_worn': 'setPassiveJammed(true)' in pack_cs,
+        'light_armour_only': 'Cloaking available for light armors only' in pack_cs,
+        'blocked_by_jam_field': 'Jamming field prevents cloaking' in pack_cs,
+        'respawn_cloak_s': float(find(r'\$InvincibleTime = (\d+);', player_cs)),
+        'vehicle_pad_cloak_s': float(find(r'schedule\((\d+), "setCloaked", false\)', hud_cs)) / 1000.0,
+        'ai_uses': False, 'sound_loop': sound,
+        'note': 'Visual detection only: motion sensors (detectsCloaked, detectMinVelocity) still see a moving wearer.'}}
 
 
 def t2_damage_scale(block):
@@ -338,6 +380,10 @@ def t2_pack(resolve, item, effect, weapon_items):
             p['jam_radius'] = float(sensor['jamRadius'])
         else:
             p['note'] = 'Armor checkShields: energy / energyPerDamagePoint (per armour) absorbs the hit.'
+    elif effect == 'cloak':
+        # the drain (stateEnergyDrain[1]) is the cloak profile's: CloakState spends it, so it is not the pack's own
+        p.update(toggled=True, min_energy=float(img['minEnergy']), cloak_profile=T2_CLOAK_ID,
+                 note='Light armour only (CloakingPackImage::onActivate); the rules are in cloak.json.')
     elif effect == 'ammo':
         p['extra_rounds'] = {wid: int(float(b['max[%s]' % ammo])) for wid, ammo in weapon_items.items()
                              if 'max[%s]' % ammo in b}

@@ -11,11 +11,11 @@ extends Node
 const GAMEPAD_ACTIONS := ["menu_back", "menu_pause", "throttle_up", "throttle_down", "turn_left", "turn_right",
 	"aim_left", "aim_right", "aim_up", "aim_down", "fire_group_1", "fire_group_2", "target_next", "view_toggle",
 	"orbit_left", "zoom_in", "ui_accept", "ui_cancel", "ui_up", "ui_down", "ui_left", "ui_right", "jet", "weapon_next",
-	"vehicle_enter_exit", "interact"]
+	"vehicle_enter_exit", "interact", "scope_zoom", "scope_level"]
 const KEYBOARD_ACTIONS := ["menu_back", "throttle_up", "throttle_down", "throttle_stop", "turn_left", "turn_right",
 	"fire_group_1", "fire_group_2", "target_next", "target_nearest", "view_toggle", "scoreboard", "cockpit_mode_1",
 	"cockpit_mode_6", "hdd_page_1", "hdd_page_2", "look_up", "look_down", "screenshot", "debug_toggle", "ui_click",
-	"jet", "weapon_next", "vehicle_enter_exit", "interact", "inventory_toggle", "exfil_call"]
+	"jet", "weapon_next", "vehicle_enter_exit", "interact", "inventory_toggle", "exfil_call", "scope_zoom", "scope_level"]
 const TICK := 0.25
 
 var _failures := 0
@@ -30,6 +30,7 @@ func _ready() -> void:
 	_check_rebinding()
 	_check_rebind_conflicts()
 	_check_pad_layout()
+	_check_menu_actions()
 	_check_v1_migration()
 	_restore_settings()
 	await _check_battle_controls()
@@ -233,6 +234,90 @@ func _check_pad_layout() -> void:
 	_expect(not _is_bound("weapon_next", _make_pad(JOY_BUTTON_X)), "pad X no longer swaps weapons")
 	_expect(not InputMap.has_action("loot_pickup"), "loot_pickup is unified into interact")
 	_expect(not BindingContexts.CONTEXTS.infantry.has("vehicle_enter_exit"), "on foot boarding is folded into interact")
+
+
+const MENU_ACTIONS := ["menu_secondary", "menu_info", "menu_tab_prev", "menu_tab_next", "menu_zone_prev",
+	"menu_zone_next", "menu_switch_kind", "menu_primary"]
+
+
+## The lobby / loadout menu actions (docs/design/lobby_loadout_economy.md section 11): bound on keyboard and pad,
+## live in the menus context, no clash inside it; Shift+Tab and Ctrl+Enter keep their modifiers through a
+## save + load; the call-in menu is L on foot and the LB + RB chord on the pad.
+func _check_menu_actions() -> void:
+	print("menu actions:")
+	SiegeInput.reset_defaults()
+	for action in MENU_ACTIONS:
+		_expect(BindingContexts.CONTEXTS.menus.has(action), "%s is live in the menus context" % action)
+		_expect(_has_device(action, SiegeInput.Device.KEYBOARD_MOUSE) and _has_device(action, SiegeInput.Device.GAMEPAD),
+			"%s has keyboard/mouse and gamepad bindings" % action)
+	_expect(_is_bound("menu_secondary", _make_pad(JOY_BUTTON_X)), "pad X is menu_secondary (remove)")
+	_expect(_is_bound("menu_tab_prev", _make_pad(JOY_BUTTON_LEFT_SHOULDER))
+		and _is_bound("menu_tab_next", _make_pad(JOY_BUTTON_RIGHT_SHOULDER)), "LB / RB are the tab actions")
+	_expect(BindingContexts.CONTEXTS.infantry.has("callin_menu") and _is_bound("callin_menu", _make_key(KEY_L)),
+		"callin_menu is L on foot")
+	_expect(SiegeInput.CHORD_ACTIONS.callin_menu == [JOY_BUTTON_LEFT_SHOULDER, JOY_BUTTON_RIGHT_SHOULDER],
+		"the call-in chord is LB + RB")
+	_check_menu_clashes()
+	_check_modifier_round_trip()
+	_check_chord()
+
+
+func _check_menu_clashes() -> void:
+	var shift_tab := _make_key(KEY_TAB)
+	shift_tab.shift_pressed = true
+	_expect(not BindingContexts.is_same_control(_make_key(KEY_TAB), shift_tab), "Tab and Shift+Tab are two controls")
+	_expect(SiegeInput.find_conflicts("menu_zone_next", _make_key(KEY_TAB)).is_empty(), "Tab does not clash with Shift+Tab")
+	var ctrl_key := _make_key(KEY_CTRL)
+	ctrl_key.ctrl_pressed = true
+	_expect(BindingContexts.is_same_control(_make_key(KEY_CTRL), ctrl_key), "a modifier key is still itself with its own bit set")
+	for context in BindingContexts.CONTEXTS:
+		for action in BindingContexts.CONTEXTS[context]:
+			_expect(InputMap.has_action(action), "%s (context %s) is registered" % [action, context])
+	var menus: Array = BindingContexts.CONTEXTS.menus
+	for a in menus:
+		for ev in InputMap.action_get_events(a):
+			for b in menus:
+				if a != b and BindingContexts.find_matching(b, ev) != null:
+					_expect(false, "menus context clash: %s and %s share %s" % [a, b, BindingText.make_event_text(ev)])
+
+
+func _check_modifier_round_trip() -> void:
+	SiegeInput.save_bindings()
+	InputMap.action_erase_events("menu_zone_prev")
+	InputMap.action_erase_events("menu_primary")
+	SiegeInput.load_bindings()
+	var shift_tab := _make_key(KEY_TAB)
+	shift_tab.shift_pressed = true
+	_expect(_is_bound("menu_zone_prev", shift_tab) and not _is_bound("menu_zone_prev", _make_key(KEY_TAB)),
+		"Shift+Tab keeps its modifier through save + load")
+	var ctrl_enter := _make_key(KEY_ENTER)
+	ctrl_enter.ctrl_pressed = true
+	_expect(_is_bound("menu_primary", ctrl_enter), "Ctrl+Enter keeps its modifier through save + load")
+	var tab_text := BindingText.make_action_bindings("menu_tab_next")
+	_expect(tab_text.begins_with("Ctrl+"), "binding text shows the modifier (%s)" % tab_text)
+	var chord_text := BindingText.make_action_bindings("callin_menu")
+	_expect(chord_text.ends_with("Pad LB + Pad RB"), "binding text shows the pad chord (%s)" % chord_text)
+
+
+func _check_chord() -> void:
+	var chord := ChordAction.new("callin_menu")
+	var down := {}
+	var is_down := func(b: int) -> bool: return down.has(b)
+	chord.advance_with(is_down)
+	_expect(not chord.just_fired, "chord: nothing held does not fire")
+	down[JOY_BUTTON_LEFT_SHOULDER] = true
+	chord.advance_with(is_down)
+	_expect(not chord.just_fired, "chord: LB alone does not fire")
+	down[JOY_BUTTON_RIGHT_SHOULDER] = true
+	chord.advance_with(is_down)
+	_expect(chord.just_fired, "chord: LB + RB fires once")
+	chord.advance_with(is_down)
+	_expect(not chord.just_fired, "chord: holding does not repeat")
+	down.erase(JOY_BUTTON_RIGHT_SHOULDER)
+	chord.advance_with(is_down)
+	down[JOY_BUTTON_RIGHT_SHOULDER] = true
+	chord.advance_with(is_down)
+	_expect(chord.just_fired, "chord: release and press again fires again")
 
 
 ## A version 1 user://input.json (loot_pickup, weapon_next on pad X) loads with interact and the new pad defaults.

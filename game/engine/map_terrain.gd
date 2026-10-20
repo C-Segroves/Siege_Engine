@@ -30,7 +30,7 @@ static func build(parent: Node3D, t: Dictionary, dir: String) -> void:
 	body.set_meta("terrain", {"w": grid.w, "h": grid.h, "sq": grid.sq, "x0": float(grid.org[0]), "z0": float(grid.org[1]),
 		"heights": heights, "holes": grid.holes})
 	parent.add_child(body)
-	var mat := _material(t, dir)
+	var mat: Material = null if ServerProfile.is_collision_only() else _material(t, dir)
 	var has_holes: bool = not grid.holes.is_empty()
 	if not has_holes:
 		_add_heightmap_collision(body, grid)
@@ -85,7 +85,11 @@ static func _material(t: Dictionary, dir: String) -> StandardMaterial3D:
 	var mat := StandardMaterial3D.new()
 	mat.roughness = 1.0
 	var ap := dir.path_join(String(t.get("albedo", "albedo.png")))
-	if FileAccess.file_exists(ap):
+	if t.get("albedo_data") is Image:   # baked in memory (the generated extraction map, VarunaMap)
+		var baked: Image = t.albedo_data
+		baked.generate_mipmaps()
+		mat.albedo_texture = ImageTexture.create_from_image(baked)
+	elif FileAccess.file_exists(ap):
 		var img := Image.load_from_file(ap)
 		img.generate_mipmaps()
 		mat.albedo_texture = ImageTexture.create_from_image(img)
@@ -120,12 +124,14 @@ static func _build_chunks(body: StaticBody3D, grid: Dictionary, mat: Material, c
 	var h: int = grid.h
 	for cz in range(0, h - 1, CHUNK):
 		for cx in range(0, w - 1, CHUNK):
+			LoadKeepAlive.pump()
 			var mesh := _chunk_mesh(grid, Rect2i(cx, cz, mini(cx + CHUNK, w - 1) - cx, mini(cz + CHUNK, h - 1) - cz), mat)
 			if mesh == null:
 				continue
-			var mi := MeshInstance3D.new()
-			mi.mesh = mesh
-			body.add_child(mi)
+			if not ServerProfile.is_collision_only():
+				var mi := MeshInstance3D.new()
+				mi.mesh = mesh
+				body.add_child(mi)
 			if collide:
 				_add_trimesh_collision(body, mesh)
 
@@ -217,6 +223,54 @@ static func make_surface_height(parent: Node3D, p: Vector3) -> float:
 		if fx >= 0 and fz >= 0 and fx <= int(d.w) - 1 and fz <= int(d.h) - 1:
 			return _sample_heights(d, fx, fz)
 	return INF
+
+
+## The highest of the four grid heights around `p`'s x/z (-INF off the terrain): the collision triangles of that
+## square never rise above it.
+static func make_highest_corner(parent: Node3D, p: Vector3) -> float:
+	for t in make_live_terrains(parent):
+		var d: Dictionary = t.get_meta("terrain")
+		var fx := (p.x - float(d.x0)) / float(d.sq)
+		var fz := (p.z - float(d.z0)) / float(d.sq)
+		if fx < 0 or fz < 0 or fx > int(d.w) - 1 or fz > int(d.h) - 1:
+			continue
+		var x0 := mini(int(fx), int(d.w) - 2)
+		var z0 := mini(int(fz), int(d.h) - 2)
+		var hi := -INF
+		for dz in 2:
+			for dx in 2:
+				hi = maxf(hi, d.heights[(z0 + dz) * int(d.w) + x0 + dx])
+		return hi
+	return -INF
+
+
+## The nearest point of solid terrain (not over a hole) to `p`'s x/z, searched in rings of squares out to `reach`
+## metres; Vector3.INF when there is none.
+static func make_nearest_solid_ground(parent: Node3D, p: Vector3, reach := 96.0) -> Vector3:
+	for t in make_live_terrains(parent):
+		var d: Dictionary = t.get_meta("terrain")
+		var sq := float(d.sq)
+		var steps := int(ceil(reach / sq))
+		for r in range(0, steps + 1):
+			var best := Vector3.INF
+			for i in range(-r, r + 1):
+				for k in range(-r, r + 1):
+					if maxi(absi(i), absi(k)) != r:
+						continue
+					var q := Vector3(snappedf(p.x, sq) + i * sq, p.y, snappedf(p.z, sq) + k * sq)
+					var fx := (q.x - float(d.x0)) / sq
+					var fz := (q.z - float(d.z0)) / sq
+					if fx < 1 or fz < 1 or fx > int(d.w) - 2 or fz > int(d.h) - 2:
+						continue
+					var h := _height_in(d, fx, fz, INF)
+					if h == INF or _height_in(d, fx + 0.5, fz + 0.5, INF) == INF or _height_in(d, fx - 0.5, fz - 0.5, INF) == INF:
+						continue
+					q.y = h
+					if best == Vector3.INF or q.distance_squared_to(p) < best.distance_squared_to(p):
+						best = q
+			if best != Vector3.INF:
+				return best
+	return Vector3.INF
 
 
 static func _height_in(d: Dictionary, fx: float, fz: float, fallback: float) -> float:

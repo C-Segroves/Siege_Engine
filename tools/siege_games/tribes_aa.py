@@ -10,6 +10,7 @@ from siege_games import Step
 
 GAME = {
     'game': 'tribes_aa', 'pack': 'tribes_aa', 'name': 'Tribes: Aerial Assault (PS2)', 'discs': 1, 'supported': True,
+    'main_exe': {'disc': 'SLUS_201.49'},   # the PS2 ELF at the ISO root (tools/disc_version.py)
     'pack_json': {'name': 'Tribes: Aerial Assault', 'engine': 'inevitable_ps2', 'unit_scale': 1.0, 'world_metres_per_unit': 1.0, 'placeholder_shapes': True, 'era': 5, 'year': 3945},
 }
 

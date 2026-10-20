@@ -189,6 +189,8 @@ func spawn_roster() -> void:
 		battle.mission.spawn_units()
 		return
 	for a in battle.config.get("ai", []):
+		if not BotBudget.admits(battle, BotBudget.Priority.MATCH):
+			break   # the server's bot cap
 		battle.send_spawn(_make_ai_spec(a, placement))
 
 
@@ -286,6 +288,7 @@ func build_vehicle(spec: Dictionary) -> Herc:
 	h.equip(spec.loadout)
 	_apply_garage(h, spec.get("garage", {}))
 	battle.vehicles[spec.net_id] = h
+	battle.entities.register(spec.net_id, h)
 	if h is Flyer and not ai.has("skill"):
 		(h as Flyer).apply_player_start()
 	return h

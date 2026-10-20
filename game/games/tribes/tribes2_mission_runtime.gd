@@ -38,8 +38,8 @@ const COMMAND_MAP_FUNCTION := "toggleCommanderMap"
 var game_id := 0
 var transforms: Tribes2Transforms
 var _won := false
-var _boxes: Array = []          # [sim time, callback code]
-var _tasks: Array = []          # [task id, client id, next sim time]
+var _new_tasks: Array = []      # [task id, client id] made, not yet run once
+var _task_timers := MissionTimers.new()   # task id -> repeating timer, payload [task id, client id]
 var _steps := {}                # client id -> AI step name
 
 
@@ -255,22 +255,32 @@ func add_task(client: int, task_name: String) -> int:
 		return task
 	if vm.has_function(ns + "::assume"):
 		vm.call_script(ns + "::assume", [task, client])
-	_tasks.append([task, client, sim_time])
+	_new_tasks.append([task, client])
 	return task
 
 
-func _run_tasks() -> void:
-	for t in _tasks.duplicate():
-		if not sim.exists(int(t[1])) or not sim.exists(int(t[0])):
-			_tasks.erase(t)
-			continue
-		if sim_time < float(t[2]):
-			continue
-		t[2] = sim_time + TASK_SECONDS
-		var ns := DarkstarScript.to_str(sim.objects[int(t[0])].fields.get("class", "")).to_lower()
-		for step in ["weight", "monitor"]:
-			if vm.has_function(ns + "::" + step):
-				vm.call_script(ns + "::" + step, [t[0], t[1]])
+## A task's first run is the frame after it is made (or the same frame's update); then every TASK_SECONDS.
+func _run_tasks(delta: float) -> void:
+	var fresh := _new_tasks
+	_new_tasks = []
+	for t in _task_timers.apply_tick(delta):
+		_run_task(t)
+	for t in fresh:
+		if _run_task(t):
+			_task_timers.apply_add(t[0], MissionTimer.make_timer(TASK_SECONDS, MissionTimer.Mode.REPEATING, t))
+
+
+## One round of task `t` ([task, client]): weight, then monitor. False (and the task is dropped) when its client or
+## the task object is gone.
+func _run_task(t: Array) -> bool:
+	if not sim.exists(int(t[1])) or not sim.exists(int(t[0])):
+		_task_timers.apply_cancel(t[0])
+		return false
+	var ns := DarkstarScript.to_str(sim.objects[int(t[0])].fields.get("class", "")).to_lower()
+	for step in ["weight", "monitor"]:
+		if vm.has_function(ns + "::" + step):
+			vm.call_script(ns + "::" + step, [t[0], t[1]])
+	return true
 
 
 func on_player_killed(player: int, killer: int) -> void:
@@ -298,7 +308,7 @@ func message_box(title: String, text: String, callback: String) -> void:
 	output.show_message("%s: %s" % [TribesText.make_plain(title), text], MESSAGE_BOX_SECONDS)
 	if title.to_lower() == VICTORY_TITLE:
 		_won = true
-	_boxes.append([sim_time + MESSAGE_BOX_SECONDS, callback])
+	schedule_game(MESSAGE_BOX_SECONDS, func() -> void: vm.eval_string(callback))
 
 
 ## Disconnect(): the mission ends (won when missionComplete's box came up).
@@ -306,12 +316,8 @@ func end_session() -> void:
 	debrief(_won, output.objectives[0] if not output.objectives.is_empty() else "")
 
 
-func _update_game(_delta: float) -> void:
-	for b in _boxes.duplicate():
-		if sim_time >= float(b[0]):
-			_boxes.erase(b)
-			vm.eval_string(String(b[1]))
-	_run_tasks()
+func _update_game(delta: float) -> void:
+	_run_tasks(delta)
 
 
 # ------------------------------------------------------------------ contacts

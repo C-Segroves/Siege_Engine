@@ -12,6 +12,10 @@ extends Node
 ## Each agent profile ({radius, height, climb, slope_deg}) has its own navigation map. Baking is asynchronous:
 ## until the tiles between two points are baked, make_path returns [] and the caller moves as it did without
 ## navigation (straight at its goal). Child "Navigation" of the Battle (of(battle) makes it on first use).
+##
+## AI asks through request_path, never make_path: the requests wait in a NavPathQueue and at most PATHS_PER_TICK are
+## handed to NavigationServer3D.query_path (its own thread) per physics tick, so many bots asking at once cost the
+## main loop a bounded amount. The asker keeps its last path until take_path_answer has a new one.
 
 const NODE_NAME := "Navigation"
 ## Tile edge (metres) and how many tiles one request may queue (a long path gets its first stretch first).
@@ -30,12 +34,18 @@ const CELL_HEIGHT := 0.1
 ## above the yard) and up slopes to 60 degrees (steeper ones he jets or skis).
 const SOLDIER := {"name": "soldier", "radius": 0.6, "height": 2.3, "climb": 8.0, "slope_deg": 60.0}
 const EDGE_CONNECTION_MARGIN := 1.0
+## Queued requests handed to the navigation server per physics tick, and how many are looked at (a request whose
+## tiles are still baking is looked at and put back).
+const PATHS_PER_TICK := 6
+const REQUESTS_LOOKED_AT_PER_TICK := 16
 
 var _root: Node3D
 var _source: NavigationMeshSourceGeometryData3D
 var _maps := {}          # profile name -> navigation map RID
 var _tiles := {}         # "profile|x|z" -> region RID (baked) or null (baking)
 var _pending := 0
+var _queue := NavPathQueue.new()
+var _in_flight := {}     # asker id -> NavigationPathQueryResult3D being filled by the navigation server
 var _last_region_frame := -1000
 ## The navigation map takes in new regions on its next sync (a physics frame): paths wait this many frames.
 const SYNC_FRAMES := 2
@@ -50,6 +60,11 @@ static func of(battle: Node3D) -> BattleNavigation:
 		n.name = NODE_NAME
 		battle.add_child(n)
 	return n
+
+
+func _physics_process(_delta: float) -> void:
+	_queue.apply_stale_purge()
+	_dispatch_waiting_requests()
 
 
 func _exit_tree() -> void:
@@ -72,6 +87,38 @@ func make_path(from: Vector3, to: Vector3, profile := SOLDIER) -> PackedVector3A
 	if NavigationServer3D.map_get_iteration_id(map) == 0 or not is_synced():
 		return PackedVector3Array()
 	return NavigationServer3D.map_get_path(map, from, to, true)
+
+
+## Asks for a path from `from` to (the walkable point nearest) `to` for `profile` on behalf of `asker` (an id,
+## e.g. get_instance_id()). The answer comes later (has_path_answer / take_path_answer): [] when no path exists.
+## A newer request of the same asker replaces its waiting one; the asker's earlier answer stays until taken.
+func request_path(asker: int, from: Vector3, to: Vector3, profile := SOLDIER) -> void:
+	_queue.apply_request(asker, from, to, profile)
+
+
+func has_path_answer(asker: int) -> bool:
+	return _queue.has_answer(asker)
+
+
+## The answer to the asker's request (see has_path_answer), removed from the queue.
+func take_path_answer(asker: int) -> PackedVector3Array:
+	return _queue.take_answer(asker)
+
+
+## True while the asker's request waits for the navigation server (not yet answered).
+func is_path_pending(asker: int) -> bool:
+	return _queue.is_waiting(asker) or _in_flight.has(asker)
+
+
+## The asker has no use for its request or answer any more (its task changed, it died).
+func apply_path_cancel(asker: int) -> void:
+	_queue.apply_cancel(asker)
+	_in_flight.erase(asker)
+
+
+## Requests waiting for a free slot or for their tiles (tests).
+func waiting_path_count() -> int:
+	return _queue.waiting_count()
 
 
 ## False for SYNC_FRAMES after a tile's region was added (the map may not have taken it in yet: a path then would
@@ -98,6 +145,43 @@ func is_ready(from: Vector3, to: Vector3, profile := SOLDIER) -> bool:
 ## Tiles being baked now.
 func pending_tiles() -> int:
 	return _pending
+
+
+# ------------------------------------------------------------------ async path queries
+
+## Hands the oldest requests whose tiles are baked to the navigation server; the others go back in line.
+func _dispatch_waiting_requests() -> void:
+	var asked := 0
+	for request in _queue.take_requests(REQUESTS_LOOKED_AT_PER_TICK):
+		if asked < PATHS_PER_TICK and _is_path_askable(request):
+			_ask_navigation_server(request)
+			asked += 1
+		else:
+			_queue.apply_requeue(request)
+
+
+func _is_path_askable(request: Dictionary) -> bool:
+	if _request_tiles(request.from, request.to, request.profile) > 0:
+		return false
+	return NavigationServer3D.map_get_iteration_id(_map_of(request.profile)) > 0 and is_synced()
+
+
+func _ask_navigation_server(request: Dictionary) -> void:
+	var query := NavigationPathQueryParameters3D.new()
+	query.map = _map_of(request.profile)
+	query.start_position = request.from
+	query.target_position = request.to
+	var result := NavigationPathQueryResult3D.new()
+	_in_flight[request.asker] = result
+	NavigationServer3D.query_path(query, result, _on_path_answered.bind(request.asker, result))
+
+
+## `result` is the one this request was made with: an answer to an asker's older request, replaced since, is dropped.
+func _on_path_answered(asker: int, result: NavigationPathQueryResult3D) -> void:
+	if _in_flight.get(asker) != result:
+		return
+	_in_flight.erase(asker)
+	_queue.apply_answer(asker, result.path)
 
 
 # ------------------------------------------------------------------ tiles

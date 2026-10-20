@@ -278,11 +278,13 @@ against B0_C0_0A texts). Mission counts as **failed** if `code > threshold[type]
   0xf99a(group G): G's target (group: every member) is safe.
 * Objective flags (0x15f80, the player each frame): type 0 sets +0xd once the player's target is an object of the
   squad's order target ("ID with the targeting computer"); type 3 sets +0xe after standing within 10000 units of the
-  order target (0x1cda0: a group's first member), facing it ±45° (torso included), through the link timer (two 5000 ms
-  stages, table 0x91ce8); stepping away resets it. Type 5 sets +0xd within 40000 units of the target (message only).
+  order target (0x1cda0: a group's first member), facing it ±45° (torso included), through four link stages (counter 0xaf700, table 0x91ce8 = 5000, 5000, negative, 0 ms; SYSTEM.STR messages 29-32
+  "ENGAGING COMPUTER LINK" ... "DATA TRANSFER COMPLETE" at 0, 5, 10 s and right after, no countdown drawn); leaving the
+  position/cone after stage 0 shows message 33 "TRANSFER ABORTED" and restarts at stage 0 (reset, no pause); the win
+  (0xf618) is the flag alone plus the safe test (status 9, else 10). Type 5 sets +0xd within 40000 units of the target (message only).
 * Death / alert regions: a unit's death fires its `death_region` (SIM@13699), a hit or an enemy within 50000 its
   `alert_region`; many campaign missions chain their reinforcement waves this way (e.g. B0_C0_4A, 3B).
-* Remake rule: types 0 / 3 also end won when every active hostile unit and structure is destroyed.
+* Type 0 and 3 end won on their flag alone (no area-cleared alternative) plus the safe test.
 
 ## 6. Demo tapes (TAPES/*.TAP) (H)
 vcr.cpp, SIM@58e74: sequence of `u32 len + bytes` for script.dat, player.mec, mission.var, prefs.cfg,

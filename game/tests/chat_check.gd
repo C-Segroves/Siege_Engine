@@ -18,10 +18,8 @@ const STEP_FRAMES := 3
 const HISTORY_LINES := 40
 const TYPED := "wave"
 const RADIO_SPEAKER := "Test speaker"
-const SETTINGS_FILE := "user://settings.json"
 ## The smallest window the placement is checked on (the remake's default window).
 const MIN_PLACEMENT_SCREEN := Vector2(1280, 800)
-const SETTINGS_BACKUP := "user://settings.json.chat_check_backup"
 
 var _fails := 0
 var _had_settings := false
@@ -96,18 +94,27 @@ func _start_battle() -> Battle:
 	return b
 
 
+## The settings file of this run (a test store, not the player's: UserStore).
+func _settings_file() -> String:
+	return Assets.SETTINGS_FILE
+
+
+func _settings_backup() -> String:
+	return _settings_file() + ".chat_check_backup"
+
+
 func _back_up_settings() -> void:
-	_had_settings = FileAccess.file_exists(SETTINGS_FILE)
+	_had_settings = FileAccess.file_exists(_settings_file())
 	if _had_settings:
-		DirAccess.copy_absolute(ProjectSettings.globalize_path(SETTINGS_FILE), ProjectSettings.globalize_path(SETTINGS_BACKUP))
+		DirAccess.copy_absolute(ProjectSettings.globalize_path(_settings_file()), ProjectSettings.globalize_path(_settings_backup()))
 
 
 func _restore_settings() -> void:
 	if _had_settings:
-		DirAccess.copy_absolute(ProjectSettings.globalize_path(SETTINGS_BACKUP), ProjectSettings.globalize_path(SETTINGS_FILE))
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(SETTINGS_BACKUP))
+		DirAccess.copy_absolute(ProjectSettings.globalize_path(_settings_backup()), ProjectSettings.globalize_path(_settings_file()))
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(_settings_backup()))
 	else:
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(SETTINGS_FILE))
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(_settings_file()))
 
 
 func _count(b: Battle, channel: String, text := "") -> int:
@@ -238,9 +245,9 @@ func _check_radio(b: Battle) -> void:
 func _check_settings_persist() -> void:
 	ChatSettings.apply_value("visible_lines", 9)
 	ChatSettings.apply_value("position", "top_right")
-	var saved = JSON.parse_string(FileAccess.get_file_as_string(SETTINGS_FILE))
+	var saved = JSON.parse_string(FileAccess.get_file_as_string(_settings_file()))
 	var chat: Dictionary = saved.get(ChatSettings.KEY, {}) if saved is Dictionary else {}
-	_expect(int(chat.get("visible_lines", 0)) == 9 and chat.get("position") == "top_right", "settings are saved to %s" % SETTINGS_FILE)
+	_expect(int(chat.get("visible_lines", 0)) == 9 and chat.get("position") == "top_right", "settings are saved to %s" % _settings_file())
 	_expect(ChatSettings.load_settings().visible_lines == 9, "and read back")
 	ChatSettings.apply_value("visible_lines", 999)
 	_expect(ChatSettings.load_settings().visible_lines == int(ChatSettings.LIMITS.visible_lines.y), "out-of-range values are clamped")

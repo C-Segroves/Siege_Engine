@@ -1,12 +1,13 @@
 class_name LauncherAutomation
 ## Command-line automation of the launcher for tests (user args after `--`):
-##   --autohost=<players> [--mode=vs|team_vs|coop|campaign]   host, wait for the players to be ready, start
+##   --autohost=<players> [--mode=vs|team_vs|coop|campaign]   host a lobby, wait for the players to be ready, start
 ##   --autojoin=<ip>                                   join a host and mark ready
-##   --page=<page> [--herc=<id>] [--shot=<png>]        open a page, optionally pick a Herc, screenshot + quit
-##   [--map=<name part>] [--game_mode=<id part>] [--bots=<n>]   host page: pick that map / game mode / bot count
-## Pages: menu | armory | options | host[:<mode>] | browser | lobby:<coop|vs|campaign> | saga |
-##        debrief | briefing:<es1|es2|starsiege|starsiege-cybrid> | hangar:<same games> | training:<tribes|tribes2> |
-##        new_campaign | saves[:save|load] | killed:<same games as briefing>
+##   --page=<page> [--shot=<png>]                      open a page, screenshot + quit
+##   [--map=<name part>] [--game_mode=<id part>] [--bots=<n>]   lobby pages: pick that map / game mode / bot count
+## Pages: menu | options | lobby[:<vs|team_vs|coop|campaign|skirmish|extraction>] (a LAN lobby; skirmish and extraction
+##        are offline) | host[:<kind>] (the same) | armory (the skirmish lobby) | extraction (the raid lobby) | browser |
+##        saga | debrief | briefing:<es1|es2|starsiege|starsiege-cybrid> (that campaign's lobby) |
+##        hangar:<same games> | training:<tribes|tribes2> | new_campaign | saves[:save|load] | killed:<same games as briefing>
 ## Only the first launcher of a process runs them (run()).
 
 const AUTOHOST_AI := 2
@@ -38,7 +39,6 @@ static func run(launcher: Launcher) -> void:
 		Net.join(join)
 	elif page != "":
 		_open_page(launcher, page)
-		_apply_herc_arg(launcher)
 		var shot := ScreenRouter.arg_value("shot")
 		if shot != "":
 			await launcher.save_shot_and_quit(shot)
@@ -46,10 +46,9 @@ static func run(launcher: Launcher) -> void:
 
 static func _autohost(launcher: Launcher, players: int) -> void:
 	Net.player_name = "Host"
-	launcher.context.vehicle = str(Packs.pilotable()[0].id) if not Packs.pilotable().is_empty() else MatchFlow.DEFAULT_VEHICLE
 	var mode := ScreenRouter.arg_value("mode")
 	var known := mode in MatchFlow.MODES or mode == TEAM_VERSUS
-	launcher.go("host", {"mode": mode if known else "vs", "ai": AUTOHOST_AI}).call("create_lobby")
+	_open_lobby(launcher, mode if known else GameOptionsModel.KIND_VERSUS, true, AUTOHOST_AI)
 	var tree := launcher.get_tree()
 	while Net.roster.size() < players or MatchFlow.make_start_block_reason() != "":
 		MatchFlow.apply_team_choices(TeamAssignment.make_assign_all(Net.roster, Net.settings))
@@ -67,27 +66,60 @@ static func _mark_ready_soon(launcher: Launcher) -> void:
 	Net.set_my_info("ready", true)
 
 
+## Opens a lobby of `kind` ("team_vs" = versus in the map's first team mode) and applies the automation arguments
+## (--map, --game_mode, --bots) and `ai` opponents (-1 = the kind's default) the way the host's Game Options would.
+## `lan` false makes a raid an offline one (a skirmish always is).
+static func _open_lobby(launcher: Launcher, kind: String, lan := true, ai := -1) -> void:
+	var team_vs := kind == TEAM_VERSUS
+	var real_kind := GameOptionsModel.KIND_VERSUS if team_vs else kind
+	var solo := real_kind == GameOptionsModel.KIND_SKIRMISH or (real_kind == GameOptionsModel.KIND_EXTRACTION and not lan)
+	launcher.open_lobby(real_kind, solo)
+	var s := Net.settings
+	if ai >= 0:
+		s = GameOptionsModel.make_with_value(s, "ai", ai)
+	if ScreenRouter.arg_value("bots") != "":
+		s = GameOptionsModel.make_with_value(s, InfantryBots.CONFIG_KEY, int(ScreenRouter.arg_value("bots")))
+	s = _apply_map_arg(s)
+	s = _apply_game_mode_arg(s, team_vs)
+	Net.set_settings(s)
+
+
+static func _apply_map_arg(s: Dictionary) -> Dictionary:
+	var part := ScreenRouter.arg_value("map").to_lower()
+	if part == "":
+		return s
+	var entries := MapPicker.make_entries()
+	for i in entries.size():
+		if str(entries[i].name).to_lower().contains(part):
+			return GameOptionsModel.make_with_map(s, i)
+	return s
+
+
+static func _apply_game_mode_arg(s: Dictionary, team_vs: bool) -> Dictionary:
+	var part := ScreenRouter.arg_value("game_mode").to_lower()
+	for m in GameOptionsModel.make_game_modes(s):
+		var matches := str(m.id).contains(part) or str(m.label).to_lower().contains(part) if part != "" else team_vs and bool(m.team_based)
+		if matches:
+			return GameOptionsModel.make_with_game_mode(s, str(m.id))
+	return s
+
+
 static func _open_page(launcher: Launcher, page: String) -> void:
 	var parts := page.split(":")
 	var detail := parts[1] if parts.size() > 1 else ""
 	match parts[0]:
-		"lobby":
-			launcher.go("host", {"mode": detail if detail != "" else "vs"}).call("create_lobby")
-		"host":
-			var host_args := {"mode": detail if detail != "" else "vs"}
-			if ScreenRouter.arg_value("bots") != "":
-				host_args[InfantryBots.CONFIG_KEY] = int(ScreenRouter.arg_value("bots"))
-			var host := launcher.go("host", host_args)
-			if ScreenRouter.arg_value("map") != "":
-				host.call("select_map", ScreenRouter.arg_value("map"))
-			if ScreenRouter.arg_value("game_mode") != "":
-				host.call("select_game_mode", ScreenRouter.arg_value("game_mode"))
+		"lobby", "host":
+			_open_lobby(launcher, detail if detail != "" else GameOptionsModel.KIND_VERSUS)
+		"armory":
+			_open_lobby(launcher, GameOptionsModel.KIND_SKIRMISH, false)
+		"extraction":
+			_open_lobby(launcher, GameOptionsModel.KIND_EXTRACTION, false)
 		"briefing":
 			_start_campaign_of(detail)
-			launcher.show_campaign()
+			launcher.show_started_campaign()
 		"hangar":
 			_start_campaign_of(detail)
-			launcher.open_hangar("briefing")
+			launcher.open_hangar("lobby")
 		"saga":
 			_start_saga_at_starsiege()
 			launcher.show_campaign()
@@ -125,9 +157,3 @@ static func _start_saga_at_starsiege() -> void:
 	for i in SAGA_STAGES_TO_STARSIEGE:
 		Session.saga.advance()
 	Session.campaign = Session.saga.campaign
-
-
-static func _apply_herc_arg(launcher: Launcher) -> void:
-	var herc := ScreenRouter.arg_value("herc")
-	if herc != "" and launcher.current != null and launcher.current.herc_selector != null:
-		launcher.current.herc_selector.select_vehicle(Assets.qualify(herc))

@@ -129,7 +129,8 @@ func make_soldier_spec(peer: int, team: int, pname: String, xf: Transform3D) -> 
 func make_chosen_armor(entry: Dictionary) -> String:
 	var chosen := str(entry.get("infantry_armor", ""))
 	var a := InfantryCatalog.armor(chosen)
-	return chosen if not a.is_empty() and str(a.get("pack", "")) == pack else InfantryCatalog.light_armor_id(pack)
+	var wanted := make_infantry_pack(battle.config)   # a mission may name its own infantry pack after the battle was built
+	return chosen if not a.is_empty() and str(a.get("pack", "")) in [pack, wanted] else InfantryCatalog.light_armor_id(pack)
 
 
 ## The soldier spec of a player spec whose vehicle is armour `spec.vehicle`: the same net id, place and team.
@@ -194,6 +195,7 @@ func build_soldier(spec: Dictionary) -> Infantry:
 	s.kit.apply_spawn(s.armor)
 	s.equip(spec.get("loadout", []))
 	battle.vehicles[s.net_id] = s
+	battle.entities.register(s.net_id, s)
 	return s
 
 

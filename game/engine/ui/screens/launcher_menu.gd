@@ -1,8 +1,9 @@
 extends LauncherScreen
-## Launcher main menu: pilot name, campaigns, the extraction mode's stash and solo raid (needs a Tribes pack), (Continue campaign: the newest save that can go on, loaded only
-## when chosen; New campaign: pilot name and the saga or one game's campaign; Load game: the Save / Load
-## screen; SaveGames is the store), the Tribes / Tribes 2 training missions, skirmish / armory, LAN, tools,
-## options, Quit (asked first). Back returns to the front end that opened the launcher and says which one.
+## Launcher main menu: pilot name, campaigns (Continue campaign: the newest save that can go on, loaded only when chosen;
+## New campaign: pilot name and the saga or one game's campaign; Load game: the Save / Load screen; SaveGames is the
+## store), the Tribes / Tribes 2 training missions, skirmish and the solo extraction raid (a lobby of their own, offline;
+## the raid needs a Tribes pack), LAN (host a lobby, host a co-op campaign, join), tools, options, Quit (asked first).
+## Back returns to the front end that opened the launcher and says which one.
 
 const INTRO_MOVIE := "video/flic/intro3.ogv"
 const SHAPE_VIEWER := "res://tools/shape_viewer.tscn"
@@ -15,14 +16,15 @@ func open(_args: Dictionary) -> void:
 	MenuMusic.play_app_hub()
 	var full := not launcher().multiplayer_only
 	set_back(launcher().make_home_label(), launcher().leave_to_front_end)
-	set_primary("Skirmish / armory", func() -> void: router.go("armory"))
+	set_primary("Skirmish", func() -> void: launcher().open_lobby(GameOptionsModel.KIND_SKIRMISH, true))
 	content.add_child(NameRow.new("Pilot name"))
 	_add_campaign_section(full)
 	if ExtractionRules.is_available():
 		content.add_child(Widgets.section("Extraction"))
-		_add(Widgets.button("Extraction raid (stash, shop, solo raid)", func() -> void: router.go("extraction")))
+		_add(Widgets.button("Extraction raid (solo)", func() -> void: launcher().open_lobby(GameOptionsModel.KIND_EXTRACTION, true)))
 	content.add_child(Widgets.section("LAN"))
-	_add(Widgets.button("Host LAN game", func() -> void: router.go("host")))
+	_add(Widgets.button("Host LAN game", func() -> void: launcher().open_lobby(GameOptionsModel.KIND_VERSUS)))
+	_add(Widgets.button("Host co-op campaign (LAN)", func() -> void: launcher().open_lobby(GameOptionsModel.KIND_CAMPAIGN)))
 	_add(Widgets.button("Join LAN game", func() -> void: router.go("browser")))
 	content.add_child(Widgets.section("More"))
 	if full:

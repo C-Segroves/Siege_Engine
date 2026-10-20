@@ -43,7 +43,7 @@ var map_data: Dictionary = {}
 var _check_t := 0.0
 static var _specs := {}          # pack -> base_equipment.json
 ## Packs without base_equipment.json of their own that borrow another pack's blocks (their stations are look-alikes).
-const SPEC_PACK_FALLBACK := {"tribes_aa": "tribes2"}
+const SPEC_PACK_FALLBACK := {"tribes_aa": "tribes2", "tribes_v": "tribes2"}
 
 
 ## Builds the base of `built` (MapBuilder.build result) under `p_battle`; null when the map has none.
@@ -88,12 +88,20 @@ static func load_specs(pack: String) -> Dictionary:
 ## The spec of map station `record` ({} when it is not base equipment).
 static func make_spec(pack: String, record: Dictionary) -> Dictionary:
 	var key := str(record.get("spec", ""))
-	return load_specs(pack).get("blocks", {}).get(key, {}) if key != "" else {}
+	var spec: Dictionary = load_specs(pack).get("blocks", {}).get(key, {}) if key != "" else {}
+	if not (record.has("barrel_shape") and spec.get("turret") is Dictionary):
+		return spec
+	# a pack with its own turret shapes (Aerial Assault): its barrel and mount node replace the borrowed block's
+	spec = spec.duplicate(true)
+	spec.turret["barrel_shape"] = str(record.barrel_shape)
+	spec.turret["barrel_mount"] = str(record.get("barrel_mount", ""))
+	return spec
 
 
 func _build_objects(stations: Array, pack: String, pal: String) -> void:
 	var neutral := is_neutral_match()
 	for st in stations:
+		LoadKeepAlive.pump()
 		var record: Dictionary = st.get("record", {})
 		var spec := make_spec(pack, record)
 		if spec.is_empty() or str(record.get("shape", "")) == "":
@@ -160,6 +168,19 @@ func add_deployed(record: Dictionary, xf: Transform3D) -> TribesBaseObject:
 	obj.apply_power(true)
 	deployed.emit(obj)
 	return obj
+
+
+## Faction ownership in a raid: every base object (turrets, sensors, stations) within an owner's `radius` of its `pos`
+## takes that owner's `team`, the nearest owner winning, so a faction's soldiers, vehicles and turrets share a side
+## (TeamRelations) and no longer fight each other. `owners`: [{pos: Vector3, radius: float, team: int}].
+func apply_owners(owners: Array) -> void:
+	for o in objects:
+		var best_d := INF
+		for ow in owners:
+			var d: float = o.global_position.distance_to(ow.pos)
+			if d <= float(ow.radius) and d < best_d:
+				best_d = d
+				o.team = int(ow.team)
 
 
 ## Neutral base: free-for-all or extraction (the stations and turrets belong to no player's team).

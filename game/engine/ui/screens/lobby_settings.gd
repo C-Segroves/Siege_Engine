@@ -9,6 +9,9 @@ class_name LobbySettings
 ##   map, world_idx  the MapPicker entry; frag_limit, ai (AI units / faction vehicles), infantry_bots (bots /
 ##                   faction soldiers), balance, infantry_pack (the infantry game when both Tribes are installed),
 ##                   extraction_relations (the factions' relation preset)
+##   max_bots        the cap on live AI units (BotBudget; 0 = none)
+##   solo            an offline session (skirmish, single player campaign or raid); coop a LAN campaign (it pays as
+##                   "campaign.coop"); goal_seed (GameOptionsModel) the host's seed of the goal board
 ## Deathmatch puts every pilot and bot on a side of its own (MatchFlow.apply_free_for_all_teams).
 
 const GAME_MODE_KEY := "game_mode"
@@ -37,6 +40,9 @@ static func make(choice: Dictionary) -> Dictionary:
 		s[GameModes.TIME_LIMIT_KEY] = int(limits.get(GameModes.TIME_LIMIT_KEY, 0))
 	if mode == ExtractionRules.MODE:
 		s[RELATIONS_KEY] = str(choice.get("relations", ""))
+	s[BotBudget.CONFIG_KEY] = maxi(int(choice.get(BotBudget.CONFIG_KEY, 0)), 0)   # the host's cap on live AI units, 0 = none
+	s["solo"] = bool(choice.get("solo", false))
+	s["coop"] = mode == "campaign" and not s.solo   # EconomyRules.make_mode_key: a LAN campaign pays as "campaign.coop"
 	return s
 
 
@@ -61,7 +67,7 @@ static func make_planned_bots(s: Dictionary) -> Array:
 	var cfg := s.duplicate()
 	var out := []
 	for i in clampi(int(s.get(InfantryBots.CONFIG_KEY, 0)), 0, InfantryBots.MAX_BOTS):
-		out.append({"name": "Bot %d" % (i + 1), "team": InfantryBots.make_team(cfg, i)})
+		out.append({"key": "bot:%d" % i, "name": "Bot %d" % (i + 1), "team": InfantryBots.make_team(cfg, i)})
 	return out
 
 
@@ -72,7 +78,7 @@ static func make_planned_ai(s: Dictionary) -> Array:
 	if str(s.get("mode", "")) != "vs" or not bool(s.get("teams", false)):
 		return out
 	for i in int(s.get("ai", 0)):
-		out.append({"name": "AI unit %d" % (i + 1), "team": make_ai_team(s, i)})
+		out.append({"key": "ai:%d" % i, "name": "AI unit %d" % (i + 1), "team": make_ai_team(s, i)})
 	return out
 
 
@@ -88,7 +94,18 @@ static func make_planned_members(s: Dictionary) -> Array:
 
 ## The team of AI unit `i` in a team versus match with `s`.
 static func make_ai_team(s: Dictionary, i: int) -> int:
-	return i % make_team_count(s)
+	var count := make_team_count(s)
+	var picked := int((s.get(InfantryBots.MEMBER_TEAMS_KEY, {}) as Dictionary).get("ai:%d" % i, -1))
+	return picked if picked >= 0 and picked < count else i % count
+
+
+## Host: settings `s` with the computer-controlled member `key` ("bot:<i>" / "ai:<i>") put on `team`.
+static func make_with_member_team(s: Dictionary, key: String, team: int) -> Dictionary:
+	var out := s.duplicate(true)
+	var picks: Dictionary = out.get(InfantryBots.MEMBER_TEAMS_KEY, {})
+	picks[key] = team
+	out[InfantryBots.MEMBER_TEAMS_KEY] = picks
+	return out
 
 
 ## One-line description of the settings.

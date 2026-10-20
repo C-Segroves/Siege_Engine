@@ -83,6 +83,21 @@ func apply_sight(h: Herc) -> void:
 		cockpit_cam.global_basis = h.sight_basis()
 
 
+## Narrows the soldier's first-person view to his Laser Rifle scope (RifleScope) while it is zoomed and widens it back
+## after; the projection centre keeps its place in the view. The weapon's view model is hidden while zoomed.
+func apply_scope(h: Herc) -> void:
+	var s := h as Infantry
+	if s == null or not is_instance_valid(cockpit_cam):
+		return
+	var zoomed := s.scope.zoomed and s.alive and RifleScope.is_scope_weapon(s.current_weapon())
+	var fov := s.scope.make_vertical_fov_deg() if zoomed else make_cockpit_fov_deg(h)
+	var size := 2.0 * cockpit_cam.near * tan(deg_to_rad(fov) * 0.5)
+	if not is_equal_approx(size, cockpit_cam.size):
+		cockpit_cam.frustum_offset *= size / cockpit_cam.size
+		cockpit_cam.size = size
+	s.held.apply_view_shown(not zoomed)
+
+
 ## Vertical field of view (degrees) of `h`'s cockpit camera: its game's (Earthsiege: the VUE view, 62).
 static func make_cockpit_fov_deg(h: Herc) -> float:
 	if str(h.def.get("pack", "")) in DARKSTAR_PACKS:

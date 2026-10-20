@@ -27,6 +27,8 @@ const FOOTSTEP_DB_OTHER := -10.0
 const CAPSULE_RADIUS_FACTOR := 0.22
 const CAPSULE_MIN_RADIUS := 1.2
 const CAPSULE_MAX_RADIUS := 4.0
+## The collision capsule's cylinder is at least this long (see _build_collision).
+const HIT_CAPSULE_MIN_BODY := 0.1
 const DEFAULT_MODEL_HEIGHT := 8.0
 ## ES2 equipment pods (effects per the original shell/manual text).
 const ENERGY_BONUS := 1.5
@@ -41,6 +43,10 @@ var display_name := ""
 var net_id := 0
 var owner_peer := 1          # peer that pilots this Herc (1 = server / AI)
 var is_puppet := false
+## Network pilot link (engine/net/pilot_link.gd): the server feeds a remote pilot's input frames through it, a predicting
+## client simulates its own body through it. Null (a LAN host's default): the body is driven by its controls directly.
+var pilot_link: PilotLink
+var _hit_capsule := Vector2.ZERO
 var palette_id := "es1:WORLD0"
 
 var def: Dictionary
@@ -110,6 +116,10 @@ var _last_yaw := 0.0
 var _eye_mount := {}  # eye_mount(): {node, position}
 ## The pilot's missiles in flight: missile camera and steered EO missile (MissileSteering).
 var missile_steering := MissileSteering.new(self)
+## The cloak this unit carries (docs/formats/cloaking.md); CloakState does nothing until a profile is installed.
+var cloak := CloakState.new()
+## The pilot's (or a mission order's) wish to be cloaked: a vehicle follows it (a soldier's cloak follows his pack).
+var cloak_input := false
 
 
 func _ready() -> void:
@@ -163,6 +173,7 @@ func _configure() -> void:
 	_apply_vehicle_stats()
 	components = HercDamage.make_components(def)
 	integrity = 1.0
+	cloak.apply_profile(CloakProfile.of_vehicle(vehicle_id, def))
 
 
 func _apply_vehicle_stats() -> void:
@@ -334,6 +345,12 @@ func sight_basis() -> Basis:
 	return aim_basis()
 
 
+## The unit direction `weapon` fires in from `muzzle` when its pilot leads the shot (an AI flyer: the shot keeps the
+## craft's speed), else ZERO: the weapon then fires at the crosshair point (Weapon.make_aim_direction).
+func make_lead_direction(_weapon: Weapon, _muzzle: Vector3) -> Vector3:
+	return Vector3.ZERO
+
+
 ## The pilot's eye point: where the cockpit camera sits and every shot's aim ray starts.
 func aim_origin() -> Vector3:
 	var mount := eye_mount()
@@ -358,19 +375,53 @@ func is_local_player() -> bool:
 # ------------------------------------------------------------------ simulation
 
 func _physics_process(delta: float) -> void:
+	if pilot_link != null and pilot_link.is_predicting(self):
+		_predicted_update(delta)
+		return
 	if is_puppet:
 		_puppet_update(delta)
 		return
 	capacitor = minf(capacitor_max, capacitor + capacitor_rate * delta)
+	cloak.apply_follow(cloak_input, self)
+	cloak.apply_step(self, delta)
 	if not alive:
 		_death_slide(delta)
 		return
 	_apply_shield_recharge(delta)
+	if pilot_link != null:
+		pilot_link.begin_step(self, delta)
 	if has_meta("disabled_until") and Time.get_ticks_msec() < int(get_meta("disabled_until")):
 		_hold_controls()
 	_drive(delta)
 	apply_torso_step(delta)
+	if pilot_link != null:
+		pilot_link.end_step(self)
 	_animate(delta)
+
+
+## One step of the movement a PilotLink replays when it reconciles: whatever decides where the body goes next.
+func step_movement(delta: float) -> void:
+	capacitor = minf(capacitor_max, capacitor + capacitor_rate * delta)
+	_drive(delta)
+
+
+## The local pilot's own body on a predicting client: it runs its movement from the pilot's controls now and the
+## server's echo corrects it later (Prediction); damage, weapons and everything else still come from the server.
+func _predicted_update(delta: float) -> void:
+	cloak.apply_step(self, delta)
+	pilot_link.begin_step(self, delta)
+	step_movement(delta)
+	apply_torso_step(delta)
+	pilot_link.end_step(self)
+	_animate(delta)
+
+
+## Capsule (radius, height in metres) standing on the position that shots are tested against (HitHistory).
+func make_hit_capsule() -> Vector2:
+	if _hit_capsule == Vector2.ZERO:
+		var size := make_body_size()
+		_hit_capsule = Vector2(size.x, maxf(size.y, size.x * 2.0 + HIT_CAPSULE_MIN_BODY))
+	return _hit_capsule
 
 
 ## Turns the torso / turret toward torso_target and pitch_target at the vehicle's rates, within its limits.
@@ -462,6 +513,7 @@ func apply_weapon_hit(raw_hit: Dictionary) -> void:
 	if through > 0.0:
 		damage_model.apply_armor(self, hit, float(hit.armor) * through)
 		integrity = HercDamage.integrity_of(components)
+	cloak.apply_damaged(float(hit.armor))
 	damaged.emit(self, hit.attacker)
 	if alive and HercDamage.is_destroyed(components, integrity):
 		_die(hit.attacker)
@@ -741,11 +793,15 @@ func apply_snapshot(s: Array, dt: float) -> void:
 		HercSnapshots.apply_damage_block(self, s[HercSnapshots.SNAP_DAMAGE])
 	if s.size() > HercSnapshots.SNAP_MISSILE_STEER and s[HercSnapshots.SNAP_MISSILE_STEER] is Vector2 and not is_local_player():
 		missile_steering.stick = s[HercSnapshots.SNAP_MISSILE_STEER]
-	speed = s[5]
+	if s.size() > HercSnapshots.SNAP_CLOAK:
+		cloak.apply_remote(bool(s[HercSnapshots.SNAP_CLOAK]))
+	var predicted := pilot_link != null and pilot_link.is_predicting(self)
+	if not predicted:
+		speed = s[5]
+		capacitor = s[10]   # a predicted body spends its own capacitor on jets and is corrected by the server's echo
 	shield_front = s[7]
 	shield_rear = s[8]
 	integrity = s[9]
-	capacitor = s[10]
 	kills = s[11]
 	deaths = s[12]
 	if alive and not s[6]:
@@ -760,6 +816,7 @@ func apply_snapshot(s: Array, dt: float) -> void:
 
 
 func _puppet_update(delta: float) -> void:
+	cloak.apply_step(self, delta)
 	if _snapshots.is_empty():
 		return
 	var pose := _snapshots.advance(delta)

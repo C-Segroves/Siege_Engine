@@ -51,6 +51,10 @@ var panel_top := DEFAULT_LOOK_DOWN_TOP
 
 var mfd_mode := CockpitMfd.MODE_SCANNER
 var radar_range_i := DEFAULT_RADAR_RANGE
+## The NAV MAP page's terrain picture (the command map's top-down render, built on first use) and the world area it covers.
+var nav_map: Texture2D
+var nav_area := Rect2()
+var _nav_building := false
 var look_down := false
 ## Earthsiege 2 side views (look_left / look_right).
 var side_view: CockpitSideView
@@ -308,7 +312,9 @@ func _apply_action(event: InputEvent) -> bool:
 			side_view.apply_front()   # the MFD keys bring the front view back (ES2 0x432ceb)
 			apply_mode(i)
 			return true
-	if event.is_action_pressed("cockpit_mode_next"):
+	if event.is_action_pressed("radar_mode_toggle"):
+		apply_radar_toggle()
+	elif event.is_action_pressed("cockpit_mode_next"):
 		apply_mode((mfd_mode + 1) % CockpitMfd.MODE_COUNT)
 	elif event.is_action_pressed("hdd_page_1"):
 		hdd_page = CockpitHdd.PAGE_MAP
@@ -338,6 +344,26 @@ func apply_mode(m: int) -> void:
 	if m == CockpitMfd.MODE_SCANNER and mfd_mode == CockpitMfd.MODE_SCANNER:
 		_step_radar_range()
 	mfd_mode = m
+	if m == CockpitMfd.MODE_NAV:
+		_build_nav_map()
+
+
+## The original's NAV MAP (DBSIM 0x36b18) draws the terrain from straight above, not a scope.
+func _build_nav_map() -> void:
+	if nav_map != null or _nav_building or not (battle is Node3D):
+		return
+	_nav_building = true
+	nav_area = CommandMapView.make_area(battle)
+	nav_map = await CommandMapBackground.make(battle, nav_area)
+	_nav_building = false
+
+
+## Toggles the unit's radar between active and passive (ACT / PASS); a cue message says which.
+func apply_radar_toggle() -> void:
+	if herc and RadarMode.toggle(herc):
+		show_message("RADAR ACTIVE")
+	else:
+		show_message("RADAR PASSIVE")
 
 
 func _step_radar_range() -> void:
@@ -356,6 +382,8 @@ func _click_mfd(v: Vector2) -> bool:
 			continue
 		if i < CockpitMfd.MODE_COUNT:
 			apply_mode(i)
+		elif i == CockpitMfd.FIRST_OPTION and mfd_mode == CockpitMfd.MODE_SCANNER:
+			apply_radar_toggle()
 		elif i == _skin.frame("mfd", "range_step_button") and mfd_mode == CockpitMfd.MODE_SCANNER:
 			_step_radar_range()
 		elif i == _skin.frame("mfd", "range_down_button"):

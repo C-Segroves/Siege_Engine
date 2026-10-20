@@ -15,6 +15,11 @@ extends TribesBaseObject
 
 ## Seconds between target searches and aim updates to the clients (Tribes 2 thinkTimeMS is 100 .. 200 ms).
 const THINK_SECONDS := 0.2
+## A server staggers the first search into this many slots of the period.
+const THINK_SLOTS := 8
+## A turret whose aim and deploy state did not change repeats its aim update only this often (in thinks): every update
+## is a packet to every client, and an idle turret on a 64-player server was most of the turrets' cost.
+const AIM_REPEAT_THINKS := 10
 ## Aim at a soldier's chest and a vehicle's middle, not their feet (metres above the origin).
 const SOLDIER_AIM_HEIGHT := 1.0
 const VEHICLE_AIM_HEIGHT := 2.0
@@ -47,6 +52,9 @@ var _cooldown := 0.0
 var _think_t := 0.0
 var _muzzle_height := 1.0
 var _wants_deployed := false
+var _sent_aim := Vector3.ZERO
+var _sent_deployed := false
+var _unsent_thinks := AIM_REPEAT_THINKS   # thinks since the last aim update went out (the first one always does)
 
 
 func apply_spec(p_spec: Dictionary) -> void:
@@ -67,7 +75,13 @@ func apply_spec(p_spec: Dictionary) -> void:
 	if is_inside_tree() and shape:
 		aim_dir = -global_basis.z.normalized()
 		_muzzle_height = make_body_size().y * MUZZLE_HEIGHT_SHARE
-		rig = TribesTurretRig.make(shape, str(t.get("barrel_shape", "")), str(t.get("barrel_mount", "")), palette)
+		if not ServerProfile.is_collision_only():   # the rig only poses the shape's meshes: nobody sees them on a server
+			rig = TribesTurretRig.make(shape, str(t.get("barrel_shape", "")), str(t.get("barrel_mount", "")), palette)
+
+
+func _ready() -> void:
+	if ServerProfile.is_collision_only():   # spread the target searches of a base's turrets over the think period
+		_think_t = THINK_SECONDS * float(get_instance_id() % THINK_SLOTS) / float(THINK_SLOTS)
 
 
 func is_armed() -> bool:
@@ -125,8 +139,15 @@ func make_local_aim() -> Vector2:
 
 
 func _send_aim() -> void:
-	if Net.is_online():
-		_receive_aim.rpc(aim_dir, _wants_deployed)
+	if not Net.is_online():
+		return
+	_unsent_thinks += 1
+	if aim_dir == _sent_aim and _wants_deployed == _sent_deployed and _unsent_thinks < AIM_REPEAT_THINKS:
+		return   # the clients already show this aim (a repeat now and then heals a lost packet)
+	_unsent_thinks = 0
+	_sent_aim = aim_dir
+	_sent_deployed = _wants_deployed
+	_receive_aim.rpc(aim_dir, _wants_deployed)
 
 
 @rpc("authority", "call_remote", "unreliable_ordered")
@@ -140,13 +161,13 @@ func find_target() -> Node3D:
 	var muzzle := make_muzzle()
 	return TurretTargeting.find_nearest(get_tree(), {"from": muzzle, "range": engage_range,
 		"is_hostile": func(v: Node) -> bool: return TeamRelations.is_hostile(team, int(v.team)),
-		"aim_point": _aim_height_point,
+		"aim_point": _aim_height_point, "sensor": spec.get("sensor", {}),
 		"accepts": func(v: Node3D, p: Vector3) -> bool: return is_in_arc(p - muzzle) and has_line_of_sight(v)})
 
 
 ## Alive, of a hostile team, not dormant (downed, a transport) and not inside a vehicle.
 func is_valid_target(v: Node) -> bool:
-	return TurretTargeting.is_targetable(v) and TeamRelations.is_hostile(team, int(v.team))
+	return TurretTargeting.is_targetable(v) and TeamRelations.is_hostile(team, int(v.team)) 		and not CloakRules.is_hidden_from_sensor(v, spec.get("sensor", {}), global_position.distance_to(v.global_position))
 
 
 ## True when world direction `dir` is within the turret's pitch limits (measured from its own base plane).

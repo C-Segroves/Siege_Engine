@@ -3,6 +3,7 @@ extends Node
 ##   host:   godot --headless --audio-driver Dummy --path game res://tests/game_modes_lan.tscn -- --role=host
 ##   client: godot --headless --audio-driver Dummy --path game res://tests/game_modes_lan.tscn -- --role=client
 ##           [--shots=<dir>: modes_lan_client.png, needs a window]
+##   host option: --packed (packed snapshots, everyone sees everything) or --interest (packed with the interest grid)
 ## The host's soldier takes the enemy flag and captures it at his own; the client must see the flag carried
 ## (replicated state, the carrier's name on its HUD) and the host team's capture in the score.
 ## Prints "LAN <role> OK" or "LAN <role> FAILED: <why>" and quits with 0 / 1.
@@ -26,6 +27,11 @@ func _ready() -> void:
 			_role = a.substr(7)
 		elif a.begins_with("--shots="):
 			_shots = a.substr(8)
+		elif a == "--packed":
+			BattleNetSync.packed_in_lan = true   # the host sends SnapshotCodec deltas, interest off
+		elif a == "--interest":
+			BattleNetSync.packed_in_lan = true
+			BattleNetSync.interest_in_lan = true
 	Net.player_name = "Host" if _role == "host" else "Client"
 	Net.game_starting.connect(_on_game_starting)
 	if _role == "host":

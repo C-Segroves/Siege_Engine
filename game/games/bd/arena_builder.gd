@@ -71,6 +71,8 @@ static func _build_environment(parent: Node3D, light: String, light_k: float) ->
 	env_node.environment = env
 	parent.add_child(env_node)
 	SceneLighting.apply_sun_direction(SUN_DIR)
+	SceneLighting.apply_scene_light(SceneLighting.PALETTE_WORLD_SUN, SceneLighting.PALETTE_WORLD_AMBIENT, false)
+	SceneLighting.add_palette_world_sun(parent)
 
 
 ## Start pads, obstacles (up to the obstacle density, in the chosen style) and turrets (up to the

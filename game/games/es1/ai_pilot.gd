@@ -25,11 +25,15 @@ var loop_path := true
 var guard_point := Vector3.ZERO
 var formation_offset := Vector3.ZERO    # metres, relative to the leader's frame
 var leader: Herc = null                 # follow this Herc in formation when set
+var _leader_cloak_seen := false         # the leader's cloak wish last copied (copied when it changes)
 var sensor_range := 900.0
 var alert_range := 50000.0 * Assets.UNIT
 var preferred_range := 150.0
 var skill := 0.5
 var _think := 0.0
+## BotSleep tier: 0 NEAR (full), 1 MID (thinned target search, line of sight checked less often).
+var ai_lod := 0
+var _decisions := 0
 var _strafe := 1.0
 var _was_alerted := false
 var _los_due_ms := 0
@@ -46,6 +50,10 @@ const TARGET_AIM_HEIGHT := 4.0
 ## Fire when the sight is within this angle (rad) of the aim point.
 const FIRE_CONE := 0.12
 const LOS_CHECK_SECONDS := 0.25
+const MID_LOS_CHECK_SECONDS := 1.0
+## Every tier decides at 5 Hz; a MID Herc searches for a target on every MID_SEARCH_EVERY-th decision only.
+const THINK_SECONDS := 0.2
+const MID_SEARCH_EVERY := 4
 ## Repositioning without line of sight: a goal this far toward the target and this far to the side (m).
 const REPOSITION_AHEAD := 60.0
 const REPOSITION_SIDE := 40.0
@@ -109,6 +117,7 @@ func _physics_process(delta: float) -> void:
 
 
 func _reconsider() -> void:
+	_follow_leader_cloak()
 	var range := sensor_range
 	match order:
 		Order.SLEEP:
@@ -117,7 +126,12 @@ func _reconsider() -> void:
 			range = sensor_range * 0.6
 		Order.SEARCH:
 			range = 100000.0
-	var t := _find_target(range)
+	_decisions += 1
+	var t: Herc
+	if ai_lod > 0 and _decisions % MID_SEARCH_EVERY != 0 and is_instance_valid(herc.target) and herc.target.alive:
+		t = herc.target
+	else:
+		t = _find_target(range)
 	var hunted = objective.get("target")
 	if hunted is Herc and is_instance_valid(hunted) and hunted.alive:
 		t = hunted
@@ -134,15 +148,26 @@ func _reconsider() -> void:
 			herc.target = null
 
 
+## A wingman cloaks when the leader he follows does (Starsiege training: "your squadmates have also cloaked").
+func _follow_leader_cloak() -> void:
+	if leader != null and is_instance_valid(leader) and herc.cloak.is_equipped() and leader.cloak_input != _leader_cloak_seen:
+		_leader_cloak_seen = leader.cloak_input
+		herc.cloak_input = _leader_cloak_seen
+
+
 func _find_target(range: float) -> Herc:
 	var best: Herc = null
 	var best_d := range
 	for v in herc.get_tree().get_nodes_in_group("vehicles"):
+		var d: float = herc.global_position.distance_to(v.global_position)
+		if d >= best_d:   # the signature only shortens how far a unit is seen: beyond the best so far, out (a native test first)
+			continue
 		if v == herc or not v.alive or not TeamRelations.is_hostile(herc.team, v.team) or v.has_meta("dormant"):
 			continue
-		var d: float = herc.global_position.distance_to(v.global_position)
-		if d < best_d:
-			best_d = d
+		if CloakRules.is_hidden_from_radar(herc, v):   # a cloaked unit the pilot's sensors do not find
+			continue
+		if d / RadarMode.make_signature(v) < best_d:   # a passive (EMCON) unit is seen from half as far
+			best_d = d / RadarMode.make_signature(v)
 			best = v
 	return best
 
@@ -272,7 +297,7 @@ func _pursue_objective() -> void:
 func _make_think_period() -> float:
 	if _is_self_destructing():
 		return float(herc.def.self_destruct.retarget_s)
-	return lerpf(1.0, 0.35, skill)
+	return minf(lerpf(1.0, 0.35, skill), THINK_SECONDS)
 
 
 ## A unit that blows itself up on contact (the Spider) runs straight at its target (DBSIM 0x18320).
@@ -303,7 +328,7 @@ func _aim_at(to: Vector3, aim_pos: Vector3) -> void:
 func _make_line_of_sight(t: Node3D, aim_pos: Vector3) -> bool:
 	var now := Time.get_ticks_msec()
 	if now >= _los_due_ms or t != _los_target:
-		_los_due_ms = now + int(LOS_CHECK_SECONDS * 1000.0)
+		_los_due_ms = now + int((LOS_CHECK_SECONDS if ai_lod == 0 else MID_LOS_CHECK_SECONDS) * 1000.0)
 		_los_target = t
 		_los_clear = LineOfSight.is_clear(herc, herc.aim_origin(), t, aim_pos)
 	return _los_clear

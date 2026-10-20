@@ -78,6 +78,7 @@ class IsoFilesDat(FilesDat):
             start = rec.extent_location() * 2048
         finally:
             iso.close()
+        self.iso_path = iso_path
         self._file = open(iso_path, 'rb')
         super().__init__(self._file, start)
 

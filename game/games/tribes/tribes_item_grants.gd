@@ -33,7 +33,7 @@ func record(datablock: String) -> Dictionary:
 
 
 ## True when item `datablock` can give a soldier something (a weapon, rounds, gear, a pack, health): the items the
-## remake models (a Hunters nexus, a cloaking pack ... are left out).
+## remake models (a Hunters nexus, a satchel charge ... are left out).
 func is_pickup(datablock: String) -> bool:
 	var db := datablock.to_lower()
 	if db == REPAIR_PATCH or str(record(db).get("class", "")).to_lower() == REPAIR_CLASS:

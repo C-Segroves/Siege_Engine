@@ -210,8 +210,16 @@ func shape(id: String) -> Dictionary:
 			j = {"lods": [{"pieces": [], "cells": [], "radius": 1, "center": [0, 0, 0]}], "nodes": []}
 		j["pack"] = p[0]
 		j["id"] = id
+		if ServerProfile.is_collision_only() and j.get("lods") is Array:
+			j["lods"] = (j.lods as Array).slice(0, 1)   # the server builds detail level 0 only; the others are dead weight
 		_shapes[id] = j
 	return _shapes[id]
+
+
+## Forgets the cached shape data of `id` (reloaded on the next shape(id)); the dedicated server frees the data of
+## shapes it only needed to build collision from.
+func release_shape(id: String) -> void:
+	_shapes.erase(qualify(id))
 
 
 func shape_index(pack := "") -> Array:

@@ -22,6 +22,7 @@ static func build_for(p_battle: Node3D) -> CommandMapInput:
 	var n := CommandMapInput.new()
 	n.battle = p_battle
 	n.name = NODE_NAME
+	ServerProfile.apply_client_only(n)
 	p_battle.add_child(n)
 	return n
 

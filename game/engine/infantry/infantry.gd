@@ -73,6 +73,8 @@ var lethal_hit_guard := Callable()
 var _muzzle: Marker3D
 ## The weapon in hand: world model on the hand node, first-person view model on the eye.
 var held := InfantryHeldWeapon.new(HAND_OFFSET)
+## The Laser Rifle scope of the local player (RifleScope; InfantryPilot drives it, BattleCameras / InfantryHud show it).
+var scope := RifleScope.new()
 var _collision: CollisionShape3D
 var _animation: InfantryAnimation
 var _sounds := InfantrySounds.new()
@@ -117,11 +119,12 @@ func _apply_armor_stats() -> void:
 
 func _build_model() -> void:
 	shape = ShapeInstance.new()
-	shape.texture_overrides = SkinCatalog.make_texture_overrides(make_body_shape_id(), skin_id)
 	add_child(shape)
-	var pack := str(armor.get("pack", "tribes"))
-	shape.build(Assets.shape(make_body_shape_id()), 0, Packs.default_palette(pack))
-	shape.position.y = -shape.lowest_point() * shape.scale.y
+	if not ServerProfile.is_collision_only():   # the server's soldier is its capsule (_build_collision), not a drawn body
+		shape.texture_overrides = SkinCatalog.make_texture_overrides(make_body_shape_id(), skin_id)
+		var pack := str(armor.get("pack", "tribes"))
+		shape.build(Assets.shape(make_body_shape_id()), 0, Packs.default_palette(pack))
+		shape.position.y = -shape.lowest_point() * shape.scale.y
 	_animation = InfantryAnimation.new(shape)
 	eye = Node3D.new()
 	eye.name = "Eye"
@@ -148,6 +151,9 @@ func make_hand_node() -> int:
 	var nodes: Array = Assets.shape(body_shape).get("nodes", [])
 	for i in nodes.size():
 		if str(nodes[i].get("name", "")).to_lower() == wanted:
+			return i
+	for i in nodes.size():
+		if str(nodes[i].get("name", "")) == InfantryCatalog.AA_HAND_NODE:
 			return i
 	return -1
 
@@ -271,6 +277,8 @@ func make_next_slot() -> int:
 
 
 func _show_held_weapon() -> void:
+	if ServerProfile.is_collision_only():
+		return
 	held.build(current_weapon(), shape, make_hand_node(), eye)
 
 
@@ -307,24 +315,75 @@ func apply_floor_limit() -> void:
 	floor_stop_on_slope = true
 
 
+## Distance LOD for faraway AI soldiers (set by SiteSpawner): they step their movement every LOD_FAR_STRIDE-th
+## physics tick with the summed delta; the legs and the held weapon are posed on that step too (a MID soldier is in plain sight).
+const LOD_FAR_STRIDE := 4
+var far_lod := false
+## Floor state of the cheap body step (InfantryCheapStep) while `far_lod` is set: is_on_floor() is stale then.
+var cheap_floor := false
+var _cheap_stepping := false
+var _lod_t := 0.0
+var _lod_phase := 0
+
+
 func _physics_process(delta: float) -> void:
+	if pilot_link != null and pilot_link.is_predicting(self):
+		_predicted_update(delta)
+		return
 	if is_puppet:
 		_puppet_update(delta)
 		return
+	if far_lod and alive and not stowed:
+		_lod_t += delta
+		_lod_phase = (_lod_phase + 1) % LOD_FAR_STRIDE
+		if _lod_phase != net_id % LOD_FAR_STRIDE:
+			return
+		delta = _lod_t
+		_lod_t = 0.0
+		cloak.apply_step(self, delta)
+		_drive(delta)
+		_animate(delta, false)   # a MID soldier is in plain sight out to the fog: his legs keep running (no footsteps heard from afar)
+		return
+	_lod_t = 0.0
 	capacitor = minf(capacitor_max, capacitor + (capacitor_rate + InfantryPack.make_recharge_bonus(kit)) * delta)
 	if alive:
 		InfantryPack.apply_frame(self, delta)
+	cloak.apply_step(self, delta)
 	if stowed:
 		InfantrySeat.apply_rider(self)
 		return
 	if not alive:
 		_fall_dead(delta)
 		return
+	if pilot_link != null:
+		pilot_link.begin_step(self, delta)
 	if has_meta("disabled_until") and Time.get_ticks_msec() < int(get_meta("disabled_until")):
 		_hold_controls()
 		jet_input = false
 	_drive(delta)
+	if pilot_link != null:
+		pilot_link.end_step(self)
 	_animate(delta)
+
+
+## The movement a PilotLink replays (see Herc.step_movement): the capacitor the jetpack draws on, then the drive.
+func step_movement(delta: float) -> void:
+	capacitor = minf(capacitor_max, capacitor + (capacitor_rate + InfantryPack.make_recharge_bonus(kit)) * delta)
+	_drive(delta)
+
+
+## The local soldier on a predicting client (Herc._predicted_update).
+func _predicted_update(delta: float) -> void:
+	cloak.apply_step(self, delta)
+	pilot_link.begin_step(self, delta)
+	step_movement(delta)
+	pilot_link.end_step(self)
+	_animate(delta)
+
+
+func make_hit_capsule() -> Vector2:
+	var radius := float(armor.get("capsule_radius", 0.6))
+	return Vector2(radius, maxf(float(armor.get("height_m", 2.2)), radius * 2.0 + 0.1))
 
 
 ## Look, run, jump and jet (Tribes PlayerData movement; docs/formats/tribes_infantry.md section 3).
@@ -332,7 +391,8 @@ func _drive(delta: float) -> void:
 	rotation.y = torso_target
 	pitch = clampf(pitch_target, pitch_min, pitch_max)
 	var wish := InfantryMotion.make_wish_direction(self)
-	var on_floor := is_on_floor()
+	_end_cheap_stepping_when_promoted()
+	var on_floor := is_on_floor_now()
 	if on_floor and not jump_input:
 		InfantryMotion.apply_ground_movement(self, wish, delta)
 	if on_floor and jump_input:
@@ -341,20 +401,48 @@ func _drive(delta: float) -> void:
 	if jetting:
 		InfantryMotion.apply_jet(self, wish, delta)
 	velocity.y = SOLDIER_FLOOR_SNAP if on_floor and not jetting and velocity.y <= 0.0 else velocity.y - TRIBES_GRAVITY * delta
-	var before := velocity
-	move_and_slide()
-	InfantryMotion.apply_fall_damage(self, before)
-	_apply_held_fall(delta)
+	_move_body(delta)
 	_apply_fell_through()
 	speed = Vector3(velocity.x, 0.0, velocity.z).length()
 	_sounds.apply_jet(self)
 
 
+## Moves the body by its velocity: the real physics step, or the cheap one while far from every human.
+func _move_body(delta: float) -> void:
+	if far_lod and InfantryCheapStep.enabled:
+		if not _cheap_stepping:
+			_cheap_stepping = true
+			cheap_floor = is_on_floor()
+		InfantryCheapStep.apply(self, delta)
+		return
+	var before := velocity
+	move_and_slide()
+	InfantryMotion.apply_fall_damage(self, before)
+	_apply_held_fall(delta)
+
+
+## Promotion from the cheap step: the real body re-snaps to the floor the cheap step left it on.
+func _end_cheap_stepping_when_promoted() -> void:
+	if (far_lod and InfantryCheapStep.enabled) or not _cheap_stepping:
+		return
+	_cheap_stepping = false
+	if cheap_floor:
+		apply_floor_snap()
+
+
+## is_on_floor(), or the cheap step's own floor state while the soldier steps cheaply.
+func is_on_floor_now() -> bool:
+	return cheap_floor if _cheap_stepping else is_on_floor()
+
+
 ## Wedged where no floor holds it (see HELD_SPEED_SHARE): the velocity becomes the real one; wedged for
 ## HELD_DEATH_SECONDS inside the geometry: dead.
 func _apply_held_fall(delta: float) -> void:
+	if is_on_floor_now() or velocity.y >= 0.0:
+		_held_seconds = 0.0
+		return
 	var real := get_real_velocity()
-	if is_on_floor() or velocity.y >= 0.0 or real.length() >= velocity.length() * HELD_SPEED_SHARE:
+	if real.length() >= velocity.length() * HELD_SPEED_SHARE:
 		_held_seconds = 0.0
 		return
 	velocity = real
@@ -389,7 +477,7 @@ func is_inside_geometry() -> bool:
 
 func _apply_fell_through() -> void:
 	var p := global_position
-	if is_on_floor() or velocity.y >= 0.0:
+	if is_on_floor_now() or velocity.y >= 0.0:
 		return
 	if get_parent().get("bounds") != null:
 		return   # the battle's BattleBounds knows the buildings below the terrain (underground bases)
@@ -400,6 +488,8 @@ func _apply_fell_through() -> void:
 
 ## Dies of the world itself, the kill message naming `cause` (KillText).
 func _die_of(cause: String) -> void:
+	if is_puppet:
+		return   # the server decides who dies (a predicting client runs _drive too)
 	KillText.apply_cause(self, cause)
 	_die(null)
 	KillText.apply_cause(self, "")
@@ -424,18 +514,20 @@ func _fall_dead(delta: float) -> void:
 	move_and_slide()
 
 
-func _animate(delta: float) -> void:
+func _animate(delta: float, with_steps := true) -> void:
 	if eye:
 		eye.rotation.x = pitch
-	if stowed:
-		return   # a rider holds his seat's pose (_process)
-	if is_puppet:
+	if stowed or ServerProfile.is_collision_only():
+		return   # a rider holds his seat's pose (_process); the server poses nobody
+	var follows_snapshots := is_puppet and not (pilot_link != null and pilot_link.is_predicting(self))
+	if follows_snapshots:
 		velocity = (global_position - _last_position) / maxf(delta, 0.001)
 		_last_position = global_position
 	var local := global_basis.inverse() * velocity
-	var airborne := not is_on_floor() if not is_puppet else absf(velocity.y) > 1.0
+	var airborne := not is_on_floor_now() if not follows_snapshots else absf(velocity.y) > 1.0
 	_animation.update(local, airborne, jetting, delta)
-	_sounds.apply_steps(self, _animation, delta)
+	if with_steps:
+		_sounds.apply_steps(self, _animation, delta)
 	held.update(current_weapon(), delta)
 
 
@@ -479,6 +571,7 @@ func apply_hit(_shield_dmg: float, armor_dmg: float, attacker: Node = null, _hit
 	var c: Dictionary = components[0]
 	c.hp = maxf(0.0, float(c.hp) - dmg)
 	integrity = HercDamage.integrity_of(components)
+	cloak.apply_damaged(dmg)
 	damaged.emit(self, attacker)
 	if c.hp <= 0.0:
 		if lethal_hit_guard.is_valid() and bool(lethal_hit_guard.call(self, attacker)):
@@ -511,6 +604,8 @@ func respawn(xf: Transform3D) -> void:
 		_rebuild_body()
 	super.respawn(xf)
 	kit.apply_spawn(armor)
+	InfantryPack.apply_cloak_profile(self)
+	cloak.apply_forced(cloak.profile.respawn_cloak_s)
 	equip(armor.get("default_loadout", []))
 	velocity = Vector3.ZERO
 	torso_target = rotation.y
@@ -606,6 +701,7 @@ func apply_snapshot(s: Array, dt: float) -> void:
 	if s.size() <= SNAP_INFANTRY or not (s[SNAP_INFANTRY] is Array):
 		return
 	InfantryNet.apply_snapshot(self, s[SNAP_INFANTRY])
+	InfantryPack.apply_cloak_profile(self)
 	_sounds.apply_jet(self)
 
 

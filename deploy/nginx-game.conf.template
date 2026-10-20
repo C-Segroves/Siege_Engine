@@ -1,0 +1,13 @@
+# Optional game server (GAME_SERVER=yes in siege.conf): included inside the site's server block by install.sh.
+#   /ws       the WebSocket game port  (127.0.0.1:@GAME_SERVER_PORT@)
+#   /matches  the match list as JSON   (127.0.0.1:@GAME_SERVER_LIST_PORT@)
+location = /ws {
+	proxy_pass http://127.0.0.1:@GAME_SERVER_PORT@;
+	proxy_http_version 1.1;
+	proxy_set_header Upgrade $http_upgrade;
+	proxy_set_header Connection "upgrade";
+	proxy_read_timeout 3600s;
+}
+location ~ ^/(matches|health)$ {
+	proxy_pass http://127.0.0.1:@GAME_SERVER_LIST_PORT@;
+}

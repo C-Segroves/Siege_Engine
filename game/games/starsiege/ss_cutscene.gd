@@ -165,7 +165,7 @@ func _raise_waypoint(index: int) -> void:
 	var fn := "%s::camera::waypoint%d" % [path.path_name, index + 1]
 	rt.log_debug("camera %s" % fn)
 	if rt.vm and rt.vm.has_function(fn):
-		rt.timers.append([0.0, fn + "();"])
+		rt.schedule(fn + "();", 0.0)
 
 
 func _schedule_fallback_callbacks(key: String) -> void:
@@ -173,7 +173,7 @@ func _schedule_fallback_callbacks(key: String) -> void:
 	for k in range(1, MAX_FALLBACK_WAYPOINTS + 1):
 		var fn := "%s::camera::waypoint%d" % [key, k]
 		if rt.vm and rt.vm.has_function(fn):
-			rt.timers.append([FALLBACK_WAYPOINT_INTERVAL * k, fn + "();"])
+			rt.schedule(fn + "();", FALLBACK_WAYPOINT_INTERVAL * k)
 
 
 func _show_camera() -> void:

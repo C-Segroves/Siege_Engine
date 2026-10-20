@@ -86,7 +86,7 @@ func make_briefing_with_herc(text: String, use_career: bool) -> String:
 
 func _make_player_entry(use_career: bool) -> Dictionary:
 	if use_career and not EsShell.career.is_empty():
-		return shell.hangar.career_campaign().garage.make_battle_entry()
+		return MissionLaunch.make_career_battle_entry(EsShell.career)
 	var v := Packs.vehicle(MissionLaunch.HERC_FOR_CAMPAIGN)
 	return {"vehicle": MissionLaunch.HERC_FOR_CAMPAIGN, "name": str(v.get("name", "")), "loadout": v.get("loadout", [])}
 

@@ -35,7 +35,7 @@ var _live_lights := 0
 ## Plays effect `ref` (pack-local or "<pack>:<name>") at `pos`; `forward` orients oriented layers
 ## (the impact normal or the shot direction).
 func play_effect(parent: Node, ref: String, pack: String, pos: Vector3, forward := Vector3.UP) -> void:
-	if parent == null or not parent.is_inside_tree():
+	if parent == null or not parent.is_inside_tree() or ServerProfile.is_collision_only():   # a server draws and hears nothing
 		return
 	if ref.begins_with("@"):
 		_play_builtin(parent, ref, pos)
@@ -71,7 +71,7 @@ func play_impact(parent: Node, def: Dictionary, surface: String, pos: Vector3, n
 ## The weapon's beam from `from` to `to` (its fx "beam" block; nothing for weapons without one).
 func play_beam(parent: Node, def: Dictionary, from: Vector3, to: Vector3) -> void:
 	var block = FxLibrary.weapon_fx(def).get("beam")
-	if not (block is Dictionary) or parent == null:
+	if not (block is Dictionary) or parent == null or ServerProfile.is_collision_only():
 		return
 	var pack := FxLibrary.weapon_pack(def)
 	var jag: Dictionary = block.jagged if block.get("jagged") is Dictionary else {}
@@ -106,7 +106,7 @@ func play_muzzle(parent: Node, def: Dictionary, pos: Vector3, dir: Vector3) -> v
 ## A looping sprite for a projectile (not pooled: it lives as long as the projectile).
 func build_looping_sprite(ref: String, pack: String, layer: Dictionary) -> FxSprite:
 	var sprite := FxLibrary.sprite(ref, pack)
-	if sprite.is_empty():
+	if sprite.is_empty() or ServerProfile.is_collision_only():
 		return null
 	var s := FxSprite.new()
 	s.setup(sprite, layer, true)
@@ -115,7 +115,7 @@ func build_looping_sprite(ref: String, pack: String, layer: Dictionary) -> FxSpr
 
 ## A plain soft puff (trails without an effect of their own): grows and fades over `lifetime`.
 func play_puff(parent: Node, pos: Vector3, color: Color, size: float, lifetime: float) -> void:
-	if _live_sprites >= MAX_LIVE_SPRITES or parent == null:
+	if _live_sprites >= MAX_LIVE_SPRITES or parent == null or ServerProfile.is_collision_only():
 		return
 	_play_flash(parent, {"flash": {"color": [color.r, color.g, color.b, color.a], "size": size, "blend": "alpha"},
 		"duration": lifetime, "grow": PUFF_GROW}, pos)

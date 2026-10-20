@@ -12,6 +12,8 @@ const MONEY_COLOR := Color(1.0, 0.85, 0.35)
 const ZONE_COLOR := Color(0.4, 1.0, 0.6)
 const TASK_COLOR := Color(1.0, 0.95, 0.3)
 const CACHE_COLOR := Color(1.0, 0.8, 0.3)
+const CALLIN_COLOR := Color(1.0, 0.6, 0.25)
+const CONTACT_COLOR := Color(1.0, 0.3, 0.3)
 const BAG_COLOR := Color(1.0, 0.45, 0.3)
 const BANNER_COLOR := Color(1.0, 0.85, 0.35)
 const DEAD_COLOR := Color(1.0, 0.35, 0.3)
@@ -36,6 +38,7 @@ var hint := ""
 func _init(p_director: ExtractionDirector) -> void:
 	director = p_director
 	name = "ExtractionHud"
+	ServerProfile.apply_client_only(self)
 
 
 func _ready() -> void:
@@ -98,9 +101,12 @@ func make_status_lines() -> Array:
 		inv.make_used_kg(), inv.max_kg, inv.make_used_slots(), inv.max_slots], MONEY_COLOR]]
 	for e in director.exfil_states:
 		lines.append([make_exfil_text(e), ZONE_COLOR])
+	for text in director.callins.make_hud_lines():
+		lines.append([text, CALLIN_COLOR])
 	if director.my_status == ExtractionDirector.STATUS_IN_RAID:
-		lines.append(["%s loot   %s inventory   %s call exfil" % [InfantryInteraction.make_key_text(),
-			OccupancyHint.make_key_text("inventory_toggle"), OccupancyHint.make_key_text("exfil_call")], DIM_COLOR])
+		lines.append(["%s loot   %s inventory   %s call exfil   %s call-ins" % [InfantryInteraction.make_key_text(),
+			OccupancyHint.make_key_text("inventory_toggle"), OccupancyHint.make_key_text("exfil_call"),
+			OccupancyHint.make_key_text("callin_menu")], DIM_COLOR])
 	return lines
 
 
@@ -122,6 +128,9 @@ func _draw_banner() -> void:
 			_draw_centered("EXTRACTED - your haul is in your stash", size.y * 0.4, BANNER_FONT_SIZE, BANNER_COLOR)
 		ExtractionDirector.STATUS_DEAD:
 			_draw_centered("KILLED IN ACTION - your gear is lost", size.y * 0.4, BANNER_FONT_SIZE, DEAD_COLOR)
+			if not director.my_lost.is_empty():
+				_draw_centered("Lost with you: %s  (buy back %d cr each)" % [", ".join(PackedStringArray(director.my_lost.map(RaidOperator.make_unlock_text))),
+					EconomyRules.rebuy_price()], size.y * 0.4 + BANNER_FONT_SIZE * 2.0, HINT_FONT_SIZE, DEAD_COLOR)
 			if not director.my_kept.is_empty():
 				_draw_centered("Insured and kept: %s" % ExtractionItems.make_stack_text(str(director.my_kept[0][0]), int(director.my_kept[0][1])),
 					size.y * 0.4 + BANNER_FONT_SIZE, HINT_FONT_SIZE, BANNER_COLOR)
@@ -142,6 +151,8 @@ func _draw_markers() -> void:
 		_draw_marker(cam, director.zones[i] + Vector3.UP * 2.0, "EXFIL %s" % ExtractionTransports.make_zone_name(i), ZONE_COLOR, s)
 	for m in director.tasks.make_markers():
 		_draw_marker(cam, m.pos + Vector3.UP * 3.0, "TASK: %s" % str(m.label).to_upper(), TASK_COLOR, s)
+	for m in director.callins.make_markers():
+		_draw_marker(cam, m.pos + Vector3.UP * 3.0, str(m.label), CONTACT_COLOR if bool(m.contact) else CALLIN_COLOR, s)
 	for c in director.containers.values():
 		var lc := c as LootContainer
 		if lc.position.distance_to(s.global_position) < CACHE_MARKER_RANGE:

@@ -41,6 +41,12 @@ func refresh() -> void:
 	add_child(Widgets.section("Squad"))
 	var squad := SquadRoster.make_squad(garage, slots)
 	add_child(Widgets.paragraph(SLOTS_TEXT % [squad.size(), slots] if slots > 0 else NO_SLOTS, "DimLabel"))
+	if slots > 0:
+		add_child(Widgets.section("Wingman slots"))
+		var slot_hercs := SquadRoster.make_slots(garage, slots)
+		for k in slots:
+			add_child(_build_slot_row(k, int(slot_hercs[k])))
+		add_child(Widgets.section("Hercs"))
 	for i in garage.vehicles.size():
 		add_child(_build_herc_row(i, squad.has(i)))
 	add_child(Widgets.section("Pilots"))
@@ -69,6 +75,29 @@ func _build_herc_row(i: int, is_wingman: bool) -> Control:
 	var row := OptionRow.new(title + ("" if Garage.is_ready(e) else "  (%s)" % IN_FACTORY), Widgets.row([picker, wing]))
 	picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	return row
+
+
+## One wingman slot: the Herc that flies it and the crew pilot in that Herc.
+func _build_slot_row(k: int, herc_i: int) -> Control:
+	var cands := SquadRoster.make_slot_candidates(garage)
+	var herc_names := ["(empty)"]
+	for c in cands:
+		herc_names.append(GaragePicker.make_entry_name(garage.vehicles[c]))
+	var herc_pick := Widgets.option_button(herc_names, cands.find(herc_i) + 1 if herc_i >= 0 else 0)
+	herc_pick.item_selected.connect(func(n: int) -> void: _set_slot(k, -1 if n == 0 else int(cands[n - 1])))
+	var pilots: Array = [{}] + garage.crew.pilots
+	var pilot_pick := Widgets.option_button(pilots.map(func(p): return SquadRoster.NO_PILOT if p.is_empty() else str(p.name)),
+		maxi(0, pilots.find(SquadRoster.pilot_of(garage, herc_i))) if herc_i >= 0 else 0)
+	pilot_pick.disabled = herc_i < 0
+	pilot_pick.item_selected.connect(func(n: int) -> void: _assign(herc_i, str(pilots[n].get("id", ""))))
+	herc_pick.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pilot_pick.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	return OptionRow.new("Wingman %d" % (k + 1), Widgets.row([herc_pick, pilot_pick]))
+
+
+func _set_slot(k: int, herc_i: int) -> void:
+	SquadRoster.apply_slot(garage, k, slots, herc_i)
+	_after_change()
 
 
 func _assign(i: int, pilot_id: String) -> void:

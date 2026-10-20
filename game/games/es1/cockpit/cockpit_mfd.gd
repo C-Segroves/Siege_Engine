@@ -80,19 +80,28 @@ func _draw_buttons(m: Dictionary) -> void:
 		canvas.blit_button(skin.dba("mfd"), f, b[i])
 	if m.has("title"):
 		var tr := CockpitCanvas.rect_of(m.title)
-		canvas.text(skin.font("mfd", "title_font"), tr.position.x, tr.position.y, label("mfd", mode, "SCANNER"), tr)
+		canvas.text(skin.font("mfd", "title_font"), tr.position.x, tr.position.y, _make_title(mode), tr)
 	else:
-		canvas.text_centered(skin.font("mfd", "title_font"), CockpitCanvas.rect_of(b[TITLE_BUTTON]), label("mfd", mode, "SCANNER"))
+		canvas.text_centered(skin.font("mfd", "title_font"), CockpitCanvas.rect_of(b[TITLE_BUTTON]), _make_title(mode))
 	if skin.list("mfd", "option_buttons").is_empty():
 		_draw_es1_options(b, mode)
 	else:
 		_draw_page_options(b, mode)
 
 
+## Page title: the two radar pages say what they point at (F4 SCANNER heading up, F3 NAV MAP north up).
+func _make_title(mode: int) -> String:
+	var t := label("mfd", mode, "SCANNER")
+	if mode == MODE_SCANNER:
+		return "%s HDG UP" % t
+	return t
+
+
 func _draw_es1_options(b: Array, mode: int) -> void:
 	var opts := ["", "", "", ""]
 	if mode == MODE_SCANNER:
-		opts[0] = label("mfd", RANGE_LABEL, "RANGE")
+		opts[0] = RadarMode.make_label(herc)   # ACT / PASS (STRINGS0 group 25; button 7 or P toggles it)
+		opts[1] = label("mfd", RANGE_LABEL, "RANGE")   # the title button / F4 again steps it
 	elif mode == MODE_TARGET:
 		opts[0] = label("mfd", TARGET_LABEL, "TARGET")
 	for i in ES1_OPTIONS:
@@ -127,12 +136,32 @@ func _draw_radar(d: Rect2, heading_up: bool) -> void:
 	var ctr := d.position + Vector2(float(c[0]), float(c[1]))
 	var rng: float = RADAR_RANGES[display.radar_range_i] * Assets.UNIT
 	var yaw := view_yaw() if heading_up else 0.0
+	if not heading_up:
+		_draw_nav_terrain(d, ctr, rng)
 	_draw_radar_vehicles(d, ctr, rng, yaw)
 	_draw_radar_navs(d, ctr, rng, yaw)
 	if not heading_up:
 		canvas.text(_page_font(), d.position.x + 1, d.position.y + 1, "N", d)
 	var km := "%dM" % int(rng)
 	canvas.text(_page_font(), d.end.x - canvas.text_width(_page_font(), km) - 1, d.end.y - 8, km, d)
+
+
+## NAV MAP: the terrain picture (top-down, north up) of the metres round the Herc that fit the scope.
+func _draw_nav_terrain(d: Rect2, ctr: Vector2, rng: float) -> void:
+	var tex := display.nav_map
+	var area := display.nav_area
+	if tex == null or not area.has_area():
+		return
+	var view := Rect2(Vector2(herc.global_position.x, herc.global_position.z) - Vector2(rng, rng), Vector2(rng, rng) * 2.0)
+	var vis := view.intersection(area)
+	if not vis.has_area():
+		return
+	var px := _radar_radius() / rng
+	var dst := Rect2(ctr + (vis.position - view.get_center()) * px, vis.size * px)
+	var k := tex.get_size() / area.size
+	var src := Rect2((vis.position - area.position) * k, vis.size * k)
+	canvas.item.draw_texture_rect_region(tex, dst.intersection(d), Rect2(src.position + (dst.intersection(d).position - dst.position) / px * k,
+		dst.intersection(d).size / px * k), Color(1, 1, 1, 0.8))
 
 
 ## Earthsiege 2's radar bitmaps are a ping animation; Earthsiege 1 has one scope picture.
@@ -162,15 +191,13 @@ func make_radar_point(at: Vector3, heading_up: bool) -> Vector2:
 func _draw_radar_vehicles(d: Rect2, ctr: Vector2, rng: float, yaw: float) -> void:
 	var blink := fmod(display.time, BLINK_PERIOD) < BLINK_ON
 	RadarContacts.apply_range(herc, rng)
-	for v in vehicles():
+	for v in vehicles() + SensorTowers.make_radar_structures(herc):
 		if v == herc or not v.alive or not RadarContacts.is_shown(herc, v):
 			continue
 		var p := _make_radar_offset(v.global_position, rng, yaw)
 		if p.length() > _radar_radius():
 			continue
-		var col := _radar_color("friend" if TargetInfo.is_friendly(herc, v) else "enemy")
-		if MapTeams.shows_team_colors and TargetInfo.is_hostile(herc, v):
-			col = TargetInfo.make_iff_color(herc, v)   # more than two teams: each opposing team in its colour
+		var col := RadarColors.make_unit_color(herc, v)
 		if v == herc.target:
 			col = _radar_color("target") if blink else _radar_color("target_blink")
 		canvas.fill(Rect2((ctr + p).round() - Vector2.ONE, Vector2(2, 2)), col, d)
@@ -181,8 +208,8 @@ func _draw_radar_navs(d: Rect2, ctr: Vector2, rng: float, yaw: float) -> void:
 		var p := _make_radar_offset(n.global_position, rng, yaw)
 		if p.length() <= _radar_radius():
 			var q := (ctr + p).round()
-			canvas.fill(Rect2(q - Vector2(1, 0), Vector2(3, 1)), _radar_color("nav"), d)
-			canvas.fill(Rect2(q - Vector2(0, 1), Vector2(1, 3)), _radar_color("nav"), d)
+			canvas.fill(Rect2(q - Vector2(1, 0), Vector2(3, 1)), RadarColors.OTHER, d)
+			canvas.fill(Rect2(q - Vector2(0, 1), Vector2(1, 3)), RadarColors.OTHER, d)
 
 
 func _draw_target_page(d: Rect2) -> void:

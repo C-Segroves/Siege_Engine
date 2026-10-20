@@ -110,7 +110,7 @@ A release is two files attached to the same GitHub release: `SiegeEngine-<versio
    — the importer's ffmpeg: a small LGPL build cross-compiled from the source archives pinned (with SHA-256) in
    `tools/ffmpeg/sources.lock`, with only the codecs the importer uses (`build/ffmpeg/ffmpeg/ffmpeg.exe`, `BUILD.txt`).
 2. `powershell -ExecutionPolicy Bypass -File tools\build_importer.ps1 [-InstallDeps]` — PyInstaller one-folder
-   build `dist\siege-importer\siege-importer.exe` (Python, numpy, Pillow, pycdlib, pyopl included; the ffmpeg from
+   build `dist\siege-importer\siege-importer.exe` (Python, numpy, Pillow, pycdlib, pyopl, capstone included; the ffmpeg from
    step 1 goes to `siege-importer\ffmpeg\`). Build it from a clean virtual environment holding only
    `tools/requirements.txt`, so no unrelated packages are frozen in. The players need no Python.
 3. `powershell -ExecutionPolicy Bypass -File tools\package_release.ps1 [-Godot <Godot_v4.6.x_console.exe>] -Zip

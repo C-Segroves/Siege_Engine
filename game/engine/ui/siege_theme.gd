@@ -11,7 +11,11 @@ extends SceneTree
 ## ContentPanel (the screen's scrolling column), TitleBar, FooterBar, ModalShade, ModalPanel, HudPanel
 ## (translucent in-battle side panels), HudTitle, HudLine, HudDoneLine, TightColumn. "Panel" (a built-in
 ## type, so not a variation) styles Panel nodes and plain PanelContainers as cards.
-## Constants (type "Siege"): margin, gap, label_width, button_width, row_height, font_size_*.
+## Lobby / loadout kit: CreditsLabel, CardPanel, CardPanelSelected, BadgeNotAllowed, BadgeAtRisk, BadgeLost (labels
+## with a coloured plate), TabButton (a toggle tab), ReadyDot / ReadyDotOff (a lit / dark status dot), Tooltip (the
+## ItemTooltip plate).
+## Constants (type "Siege"): margin, gap, label_width, button_width, row_height, font_size_*, narrow_width (the
+## content width below which screens use their narrow layout).
 
 const OUTPUT_PATH := "res://engine/ui/siege_theme.tres"
 
@@ -52,6 +56,7 @@ const FONT_NAMES := ["Bahnschrift", "Segoe UI", "Arial", "sans-serif"]
 const SIZES := {
 	"margin": 28, "gap": 10, "label_width": 180, "button_width": 300, "row_height": 40,
 	"font_size_small": 14, "font_size_body": 17, "font_size_section": 22, "font_size_header": 30,
+	"narrow_width": 900,
 }
 const BORDER := 1
 const FOCUS_BORDER := 2
@@ -81,6 +86,7 @@ static func make_theme() -> Theme:
 	_add_inputs(t)
 	_add_containers(t)
 	_add_popups(t)
+	_add_kit(t)
 	return t
 
 
@@ -351,3 +357,66 @@ static func _add_popups(t: Theme) -> void:
 	t.set_stylebox("panel", "AcceptDialog", _box(STEEL, STEEL_BLUE, BORDER, Vector2(16, 12)))
 	t.set_stylebox("embedded_border", "Window", _box(STEEL, STEEL_BLUE, BORDER, Vector2(0, 28)))
 	t.set_color("title_color", "Window", AMBER)
+
+
+# ------------------------------------------------------------------ lobby / loadout kit
+
+const BADGE_RED := Color8(150, 40, 30, 230)
+const BADGE_AMBER := Color8(150, 110, 0, 230)
+const BADGE_GREY := Color8(70, 80, 80, 230)
+const READY_DOT_SIZE := 14
+const TAB_PADDING := Vector2(18, 8)
+
+
+## Credits readout, selectable cards, state badges, slot / pane tabs, the ready dot and the tooltip plate.
+static func _add_kit(t: Theme) -> void:
+	_label_variation(t, "CreditsLabel", AMBER, SIZES.font_size_section)
+	_add_cards(t)
+	_add_badges(t)
+	_add_tab_button(t)
+	_add_ready_dots(t)
+	_panel_variation(t, "Tooltip", _box(Color8(4, 30, 34, 240), AMBER, BORDER, Vector2(12, 8)))
+
+
+static func _add_cards(t: Theme) -> void:
+	var card := _box(STEEL_DARK, STEEL_LIGHT, BORDER, Vector2(16, 12))
+	card.border_width_left = 3
+	card.border_color = STEEL_BLUE
+	_panel_variation(t, "CardPanel", card)
+	var selected := _box(STEEL, AMBER, FOCUS_BORDER, Vector2(16, 12))
+	selected.border_width_left = 4
+	_panel_variation(t, "CardPanelSelected", selected)
+
+
+## A small coloured plate behind a Label: not allowed (red), at risk (amber), lost (grey).
+static func _add_badges(t: Theme) -> void:
+	var badges := {"BadgeNotAllowed": BADGE_RED, "BadgeAtRisk": BADGE_AMBER, "BadgeLost": BADGE_GREY}
+	for name in badges:
+		_label_variation(t, name, Color.WHITE, SIZES.font_size_small)
+		t.set_stylebox("normal", name, _box(badges[name], badges[name].lightened(0.3), BORDER, Vector2(6, 1)))
+
+
+## A toggle tab: dim when off, bright with an amber underline when it is the selected tab.
+static func _add_tab_button(t: Theme) -> void:
+	t.set_type_variation("TabButton", "Button")
+	var off := _box(STEEL_DARK, STEEL_LIGHT, BORDER, TAB_PADDING)
+	t.set_stylebox("normal", "TabButton", off)
+	t.set_stylebox("hover", "TabButton", _box(STEEL, TEAL_BRIGHT, BORDER, TAB_PADDING))
+	var on := _box(BUTTON_FILL, TEAL_BRIGHT, BORDER, TAB_PADDING)
+	on.border_width_bottom = FOCUS_BORDER + 1
+	on.border_color = AMBER
+	t.set_stylebox("pressed", "TabButton", on)
+	t.set_stylebox("hover_pressed", "TabButton", on)
+	t.set_color("font_color", "TabButton", TEXT)
+	for state in ["font_hover_color", "font_focus_color"]:
+		t.set_color(state, "TabButton", AMBER)
+	for state in ["font_pressed_color", "font_hover_pressed_color"]:
+		t.set_color(state, "TabButton", BUTTON_TEXT)
+
+
+## A round status dot (PanelContainer): lit green for ready, dark teal for not ready.
+static func _add_ready_dots(t: Theme) -> void:
+	for entry in [["ReadyDot", DONE], ["ReadyDotOff", STEEL_DARK]]:
+		var dot := _box(entry[1], entry[1].lightened(0.3), BORDER, Vector2.ZERO)
+		dot.set_corner_radius_all(READY_DOT_SIZE / 2)
+		_panel_variation(t, entry[0], dot)

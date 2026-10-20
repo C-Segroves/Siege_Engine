@@ -163,7 +163,7 @@ Shot: `qa\starsiege_human_m1_05_battle.png`.
 13. **FIXED** (Back says "Back to library" / "Back to original shell" by `Session.launcher_home`; Quit asks
     first) **Launcher back button says "Original shell"** when the launcher was opened from the library (it goes back to the library).
     The launcher's **Quit has no confirmation**, unlike the library's. Shot: `qa\library_09_launcher_menu.png`.
-14. Library **"Arena / versus" opens the LAN host page**, not skirmish / armory. Reaching skirmish needs Back first.
+14. Library **"Arena / versus" opens the LAN host lobby**, not skirmish. Skirmish is in the launcher menu ("Skirmish").
 15. **FIXED** (refused with "A PILOT NAMED ... IS ALREADY REGISTERED") **Duplicate ES1 career names** are accepted (two "QATEST" careers after two runs).
 16. **FIXED** (`BindingContexts` + options dialog Swap / Clear / Cancel; keyboard listed before pad) **Rebinding allows conflicts**: throttle_stop could be bound to Z while Z is already a default binding of another action
     ("Z, Pad RS click"). There is no warning. Bindings are re-listed as "Pad LS click, Z" (pad first).

@@ -1,0 +1,6 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://tests/snapshot_codec_check.gd" id="1"]
+
+[node name="SnapshotCodecCheck" type="Node"]
+script = ExtResource("1")

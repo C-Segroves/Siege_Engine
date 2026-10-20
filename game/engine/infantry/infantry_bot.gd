@@ -25,7 +25,15 @@ extends Node
 
 enum Task { ROAM, FIGHT, COVER, REFILL, BOARD, OBJECTIVE }
 
-const THINK_SECONDS := 0.4
+const THINK_SECONDS := 0.2   # NEAR and MID decide at 5 Hz (BotSleep tiers); FAR walks at the director's tick
+## MID tier: the target is searched on every MID_SEARCH_EVERY-th decision (a basic threat assessment in between).
+const MID_SEARCH_EVERY := 4
+## FAR tier (BotSleep): the linear walk's pace as a share of the soldier's top speed (1: the armour's real running
+## speed, so LOD changes the cost and not when the bot arrives); it decides this often (s).
+const FAR_SPEED_SHARE := 1.0
+## One FAR step walks at most this many route legs (a short leg would otherwise waste the rest of the step).
+const FAR_LEGS := 4
+const FAR_THINK_SECONDS := 1.0
 const SENSOR_RANGE := 600.0
 const FIGHT_RANGE := 250.0
 const BOARD_SEARCH := 150.0
@@ -85,6 +93,9 @@ var guard_radius := 0.0
 var _station := -1
 var _vehicle_goal: Herc
 var _think := 0.0
+## BotSleep tier: 0 NEAR (full logic and rays), 1 MID (simplified: no probes, thinned target search), 2 FAR (linear walk).
+var ai_lod := 0
+var _mid_decisions := 0
 var _strafe := 1.0
 var _jet_left := 0.0
 var _grenade_t := 0.0
@@ -131,7 +142,9 @@ func _physics_process(delta: float) -> void:
 # ------------------------------------------------------------------ deciding
 
 func _reconsider() -> void:
-	target = _find_target()
+	_mid_decisions += 1
+	if ai_lod == 0 or _mid_decisions % MID_SEARCH_EVERY == 0 or not _is_target_usable():
+		target = _find_target()
 	var hunted = objective.get("target")
 	if hunted is Herc and is_instance_valid(hunted) and hunted.alive \
 			and soldier.global_position.distance_to(hunted.global_position) < FIGHT_RANGE:
@@ -146,6 +159,43 @@ func _reconsider() -> void:
 		_vehicle_goal = null
 	_choose_task(d)
 	_apply_weapon_choice(d)
+
+
+func _is_target_usable() -> bool:
+	return target != null and is_instance_valid(target) and target.alive
+
+
+## FAR tier (BotSleep, physics and pathing off): decides now and then, and walks `dt` seconds toward the goal in a
+## straight line along the route's next point, standing on the terrain. Nothing is fired or probed.
+func apply_far_step(dt: float) -> void:
+	if soldier == null or not soldier.alive or soldier.stowed:
+		return
+	_think -= dt
+	if _think <= 0.0:
+		_think = FAR_THINK_SECONDS
+		_reconsider()
+	var budget := soldier.max_speed * FAR_SPEED_SHARE * dt
+	var at := soldier.global_position
+	var flat := Vector3.ZERO
+	var walked := false
+	for leg in FAR_LEGS:
+		var step := _route.make_next_point(battle(), at, goal, dt if leg == 0 else 0.0)
+		var leg_flat := Vector3(step.x - at.x, 0.0, step.z - at.z)
+		if leg_flat.length() <= ARRIVE:
+			break
+		flat = leg_flat
+		var run := minf(leg_flat.length(), budget)
+		at += leg_flat.normalized() * run
+		walked = true
+		budget -= run
+		if budget <= 0.01:
+			break
+	if not walked:
+		return
+	at.y = MapTerrain.ground_height(soldier, at)
+	soldier.global_position = at
+	soldier.torso_target = atan2(-flat.x, -flat.z)
+	soldier.rotation.y = soldier.torso_target
 
 
 func _choose_task(d: float) -> void:
@@ -186,16 +236,21 @@ func _apply_objective_task() -> void:
 	task = Task.OBJECTIVE
 
 
-## The nearest enemy within `reach` it can sense (a jamming soldier hides beyond his jam radius).
+## The nearest enemy within `reach` it can sense (a jamming soldier hides beyond his jam radius, a cloaked one beyond
+## the cloak's reveal range: Tribes 2 ai.cs AIFindClosestEnemy).
 func _find_target(reach := SENSOR_RANGE) -> Herc:
 	var best: Herc = null
 	var best_d := reach
+	var at := soldier.global_position
 	for v in soldier.get_tree().get_nodes_in_group("vehicles"):
+		# the native distance test first: every bot asks every few tenths of a second, and most units are out of reach
+		var d := at.distance_to((v as Node3D).global_position)
+		if d >= best_d:
+			continue
 		var h := v as Herc
 		if h == null or h == soldier or not h.alive or not TeamRelations.is_hostile(soldier.team, h.team) or h.has_meta("dormant"):
 			continue
-		var d := soldier.global_position.distance_to(h.global_position)
-		if d < best_d and not InfantryPack.is_hidden_at(h, d):
+		if not InfantryPack.is_hidden_at(h, d) and not CloakRules.is_hidden_from_eyes(h, d):
 			best_d = d
 			best = h
 	return best
@@ -451,12 +506,14 @@ func _move(delta: float) -> void:
 	_detour_t -= delta
 	if _detour_t > 0.0 and wish != Vector3.ZERO:
 		wish = (wish.cross(Vector3.UP) * _detour_side + wish * DETOUR_FORWARD).normalized()
-	wish = _make_steered_wish(wish)
+	if ai_lod == 0:
+		wish = _make_steered_wish(wish)
 	var local := Basis(Vector3.UP, -soldier.torso_target) * wish
 	soldier.throttle = -local.z
 	soldier.turn = local.x
 	var climb := to.y > CLIMB_HEIGHT and flat.length() < CLIMB_NEAR   # also from right below the goal
-	_apply_jet(delta, climb or (wish != Vector3.ZERO and (_is_blocked(wish) or _is_stuck(delta, wish))))
+	var blocked := ai_lod == 0 and wish != Vector3.ZERO and (_is_blocked(wish) or _is_stuck(delta, wish))
+	_apply_jet(delta, climb or blocked)
 	if task == Task.BOARD and is_instance_valid(_vehicle_goal):
 		goal = _make_hatch_point(_vehicle_goal)
 		_apply_board_when_near()
@@ -483,7 +540,7 @@ func _apply_jet(delta: float, wanted: bool) -> void:
 		_jet_left = JET_HOLD
 	_jet_left = _jet_left - delta if energy > JET_STOP else 0.0
 	soldier.jet_input = _jet_left > 0.0
-	soldier.jump_input = _jet_left > 0.0 and soldier.is_on_floor()
+	soldier.jump_input = _jet_left > 0.0 and soldier.is_on_floor_now()
 
 
 ## Something knee-high in the way along `wish`.

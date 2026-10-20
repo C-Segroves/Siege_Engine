@@ -67,6 +67,8 @@ func make_record() -> Dictionary:
 
 
 func _build_model() -> void:
+	if ServerProfile.is_collision_only():
+		return   # a container is a point to open; nobody sees it on the server
 	if kind == "flag":
 		_build_beacon()
 	var shape_id := shape_override if _is_imported(shape_override) else make_shape_id(kind)

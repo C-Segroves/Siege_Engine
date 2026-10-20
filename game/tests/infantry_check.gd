@@ -185,6 +185,20 @@ func _check_on_foot_view(battle: Battle, soldier: Infantry) -> void:
 		in_front = in_front and centre.z < -cam.near and (mi.layers & cam.cull_mask) != 0 \
 			and (mi.layers & battle.cameras.chase_cam.cull_mask) == 0
 	_expect(in_front, "view model in front of the eye, drawn by the first-person camera only")
+	_check_view_toggle(battle)
+
+
+## V / pad Back (view_toggle, live in the infantry context) switches a soldier between first and third person.
+func _check_view_toggle(battle: Battle) -> void:
+	_expect(BindingContexts.CONTEXTS.infantry.has("view_toggle") and InputMap.has_action("view_toggle"), "view_toggle is an on-foot action")
+	var first := not battle.use_chase
+	var ev := InputEventAction.new()
+	ev.action = "view_toggle"
+	ev.pressed = true
+	battle._unhandled_input(ev)
+	_expect(battle.use_chase == first and battle.cameras.is_chasing() == first, "view_toggle on foot: first person -> third person")
+	battle._unhandled_input(ev)
+	_expect(battle.use_chase != first and battle.cameras.is_chasing() != first, "view_toggle on foot: and back to first person")
 
 
 func _check_movement(battle: Battle) -> void:

@@ -116,6 +116,8 @@ static func make_mode_ids_for_map(map_entry: Dictionary) -> Array:
 ## Remake modes the map row allows: deathmatch and co-op everywhere (a map without starts of its own gets the
 ## battle's ring of starts, BattleSpawner), team deathmatch with enough starts, extraction on large maps.
 static func make_remake_ids(row: Dictionary) -> Array:
+	if row.has("remake_modes"):   # a map made for certain remake modes only (Varuna's Fall: extraction)
+		return (row.remake_modes as Array).filter(func(id) -> bool: return id != "extraction" or ExtractionRules.is_available())
 	var out := ["deathmatch", "coop_ai"]
 	var need: Dictionary = data().get("min_spawns", {})
 	if make_start_count(row) >= int(need.get("team", 2)):

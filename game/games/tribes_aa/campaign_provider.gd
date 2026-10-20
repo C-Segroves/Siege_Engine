@@ -19,6 +19,10 @@ class AACampaign:
 	var over := false
 	var victory := false
 	var results: Array = []
+	## Which pack this campaign plays; Tribes: Vengeance reuses the class (games/tribes_v/campaign_provider.gd).
+	var pack := PACK
+	var runtime_key := RUNTIME_KEY
+	var title := TITLE
 
 	func current_mission() -> String:
 		return String(missions[index].get("folder", "")) if index < missions.size() else ""
@@ -32,8 +36,8 @@ class AACampaign:
 		for line in objectives.split("\n", false):
 			if line.strip_edges().begins_with("-"):
 				notes.append(line.strip_edges().trim_prefix("-").strip_edges())
-		return {"pack": PACK, "runtime": RUNTIME_KEY, "id": String(e.folder), "name": String(e.name),
-			"map": "%s:%s" % [PACK, String(e.map)], "mission_name": "%s:%s" % [PACK, String(e.map)],
+		return {"pack": pack, "runtime": runtime_key, "id": String(e.folder), "name": String(e.name),
+			"map": "%s:%s" % [pack, String(e.map)], "mission_name": "%s:%s" % [pack, String(e.map)],
 			"kind": String(e.get("kind", "mission")),
 			"texts": {"briefing": "%s\n\n%s" % [String(e.name).to_upper(), String(e.get("briefing", ""))],
 				"objectives": Array(notes), "objective_notes": "\n".join(notes), "debriefings": ["Mission complete.", "Mission failed."]}}
@@ -65,10 +69,10 @@ class AACampaign:
 		return true
 
 	func pack_id() -> String:
-		return PACK
+		return pack
 
 	func make_heading() -> String:
-		return "%s  -  mission %d of %d" % [TITLE, index + 1, missions.size()]
+		return "%s  -  mission %d of %d" % [title, index + 1, missions.size()]
 
 	func make_presentation() -> Dictionary:
 		return {"killed_prompt": "Mission failed.", "victory_text": "VICTORY - the campaign is complete.",
@@ -78,20 +82,23 @@ class AACampaign:
 		return {"index": index, "over": over, "victory": victory, "results": results}
 
 
-static func _make() -> AACampaign:
+static func make_for(p_pack := PACK, p_runtime := RUNTIME_KEY, p_title := TITLE) -> AACampaign:
 	var c := AACampaign.new()
-	var d = Assets.load_json(DATA_FILE, PACK)
+	c.pack = p_pack
+	c.runtime_key = p_runtime
+	c.title = p_title
+	var d = Assets.load_json(DATA_FILE, p_pack)
 	if d is Dictionary:
 		c.missions = d.get("missions", [])
 	return c
 
 
 static func start(_variant: String) -> Object:
-	return _make()
+	return make_for()
 
 
-static func restore(d: Dictionary) -> Object:
-	var c := _make()
+static func restore(d: Dictionary, p_pack := PACK, p_runtime := RUNTIME_KEY, p_title := TITLE) -> Object:
+	var c := make_for(p_pack, p_runtime, p_title)
 	c.index = clampi(int(d.get("index", 0)), 0, maxi(0, c.missions.size() - 1))
 	c.over = bool(d.get("over", false))
 	c.victory = bool(d.get("victory", false))

@@ -228,7 +228,7 @@ write_brotli_snippet() {
 render() {
 	sed -e "s|@HTTP_PORT@|$HTTP_PORT|g" -e "s|@SITE_DIR@|$SITE_DIR|g" -e "s|@SNIPPET_DIR@|$NGINX_SNIPPETS|g" \
 		-e "s|@SERVICE_USER@|$SERVICE_USER|g" -e "s|@SIEGE_CONF@|$SIEGE_CONF|g" -e "s|@REPO_DIR@|$REPO_DIR|g" \
-		-e "s|@UPDATE_INTERVAL@|$UPDATE_INTERVAL|g" "$1" > "$2"
+		-e "s|@UPDATE_INTERVAL@|$UPDATE_INTERVAL|g" -e "s|@GODOT_BIN@|$GODOT_BIN|g" -e "s|@INSTALL_DIR@|$INSTALL_DIR|g" 		-e "s|@DATA_DIR@|$DATA_DIR|g" -e "s|@GAME_SERVER_CONFIG@|$GAME_SERVER_CONFIG|g" 		-e "s|@GAME_SERVER_PORT@|$GAME_SERVER_PORT|g" -e "s|@GAME_SERVER_LIST_PORT@|$GAME_SERVER_LIST_PORT|g" "$1" > "$2"
 }
 
 setup_nginx() {
@@ -245,6 +245,31 @@ setup_nginx() {
 	nginx -t
 	systemctl enable nginx >/dev/null
 	systemctl reload-or-restart nginx
+}
+
+# ------------------------------------------------------------------ game server (optional)
+
+# GAME_SERVER=yes: the dedicated server as a systemd service, and /ws + /matches in the nginx site.
+setup_game_server() {
+	local snippet="$NGINX_SNIPPETS/server-game.conf"
+	if [[ "$GAME_SERVER" != yes ]]; then
+		rm -f "$snippet"
+		systemctl disable --now siege-server.service >/dev/null 2>&1 || true
+		return 0
+	fi
+	log "configuring the game server (ports $GAME_SERVER_PORT / $GAME_SERVER_LIST_PORT)"
+	if [[ ! -f "$GAME_SERVER_CONFIG" ]]; then
+		install -d -m 755 "$(dirname "$GAME_SERVER_CONFIG")"
+		install -m 640 -g "$SERVICE_USER" "$REPO_DIR/deploy/server.json.example" "$GAME_SERVER_CONFIG"
+		log "created $GAME_SERVER_CONFIG from the example - edit it (name, map, mode, password)"
+	fi
+	render "$REPO_DIR/deploy/nginx-game.conf.template" "$snippet"
+	render "$REPO_DIR/deploy/systemd/siege-server.service.template" /etc/systemd/system/siege-server.service
+	systemctl daemon-reload
+	systemctl enable siege-server.service >/dev/null
+	systemctl restart siege-server.service
+	nginx -t
+	systemctl reload nginx
 }
 
 # ------------------------------------------------------------------ updates
@@ -270,6 +295,8 @@ print_summary() {
 	log "  disc images:  $ISO_DIR"
 	log "  build now:    sudo siege-update --force      (log: $LOG_DIR/update.log)"
 	log "  then open:    http://${ip:-<this machine>}:$HTTP_PORT/"
+	[[ "$GAME_SERVER" == yes ]] && log "  game server:  ws://${ip:-<this machine>}:$HTTP_PORT/ws   (list: /matches; settings: $GAME_SERVER_CONFIG)"
+	return 0
 }
 
 main() {
@@ -285,6 +312,7 @@ main() {
 	setup_venv
 	install_godot
 	setup_nginx
+	setup_game_server
 	setup_systemd
 	print_summary
 	if (( BUILD_NOW )); then

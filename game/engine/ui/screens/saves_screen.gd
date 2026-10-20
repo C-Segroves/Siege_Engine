@@ -78,7 +78,7 @@ func _choose(entry: Dictionary) -> void:
 
 func _load(id: String) -> void:
 	if Session.load_save(id):
-		launcher().show_campaign()
+		launcher().show_started_campaign()
 	else:
 		set_status("This save cannot be loaded.")
 

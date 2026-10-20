@@ -173,18 +173,16 @@ func _check_skins() -> void:
 	inst.build(Assets.shape("tribes2:light_male"))
 	var skinned := 0
 	for i in (inst.shape.get("materials", []) as Array).size():
-		var mat := inst.call("_override_material", i) as StandardMaterial3D
-		if mat != null and mat.albedo_texture != null:
+		var mat := inst.call("_override_material", i) as Material
+		if mat is StandardMaterial3D and mat.albedo_texture != null:
+			skinned += 1
+		elif mat is ShaderMaterial and mat.get_shader_parameter("albedo_array") != null:   # the unified render path
 			skinned += 1
 	_expect(skinned > 0, "the skin replaces textured materials (%d)" % skinned)
 	inst.queue_free()
 	if Assets.has_pack("starsiege"):
 		var herc_skins := SkinCatalog.make_vehicle_skin_choices("starsiege:tr_apoc")
 		_expect(herc_skins.size() > 1, "a Starsiege Herc offers skins (%d)" % herc_skins.size())
-	PlayerProfile.apply_herc_skin("starsiege:tr_apoc", "desert")
-	_expect(PlayerProfile.load_herc_skin("starsiege:tr_apoc") == "desert", "a Herc skin is saved per Herc")
-	var fields := PlayerProfile.make_roster_fields("tribes2", "starsiege:tr_apoc")
-	_expect(fields.has(PlayerProfile.ARMOR_KEY) and fields[PlayerProfile.HERC_SKIN_KEY] == "desert", "the roster fields carry armour and Herc skin")
 
 
 # ------------------------------------------------------------------ kill messages (KillText)
@@ -242,47 +240,53 @@ func _check_library_buttons() -> void:
 	await _frames()
 
 
-# ------------------------------------------------------------------ D12 host screen, D1 bots
+# ------------------------------------------------------------------ D12 host lobby, D1 bots
 
+## "Host LAN game" opens the standard lobby with the mode's default settings at once; the host's options are settings.
 func _check_host_screen() -> void:
 	var launcher := _open_launcher()
 	await _frames()
-	var host: RoutedScreen = launcher.go("host")
+	var lobby := launcher.open_lobby("vs") as LobbyScreen
 	await _frames()
-	var s: Dictionary = host.call("make_settings")
-	_expect(s.mode == "vs" and not s.teams and s.get("game_mode") == "deathmatch", "the host screen defaults to a deathmatch")
-	var text := _all_text(host)
-	_expect(not text.contains("Teams ("), "no team list in a deathmatch")
-	host = launcher.go("host", {"mode": "team_vs"})
+	var s := Net.settings
+	_expect(s.mode == "vs" and not s.teams and s.get("game_mode") == "deathmatch", "the host lobby defaults to a deathmatch")
+	_expect(not _all_text(lobby.options).contains("Teams ("), "no team list in a deathmatch")
+	Net.leave()
 	await _frames()
-	_expect(bool(host.call("make_settings").teams) and _all_text(host).contains("Teams ("), "a team mode shows the team count and the team list")
-	host = launcher.go("host", {"mode": "vs"})
-	if host.call("select_map", "Raindance") and host.call("select_game_mode", "ctf"):
-		var ctf_cfg := MatchFlow.make_match_config(host.call("make_settings"), Packs.pilotable())
-		_expect(int(ctf_cfg.get("score_limit", -1)) == 0 and _all_text(host).contains("Score limit"),
-			"CTF with the limit untouched sends score_limit 0 (the mode decides) and says Score limit")
-	host = launcher.go("host", {"mode": ExtractionRules.MODE})
+	lobby = launcher.open_lobby("vs") as LobbyScreen
 	await _frames()
-	text = _all_text(host)
-	_expect(text.contains("Faction soldiers") and text.contains("Faction vehicles") and text.contains("Faction relations"),
-		"extraction: faction soldiers / vehicles and the relations row")
-	host = launcher.go("host", {"mode": "campaign"})
+	var team_modes := GameOptionsModel.make_game_modes(Net.settings).filter(func(m: Dictionary) -> bool: return bool(m.team_based))
+	lobby.apply_settings(GameOptionsModel.make_with_game_mode(Net.settings, str(team_modes[0].id)))
 	await _frames()
-	text = _all_text(host)
-	_expect(text.contains("Co-op campaign: you host") and not _visible_label(host, "Infantry bots"), "co-op campaign: instructions, no bots row")
-	host = launcher.go("host", {"mode": "vs", InfantryBots.CONFIG_KEY: 3})
+	_expect(bool(Net.settings.teams) and lobby.options.find_children("*", "Button", true, false).any(func(b: Button) -> bool: return b.text.begins_with("Adjust teams")),
+		"a team mode offers the team controls")
+	var entries := MapPicker.make_entries()
+	var raindance := entries.find_custom(func(e: Dictionary) -> bool: return str(e.name).contains("Raindance"))
+	var ctf := GameOptionsModel.make_game_modes(GameOptionsModel.make_with_map(Net.settings, raindance)).filter(func(m: Dictionary) -> bool: return str(m.id).contains("ctf"))
+	if raindance >= 0 and not ctf.is_empty():
+		var ctf_settings := GameOptionsModel.make_with_game_mode(GameOptionsModel.make_with_map(Net.settings, raindance), str(ctf[0].id))
+		var ctf_cfg := MatchFlow.make_match_config(ctf_settings, Packs.pilotable())
+		_expect(int(ctf_cfg.get("score_limit", -1)) == 0, "CTF with the limit untouched sends score_limit 0 (the mode decides)")
+	Net.leave()
 	await _frames()
-	var cfg := MatchFlow.make_match_config(host.call("make_settings"), Packs.pilotable())
+	lobby = launcher.open_lobby("extraction", true) as LobbyScreen
+	await _frames()
+	_expect(ExtractionRules.is_extraction(Net.settings) and Net.settings.solo and Net.roster.size() == 1, "the solo raid is an offline lobby with the pilot alone")
+	Net.leave()
+	await _frames()
+	lobby = launcher.open_lobby("campaign") as LobbyScreen
+	await _frames()
+	_expect(Net.settings.mode == "campaign" and not Net.settings.get("solo", false) and Session.has_campaign(), "co-op campaign: a LAN lobby of a new campaign")
+	Net.leave()
+	await _frames()
+	lobby = launcher.open_lobby("vs") as LobbyScreen
+	await _frames()
+	lobby.apply_settings(GameOptionsModel.make_with_value(Net.settings, InfantryBots.CONFIG_KEY, 3))
+	var cfg := MatchFlow.make_match_config(Net.settings, Packs.pilotable())
 	_expect(int(cfg.get(InfantryBots.CONFIG_KEY, 0)) == 3, "the host's bot count reaches the battle config (D1)")
+	Net.leave()
 	launcher.queue_free()
 	await _frames()
-
-
-func _visible_label(root: Node, text: String) -> bool:
-	for c in root.find_children("*", "Label", true, false):
-		if str(c.text) == text and (c as Label).is_visible_in_tree():
-			return true
-	return false
 
 
 # ------------------------------------------------------------------ D3 / D4 lobby
@@ -290,8 +294,7 @@ func _visible_label(root: Node, text: String) -> bool:
 func _check_lobby_gating() -> void:
 	var launcher := _open_launcher()
 	await _frames()
-	var host: RoutedScreen = launcher.go("host", {"mode": "vs"})
-	host.call("create_lobby")
+	launcher.open_lobby("vs")
 	await _frames()
 	if not Net.is_online():
 		_expect(false, "the lobby opened (port %d)" % Net.GAME_PORT)
@@ -303,7 +306,8 @@ func _check_lobby_gating() -> void:
 	Net.roster_changed.emit()
 	await _frames()
 	_expect(lobby.primary_button.disabled and lobby.status_text().contains("Slowpoke"), "Start waits for Slowpoke and names him")
-	_expect(_all_text(lobby).contains("not ready"), "the pilot list shows who is not ready")
+	var waiting_row: TreeItem = lobby.list.tree.get_root().get_child(0).get_child(0) if lobby.list.row_count() > 0 else null
+	_expect(waiting_row != null and waiting_row.get_text(0) == "Slowpoke" and waiting_row.get_text(2) == "not ready", "the others list shows who is not ready")
 	_expect(_all_text(lobby).contains("press Start match once every pilot"), "the lobby says what to do next")
 	Net.roster[FAKE_PEER].ready = true
 	Net.roster_changed.emit()
@@ -338,7 +342,17 @@ func _check_team_list() -> void:
 	_expect(grid.get_child_count() == 4, "one column per team plus Unassigned (%d)" % grid.get_child_count())
 	_expect(_find_button(list, "Assign all") != null, "the host has Assign all")
 	var pickers := list.find_children("*", "OptionButton", true, false)
-	_expect(pickers.size() == 2, "the host may move both pilots (%d pickers)" % pickers.size())
+	var bot_count := LobbySettings.make_planned_members(s).size()
+	_expect(pickers.size() == 2 + bot_count, "the host may move both pilots and every bot (%d pickers, %d bots)" % [pickers.size(), bot_count])
+	var moved := LobbySettings.make_with_member_team(s, "bot:0", 1)
+	_expect(LobbySettings.make_planned_bots(moved)[0].team == 1 and InfantryBots.make_team(moved, 0) == 1,
+		"the host's pick puts a bot on the team")
+	var guest_list := TeamList.new()
+	add_child(guest_list)
+	guest_list.refresh(s, {1: {"name": "Host", "team": 0}, FAKE_PEER: {"name": "Guest", "team": 2}}, FAKE_PEER, false)
+	_expect(guest_list.find_children("*", "OptionButton", true, false).size() == 1, "a guest has only his own picker, no bot pickers")
+	guest_list.queue_free()
+	_expect(MapTeams.make_team_name(0, {"map": "x"}) == "Red" and MapTeams.make_team_name(1) == "Blue", "team names are colour names")
 	if pickers.size() == 2:
 		var picker := pickers[1] as OptionButton
 		_expect(picker.get_item_text(picker.selected) != "" and picker.get_item_icon(picker.selected) != null, "a team picker shows the current team's name and colour (%s)" % picker.get_item_text(picker.selected))

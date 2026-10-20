@@ -12,6 +12,10 @@ extends RefCounted
 
 const SECONDS_PER_MINUTE := 60.0
 const NO_LIMIT := 0.0
+## Verdict codes of the match rules (a verdict names the rule that ended the match; the result text and winner carry the rest).
+const CODE_SCORE_LIMIT := 1
+const CODE_TIME_LIMIT := 2
+const CODE_DRAW := 3
 
 var mode_id := ""
 var team_based := false
@@ -37,6 +41,19 @@ var revision := 0
 ## Things the battle must do (take_requests): {"kind": "respawn_all"} (Siege halftime, a Football touchdown),
 ## {"kind": "kill", "id": net id} (a Football foul).
 var requests: Array = []
+var _time_limit: MissionTimer = null
+var _announcer := MissionAnnouncer.new(_MessageSink.new(messages), MissionAnnouncer.Discipline.CUT)
+
+
+## The announcements go to `messages` as they come (the CUT discipline plays each one at once).
+class _MessageSink extends MissionSink:
+	var _lines: Array[String]
+
+	func _init(p_lines: Array[String]) -> void:
+		_lines = p_lines
+
+	func apply_message(message: MissionMessage) -> void:
+		_lines.append(message.text)
 
 
 func configure(p_mode_id: String, p_team_based: bool, p_settings: Dictionary) -> void:
@@ -179,9 +196,18 @@ func apply_tick(delta: float, p_players: Array) -> void:
 		players[str(p.key)] = p
 		names_by_id[int(p.id)] = str(p.key)
 	_on_tick(delta)
-	var limit := _num("time_limit_s", NO_LIMIT)
-	if not over and limit > NO_LIMIT and elapsed >= limit:
+	if _is_time_up(delta) and not over:
 		_on_time_limit()
+
+
+## Counts the time limit (time_limit_s, 0 = none) from where the match stood at its first tick; true once it ran out.
+func _is_time_up(delta: float) -> bool:
+	var limit := _num("time_limit_s", NO_LIMIT)
+	if limit <= NO_LIMIT:
+		return false
+	if _time_limit == null:
+		_time_limit = MissionTimer.make_timer(limit - (elapsed - delta))
+	return _time_limit.apply_tick(delta) or _time_limit.is_finished()
 
 
 func _on_tick(_delta: float) -> void:
@@ -196,18 +222,25 @@ func _on_time_limit() -> void:
 # ------------------------------------------------------------------ results
 
 func finish_by_score(reason: String) -> void:
+	var best := make_best_name()
+	if best == "":
+		finish_with(MissionVerdict.make_loss(CODE_DRAW, "%s The match is a draw." % reason), "")
+	else:
+		finish_with(MissionVerdict.make_win(CODE_TIME_LIMIT, "%s %s wins!" % [reason, best]), best)
+
+
+## The leading team's name (team match) or player (free for all); "" for a tie.
+func make_best_name() -> String:
 	if team_based:
 		var t := score.make_best_team()
-		if t == ModeScore.NO_TEAM:
-			finish("%s The match is a draw." % reason, "")
-		else:
-			finish("%s %s wins!" % [reason, make_team_name(t)], make_team_name(t))
-	else:
-		var k := score.make_best_player()
-		if k == ModeScore.NOBODY:
-			finish("%s The match is a draw." % reason, "")
-		else:
-			finish("%s %s wins!" % [reason, k], k)
+		return "" if t == ModeScore.NO_TEAM else make_team_name(t)
+	var k := score.make_best_player()
+	return "" if k == ModeScore.NOBODY else k
+
+
+## Ends the match by `verdict`'s text (a draw has no winner).
+func finish_with(verdict: MissionVerdict, p_winner: String) -> void:
+	finish(verdict.text, p_winner)
 
 
 func finish(text: String, p_winner: String) -> void:
@@ -221,15 +254,25 @@ func finish(text: String, p_winner: String) -> void:
 
 ## Team score limit reached by `team` (score_limit 0 = none).
 func check_team_limit(team: int) -> void:
-	var limit := _num("score_limit", NO_LIMIT)
-	if limit > NO_LIMIT and score.team_score(team) >= limit:
-		finish("%s reaches %d points." % [make_team_name(team), int(limit)], make_team_name(team))
+	if _is_limit_reached(team, score.team_score):
+		var name := make_team_name(team)
+		finish_with(MissionVerdict.make_win(CODE_SCORE_LIMIT, "%s reaches %d points." % [name, int(_num("score_limit", NO_LIMIT))]), name)
 
 
 func check_player_limit(key: String) -> void:
+	if _is_limit_reached(key, score.player_score):
+		finish_with(MissionVerdict.make_win(CODE_SCORE_LIMIT, "%s reaches %d points." % [key, int(_num("score_limit", NO_LIMIT))]), key)
+
+
+## True when the score of `key` (read by `points`: key -> float) is at the score limit.
+func _is_limit_reached(key: Variant, points: Callable) -> bool:
 	var limit := _num("score_limit", NO_LIMIT)
-	if limit > NO_LIMIT and score.player_score(key) >= limit:
-		finish("%s reaches %d points." % [key, int(limit)], key)
+	if limit <= NO_LIMIT:
+		return false
+	var objective := ScoreObjective.new("score_limit", "", key, limit)
+	objective.source = points
+	objective.apply_tick(MissionWorld.new(), 0.0)
+	return objective.is_done()
 
 
 func make_team_name(team: int) -> String:
@@ -310,7 +353,7 @@ func make_label(key: String, player := {}) -> String:
 
 
 func announce(text: String) -> void:
-	messages.append(text)
+	_announcer.apply_say(MissionMessage.make_message(text))
 
 
 func take_messages() -> Array[String]:

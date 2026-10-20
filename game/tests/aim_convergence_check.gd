@@ -1,7 +1,8 @@
 extends Node3D
 ## Every pilotable vehicle shoots where its crosshair is (playtest 2026-10-11 A1):
 ##   for each vehicle, torso straight and twisted / pitched, a target is put on the ray through the cockpit's
-##   crosshair (the HUD reticle; the plain HUD's centre for a vehicle without a cockpit layout) at several ranges,
+##   crosshair (the HUD reticle; for a vehicle without a cockpit layout the plain HUD's, which Hud._draw_crosshair puts
+##   on the projection of the aim ray) at several ranges,
 ##   and every direct-fire weapon's shot line, from its muzzle along the direction the weapon computes, must
 ##   pass through the target within MISS_TOLERANCE.
 ##   godot --headless --audio-driver Dummy --path game res://tests/aim_convergence_check.tscn [-- --only=<pack,...>]
@@ -89,7 +90,9 @@ func _apply_pose(host: Herc, pose: Vector2) -> void:
 
 ## The crosshair's point on the cockpit canvas -> the camera ray through it. Built from the camera's own projection
 ## (Camera3D.project_ray_normal leaves out a frustum camera's offset, which puts the HUD centre row on the axis).
-func _crosshair_ray(cam: Camera3D, cockpit: CockpitDisplay) -> Array:
+func _crosshair_ray(host: Herc, cam: Camera3D, cockpit: CockpitDisplay) -> Array:
+	if cockpit == null:                    # plain HUD: the reticle is drawn where the aim ray projects
+		return [host.aim_origin(), -host.aim_basis().z]
 	var share := Vector2(0.5, 0.5)
 	if cockpit != null:
 		share = cockpit.make_crosshair_point() / cockpit.canvas_size
@@ -100,7 +103,7 @@ func _crosshair_ray(cam: Camera3D, cockpit: CockpitDisplay) -> Array:
 
 
 func _check_pose(host: Herc, cam: Camera3D, cockpit: CockpitDisplay, where: String) -> void:
-	var ray := _crosshair_ray(cam, cockpit)
+	var ray := _crosshair_ray(host, cam, cockpit)
 	for r in RANGES:
 		var at: Vector3 = ray[0] + ray[1] * r
 		var body := _build_target(at)

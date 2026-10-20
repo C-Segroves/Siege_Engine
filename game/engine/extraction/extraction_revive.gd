@@ -216,6 +216,7 @@ func _apply_revived(soldier: Infantry, reviver: Infantry) -> void:
 	revives.erase(soldier.net_id)
 	ExtractionDirector.send_all_from(self, "_set_downed", [soldier.net_id, false])
 	director.notify_all("%s revived %s." % [reviver.display_name, soldier.display_name])
+	director.callins.points.apply_revive(director.peer_of(reviver))
 
 
 ## Host: kills downed `soldier` (bled out, or nobody left to come): the usual death follows.

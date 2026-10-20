@@ -51,13 +51,19 @@ static func make_count(config: Dictionary) -> int:
 	return clampi(int(config.get(CONFIG_KEY, 0)), 0, MAX_BOTS)
 
 
+## Config / lobby-settings key: {"bot:<i>" | "ai:<i>": team} the host picked for computer-controlled members.
+const MEMBER_TEAMS_KEY := "member_teams"
+
+
 ## Team of bot `index` in a match with `config`.
 static func make_team(config: Dictionary, index: int) -> int:
 	var mode := str(config.get("mode", "skirmish"))
 	if mode == "vs" and not bool(config.get("teams", false)):
 		return FREE_FOR_ALL_TEAM_BASE + index
 	if mode == "vs":
-		return index % maxi(int(config.get("team_count", 2)), 2)
+		var count := maxi(int(config.get("team_count", 2)), 2)
+		var picked := int((config.get(MEMBER_TEAMS_KEY, {}) as Dictionary).get("bot:%d" % index, -1))
+		return picked if picked >= 0 and picked < count else index % count
 	return ENEMY_TEAM if index % 2 == 0 else PLAYER_TEAM
 
 
@@ -66,11 +72,17 @@ static func make_team(config: Dictionary, index: int) -> int:
 ## Host: spawns the config's bots on every peer, in `pack`'s armour.
 func spawn_all(pack: String) -> void:
 	for i in make_count(battle.config):
+		if not BotBudget.admits(battle, BotBudget.Priority.MATCH):
+			return   # the server's bot cap (BotBudget)
 		spawn_bot(make_bot_spec(pack, i), BOT_SKILL)
 
 
-## Host: spawns the bot soldier of `spec` (make_bot_spec, or a mode's own) on every peer with its brain.
+## Host: spawns the bot soldier of `spec` (make_bot_spec, or a mode's own) on every peer with its brain; null when the
+## server's bot cap refuses it (BotBudget).
 func spawn_bot(spec: Dictionary, skill: float) -> InfantryBot:
+	if not BotBudget.admits(battle, make_budget_priority(spec)):
+		return null
+	LoadKeepAlive.pump()
 	battle.send_spawn(spec)
 	var s := battle.vehicles.get(int(spec.net_id)) as Infantry
 	if s == null:
@@ -78,6 +90,14 @@ func spawn_bot(spec: Dictionary, skill: float) -> InfantryBot:
 	var brain := InfantryBot.make(s, int(spec.owner), skill)
 	s.add_child(brain)
 	return brain
+
+
+## The bot cap's priority of the soldier `spec`: a faction soldier (extraction garrison, squad, response) by its distance
+## to the nearest human, a mission's soldier critical, the match's own bot a match bot.
+func make_budget_priority(spec: Dictionary) -> int:
+	if spec.has("faction"):
+		return BotBudget.make_distance_priority(battle, (spec.xf as Transform3D).origin)
+	return BotBudget.Priority.CRITICAL if battle.mission != null else BotBudget.Priority.MATCH
 
 
 ## A fresh bot id (never one handed out before in this match).

@@ -469,6 +469,7 @@ step = {"effects": ["<effect>", "..."],  // one picked at random per count
 | Starsiege | exp_l + shock_m (on the ground) + 3 debris exp_l | - | the record's explosion tag (`structures`: IDDTS_EXP_S / M / L) | the record's tag | - |
 | Tribes | FlierData explosionId flashExpLarge + 3 flashDebrisLarge spawnedExplosionID | - | Generator: flashExpLarge + debris | PlasmaTurret: LargeShockwave + debrisExpMedium | nothing |
 | Tribes 2 | VehicleData `explosion`: Shrike / Wildcat VehicleExplosion, Havoc / Thundersword LargeAirVehicleExplosion, Beowulf / Jericho LargeGroundVehicleExplosion | - | GeneratorLarge ShapeExplosion | TurretBaseLarge TurretExplosion | nothing |
+| Aerial Assault, Vengeance | engine default: `DefaultVehicleExplosion` | - | 4 x `DefaultStructureExplosion` scattered, then one more | `DefaultTurretExplosion` | nothing |
 
 **Earthsiege 1 (DBSIM).** No explosion belongs to the unit itself: a mech dies when a cockpit component is destroyed
 (0x13824), and damage.cpp 0x9cd4 spawns, for every component the hit destroys, its debris (flag 2) and explosion 10 at
@@ -497,6 +498,14 @@ IDDTS_SHOCK_M. Static shapes and turrets carry their own explosion tag in the mi
 **Tribes.** Vehicle.cs FlierData `explosionId` / `debrisId` (the debris pieces explode their `spawnedExplosionID`
 when they come to rest: played around the wreck), turret.cs / staticshape.cs / station.cs the same per datablock.
 **Tribes 2.** VehicleData / TurretData / StaticShapeData `explosion`. Soldiers: section 6 of tribes_infantry.md.
+
+**Aerial Assault and Vengeance (engine default, `tools/fx_default.py`).** Neither pack names an explosion in data the importer
+reads: Aerial Assault's vehicles are the Tribes 2 art with Tribes 2 stats and its sound bank is numbered, not named; Vengeance's
+explosions are Unreal `ParticleEmitter` actors (not decoded). Their importers (`aa_import`, `tv_import`) write a small
+`fx/effects.json` whose `source` strings say "engine default": a flash, fire and smoke layers drawn by the engine, plus what the pack
+owns (Aerial Assault: its disc `explosion` shape; Vengeance: `audio/sfx/tv_dyn/Explo_MetalLg1 / StorageLg1 / MetalLg2`). Sizes,
+counts and times are defaults, not disc values. `death_fx_check` accepts them as ordinary entries (steps, known effects, no generic
+explosion); the generic stand-in stays a last resort for a pack without a library.
 
 Approximations: debris pieces are not simulated (their explosions play around the wreck, `scatter`); one entry per
 kind for structures / turrets of Tribes and Tribes 2 (the remake builds none of their static shapes in battle yet);

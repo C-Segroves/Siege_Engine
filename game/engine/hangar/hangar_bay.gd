@@ -644,6 +644,7 @@ func _environment(hall: Node3D) -> void:
 	env.ambient_light_energy = 0.3
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	env.tonemap_exposure = 1.05
+	SceneLighting.apply_scene_light(Color.WHITE, env.ambient_light_color, true)   # palette models undo the FILMIC curve
 	env.glow_enabled = true
 	env.glow_intensity = 0.55
 	env.glow_bloom = 0.04

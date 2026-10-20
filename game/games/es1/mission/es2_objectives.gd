@@ -3,17 +3,21 @@ extends RefCounted
 ## Earthsiege 2 mission rules: the detection flags (alert regions), the scan test, the objective
 ## tests (DBSIM 0x413280; docs/formats/es2.md 10.3) and the mission status with its automatic end.
 
-## Detection: an enemy within 50000 original units (195 m) or targeting the unit (DBSIM +0xc flag).
-const DETECT_RANGE_UNITS := 50000.0
-## "Safe" (DBSIM 0x4137b4): no armed enemy within 80000 units (312 m), 100000 (390 m) if it targets u.
-const SAFE_RANGE_UNITS := 80000.0
-const SAFE_RANGE_TARGETING_UNITS := 100000.0
+## Detection and "safe" (DBSIM 0x4137b4, armed enemies only here): the ranges are EsRanges'.
 ## Scan missions (header word 3): face the target within SCAN_RANGE (+ structure slack) for SCAN_TIME.
 const SCAN_MODES := [3, 7]
 const SCAN_RANGE := 60.0
 const SCAN_RANGE_STRUCTURE_EXTRA := 20.0
-const SCAN_CONE := PI / 4.0
+const SCAN_CONE_DEGREES := 45.0
 const SCAN_TIME := 4.0
+## The scan's own lines: a progress line every 4th rules tick, then the completion.
+const SCAN_PROGRESS_TICKS := 4
+const SCAN_PROGRESS_TEXT := "Scanning target... %d%%"
+const SCAN_PROGRESS_SECONDS := 1.0
+const SCAN_DONE_TEXT := "Scan complete."
+const SCAN_DONE_SECONDS := 4.0
+## The mission's header word 3 names the mission type.
+const HEADER_MODE_WORD := 3
 ## Objective types that name the scan target.
 const SCAN_TARGET_OBJECTIVES := [3, 4, 9, 10]
 ## Passive goals (protect 2, disarm 7, stealth 8, no-scan 9/10), see threat_over().
@@ -33,25 +37,75 @@ const OUTSIDE_FAR_UNITS := 110000.0
 const AUTO_END_STATUSES := [STATUS_FAILED, STATUS_OUTSIDE, STATUS_FAR_OUTSIDE, STATUS_COMPLETE]
 ## Statuses 6 and 9 end the mission after this grace period (DBSIM 0x4131ac).
 const END_GRACE := 4.9
+## The end lines and codes.
+const CODE_KILLED := 2
+const TEXT_KILLED := "You have been killed."
+const TEXT_COMPLETE := "Mission objectives complete."
+const TEXT_FAILED := "You have failed your mission."
+const TEXT_LEFT_AREA := "You have left the mission area."
+const STATUS_MESSAGE_SECONDS := 5.0
 
 var rt: MissionRuntimeES2
-var objectives := []              # [{def, done}]
+var objectives := []              # [{def, done}], in the order of the goals of the set
 var detected := {}                # node instance id -> true (an enemy came within 195 m / targeted it)
-var scan_flag := false
+var scan_flag: bool:
+	get: return _scan != null and _scan.is_done()
 var status := STATUS_IN_PROGRESS
-var _scan_t := 0.0
-var _end_t := -1.0
-var _end_status := -1
+var world: ES2MissionWorld
+var _goals := ObjectiveSet.new()
+var _scan: ScanObjective = null
+var _killed_rule := PlayerKilledRule.new(CODE_KILLED, TEXT_KILLED)
+var _left_rule := LeftAreaRule.new(0, TEXT_LEFT_AREA, END_GRACE)
+var _ender: MissionEnder
+## The end-forcing status held now, and for how long (the grace counts from the change of status).
+var _held_status := -1
+var _held_seconds := 0.0
 var _objectives_complete := false
 
 
 func _init(runtime: MissionRuntimeES2) -> void:
 	rt = runtime
+	_left_rule.code_source = get_status
 
 
+## Builds the goals of the set (a required one completes the mission, an optional one hit fails it), the scan of the
+## scan missions and the way out (needs the battle: its sink).
 func load_objectives(defs: Array) -> void:
+	world = ES2MissionWorld.new(rt)
+	_ender = MissionEnder.new(rt.end_mission, world.sink.is_voice_playing)
 	for o in defs:
-		objectives.append({"def": o, "done": false})
+		var entry := {"def": o, "done": false}
+		var goal := ConditionObjective.new(str(objectives.size()), _make_goal_text(o), _is_goal_hit.bind(entry))
+		goal.required = bool(o.get("required", true))
+		objectives.append(entry)
+		_goals.apply_add(goal)
+	if get_mission_mode() in SCAN_MODES:
+		_scan = _make_scan()
+
+
+func get_status() -> int:
+	return status
+
+
+func get_mission_mode() -> int:
+	var raw: Array = MissionRuntime._arr(rt.m.get("header", {}).get("raw"))
+	return int(raw[HEADER_MODE_WORD]) if raw.size() > HEADER_MODE_WORD else 0
+
+
+static func _make_goal_text(o: Dictionary) -> String:
+	return String(o.get("text", "")) if o.get("text") != null else ""
+
+
+## The scan: face the target within range for SCAN_TIME (one stage, no text of its own), with its progress lines.
+func _make_scan() -> ScanObjective:
+	var scan := ScanObjective.new("scan", "", "", SCAN_RANGE, [{"seconds": SCAN_TIME, "text": ""}])
+	scan.cone_degrees = SCAN_CONE_DEGREES
+	scan.progress_format = SCAN_PROGRESS_TEXT
+	scan.progress_every = SCAN_PROGRESS_TICKS
+	scan.progress_seconds = SCAN_PROGRESS_SECONDS
+	scan.complete_text = SCAN_DONE_TEXT
+	scan.complete_seconds = SCAN_DONE_SECONDS
+	return scan
 
 
 # ------------------------------------------------------------------ detection and scan
@@ -61,10 +115,7 @@ func is_safe(u: Node3D) -> bool:
 	if u == null:
 		return true
 	for v in rt.active_vehicles():
-		if v.team == u.team or v.weapons.is_empty():
-			continue
-		var r := SAFE_RANGE_TARGETING_UNITS if v.target == u else SAFE_RANGE_UNITS
-		if v.global_position.distance_to(u.global_position) < r * Assets.UNIT:
+		if v.team != u.team and not v.weapons.is_empty() and EsRanges.is_in_safe_range(v, u):
 			return false
 	return true
 
@@ -78,7 +129,7 @@ func update_detection() -> void:
 			units.append(s)
 	for u in units:
 		var key: int = u.get_instance_id()
-		if detected.has(key) or not MissionTargets.is_noticed(u, vs, DETECT_RANGE_UNITS):
+		if detected.has(key) or not MissionTargets.is_noticed(u, vs, EsRanges.DETECT_RANGE_UNITS):
 			continue
 		detected[key] = true
 		var ar := rt.alert_region_of(u)
@@ -92,20 +143,9 @@ func mark_detected(n: Node) -> void:
 
 ## Scan missions (header word 3 = 3 / 7): face the player squad's order target closely for 4 s.
 func update_scan(dt: float) -> void:
-	var raw: Array = MissionRuntime._arr(rt.m.get("header", {}).get("raw"))
-	var mode := int(raw[3]) if raw.size() > 3 else 0
-	if scan_flag or not (mode in SCAN_MODES):
+	if _scan == null or _scan.is_done() or rt._living_player() == null:
 		return
-	var me := rt._living_player()
-	if me == null:
-		return
-	var near := _facing_scan_target(me)
-	_scan_t = _scan_t + dt if near else 0.0
-	if near and int(_scan_t / dt) % 4 == 1:
-		rt.battle.fx("message", ["Scanning target... %d%%" % mini(100, int(_scan_t * 25.0)), 1.0], true)
-	if _scan_t >= SCAN_TIME:
-		scan_flag = true
-		rt.battle.fx("message", ["Scan complete.", 4.0], true)
+	_scan.apply_tick(world, dt)
 
 
 func _scan_targets() -> Array:
@@ -121,14 +161,16 @@ func _scan_targets() -> Array:
 	return out
 
 
-func _facing_scan_target(me: Node3D) -> bool:
+## True when a scan target other than `me` lies within `reach` (a structure's slack added) of `me` and inside the cone.
+## The angle is the signed one of Vector2.angle_to, as the original port of the test has it.
+func is_facing_scan_target(me: Node3D, reach: float, cone: float) -> bool:
 	var near := false
 	for t in _scan_targets():
 		if is_instance_valid(t) and t.alive and t != me:
 			var to: Vector3 = t.global_position - me.global_position
 			var fwd: Vector3 = -me.aim_basis().z
-			var reach := SCAN_RANGE + SCAN_RANGE_STRUCTURE_EXTRA * float(t is Structure)
-			if to.length() < reach and Vector2(fwd.x, fwd.z).angle_to(Vector2(to.x, to.z)) < SCAN_CONE:
+			var range := reach + SCAN_RANGE_STRUCTURE_EXTRA * float(t is Structure)
+			if to.length() < range and Vector2(fwd.x, fwd.z).angle_to(Vector2(to.x, to.z)) < cone:
 				near = true
 	return near
 
@@ -172,6 +214,17 @@ func goal_met(o: Dictionary) -> bool:
 	if o.get("required", true) and int(o.get("type", 0)) in PASSIVE_GOALS and not threat_over():
 		return false
 	return _goal_at_face_value(o)
+
+
+## The condition of a goal: its test, running the objective's mission variable changes once, when first hit.
+func _is_goal_hit(entry: Dictionary) -> bool:
+	var o: Dictionary = entry.def
+	var hit := goal_met(o)
+	if hit and not entry.done:
+		entry.done = true
+		for a in MissionRuntime._arr(o.get("actions")):
+			rt._var_op(int(a[0]), int(a[1]), MissionRuntimeES2.TABLE_OBJECTIVE)
+	return hit
 
 
 func _goal_at_face_value(o: Dictionary) -> bool:
@@ -219,41 +272,45 @@ func is_complete() -> bool:
 	return _objectives_complete
 
 
-## Evaluates the objectives (running their actions once), updates the status and ends the
-## mission after the grace period. `dt` = time since the last check.
+## Seconds the status "left the mission area" (7 / 8) has held (0 for any other status).
+func get_area_seconds() -> float:
+	return _held_seconds if status in [STATUS_OUTSIDE, STATUS_FAR_OUTSIDE] else 0.0
+
+
+## Evaluates the objectives (running their actions once), updates the status and hands the end to the MissionEnder: at once
+## when the player is dead, else after the status that ends the mission has held the grace period. `dt` = time since the last check.
 func check_end(dt: float) -> void:
-	var me := rt._living_player()
-	if me == null:
-		rt.end_mission(false, 2, "You have been killed.")
+	var killed := _killed_rule.make_verdict(world, dt)
+	if killed != null:
+		_apply_verdict(killed, dt)
 		return
 	var outcome := _evaluate_objectives()
 	_objectives_complete = outcome.complete and not outcome.failed
+	var me := rt._living_player()
 	status = _status_for(outcome.failed, outcome.complete, is_safe(me))
 	var area := make_area_status(rt.battle.bounds.make_outside_distance(me.global_position) if rt.battle.get("bounds") else 0.0)
 	if area != 0:
 		status = area
-	if status in AUTO_END_STATUSES:
-		_count_down_end(dt, String(outcome.fail_text))
-	else:
-		_end_status = -1
+	_hold_status(dt)
+	_apply_verdict(_make_end_verdict(String(outcome.fail_text), dt), dt)
+
+
+func _apply_verdict(verdict: MissionVerdict, dt: float) -> void:
+	_ender.apply_verdict(verdict)
+	_ender.apply_tick(dt)
 
 
 ## {failed, complete, fail_text}: a hit optional (failure) condition fails, every required one completes.
 func _evaluate_objectives() -> Dictionary:
+	_goals.apply_tick(world, 0.0)
 	var out := {"failed": false, "complete": true, "fail_text": ""}
-	for ob in objectives:
-		var o: Dictionary = ob.def
-		var hit := goal_met(o)
-		if hit and not ob.done:
-			ob.done = true
-			for a in MissionRuntime._arr(o.get("actions")):
-				rt._var_op(int(a[0]), int(a[1]), "objective")
-		if o.get("required", true):
-			if not hit:
+	for g in _goals.get_objectives():
+		if g.required:
+			if not g.is_done():
 				out.complete = false
-		elif hit:
+		elif g.is_done():
 			out.failed = true
-			out.fail_text = String(o.get("text", "")) if o.get("text") != null else ""
+			out.fail_text = g.text
 	return out
 
 
@@ -276,21 +333,36 @@ static func make_area_status(outside_m: float) -> int:
 	return STATUS_FAR_OUTSIDE if outside_m > OUTSIDE_FAR_UNITS * Assets.UNIT else STATUS_OUTSIDE
 
 
-func _count_down_end(dt: float, fail_text: String) -> void:
-	var won := status == STATUS_COMPLETE
-	if _end_status != status:
-		_end_status = status
-		_end_t = END_GRACE
-		rt.battle.fx("message", ["Mission objectives complete." if won else _make_failure_line(), 5.0], true)
-	_end_t -= dt
-	if _end_t > 0.0:
+## Counts how long the status has held while it is one that ends the mission (a change of status starts the grace over
+## and announces the end that is coming).
+func _hold_status(dt: float) -> void:
+	if status not in AUTO_END_STATUSES:
+		_held_status = -1
+		_held_seconds = 0.0
 		return
-	if won:
-		rt.end_mission(true, STATUS_COMPLETE, "Mission objectives complete.")
-	else:
-		var why := "\n" + fail_text.strip_edges() if fail_text.strip_edges() != "" and status == STATUS_FAILED else ""
-		rt.end_mission(false, status, _make_failure_line() + why)
+	if _held_status != status:
+		_held_status = status
+		_held_seconds = 0.0
+		var line := TEXT_COMPLETE if status == STATUS_COMPLETE else _make_failure_line()
+		world.sink.apply_message(MissionMessage.make_message(line, STATUS_MESSAGE_SECONDS, MissionMessage.CHANNEL_INFO))
+	_held_seconds += dt
+
+
+## The ruling once the status has held END_GRACE: the left area (the rule), the won mission, or the failed one with the
+## failing condition's text.
+func _make_end_verdict(fail_text: String, dt: float) -> MissionVerdict:
+	var left := _left_rule.make_verdict(world, dt)
+	if left != null:
+		return left
+	if _held_seconds < END_GRACE:
+		return null
+	if status == STATUS_COMPLETE:
+		return MissionVerdict.make_win(STATUS_COMPLETE, TEXT_COMPLETE)
+	if status == STATUS_FAILED:
+		var why := "\n" + fail_text.strip_edges() if fail_text.strip_edges() != "" else ""
+		return MissionVerdict.make_loss(status, _make_failure_line() + why)
+	return null
 
 
 func _make_failure_line() -> String:
-	return "You have left the mission area." if status in [STATUS_OUTSIDE, STATUS_FAR_OUTSIDE] else "You have failed your mission."
+	return TEXT_LEFT_AREA if status in [STATUS_OUTSIDE, STATUS_FAR_OUTSIDE] else TEXT_FAILED

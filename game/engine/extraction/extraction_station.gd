@@ -25,8 +25,10 @@ func _init(p_director: ExtractionDirector) -> void:
 
 # ------------------------------------------------------------------ queries
 
-## True when `soldier` stands on a working inventory station (the map's TribesStations).
+## True when `soldier` stands on a working inventory station (the map's TribesStations, or a call-in station).
 func is_at_station(soldier: Infantry) -> bool:
+	if director.callins != null and director.callins.is_at_inventory_station(soldier):
+		return true   # a call-in station (CallinDirector)
 	var stations := director.battle.get_node_or_null(STATIONS_NODE)
 	if stations == null or not stations.has_method("find_station") or soldier == null:
 		return false

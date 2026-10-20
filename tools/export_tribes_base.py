@@ -438,12 +438,14 @@ def t2_sensor_radius(resolve, b):
 
 def t2_sensor(resolve, sensor_name):
     """SensorData (scripts/*.cs): detectRadius, detectsUsingLOS, detectsPassiveJammed (sees a jammer pack's
-    wearer), detectsFOVOnly with detectFOVPercent of the owner's FOV (the PlayerSensor)."""
+    wearer), detectsCloaked and detectMinVelocity (a motion sensor sees a cloaked wearer moving at least that
+    fast), detectsFOVOnly with detectFOVPercent of the owner's FOV (the PlayerSensor)."""
     s = resolve(sensor_name)
     return {'range': num(s, 'detectRadius'), 'los': V.is_true(s.get('detectsUsingLOS')),
             'detects_jammed': V.is_true(s.get('detectsPassiveJammed')), 'jams': V.is_true(s.get('jams')),
             'fov_only': V.is_true(s.get('detectsFOVOnly')), 'fov_percent': num(s, 'detectFOVPercent', 1.0),
-            'pings': V.is_true(s.get('detectionPings'))}
+            'pings': V.is_true(s.get('detectionPings')), 'detects_cloaked': V.is_true(s.get('detectsCloaked')),
+            'min_velocity': num(s, 'detectMinVelocity')}
 
 
 def t2_player_sensor(resolve):

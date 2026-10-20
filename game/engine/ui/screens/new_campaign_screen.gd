@@ -2,7 +2,7 @@ extends LauncherScreen
 ## New campaign: the pilot (and save) name and which campaign to fly - the saga or one game's campaign
 ## (MatchFlow.make_new_campaign_choices), each with a short description; campaigns whose game is not
 ## installed are shown but cannot be chosen. Start writes the pilot's autosave at once (asking first when
-## that pilot already has an unfinished autosave of the same campaign) and opens the campaign.
+## that pilot already has an unfinished autosave of the same campaign) and opens the campaign's lobby.
 ## The multiplayer-only launcher (the original shell's MULTIPLAYER) offers Earthsiege's campaign only.
 
 const NOT_INSTALLED := "  (not installed)"
@@ -11,6 +11,7 @@ const RESTART_QUESTION := "%s already flies a %s campaign (autosaved). Start a n
 var _name_edit: LineEdit
 var _choices: Array = []
 var _boxes: Array[CheckBox] = []
+var _classic_box: CheckBox
 
 
 func open(_args: Dictionary) -> void:
@@ -22,6 +23,11 @@ func open(_args: Dictionary) -> void:
 	content.add_child(OptionRow.new("Pilot name", _name_edit))
 	content.add_child(Widgets.section("Campaign"))
 	_add_choices()
+	content.add_child(Widgets.section("Rules"))
+	_classic_box = Widgets.check_box("Classic", false)
+	content.add_child(_classic_box)
+	content.add_child(Widgets.paragraph("Only the weapons the campaign's game had released by this point, weapons from older games, "
+		+ "Battledrome weapons that resemble them, and the basic infantry kit.", "DimLabel"))
 
 
 func _add_choices() -> void:
@@ -50,6 +56,11 @@ func chosen() -> Dictionary:
 	return {}
 
 
+## True when the Classic box is ticked.
+func is_classic() -> bool:
+	return _classic_box != null and _classic_box.button_pressed
+
+
 func _ask_start() -> void:
 	var choice := chosen()
 	var pilot := _name_edit.text.strip_edges()
@@ -70,5 +81,5 @@ func _ask_start() -> void:
 
 func _start(choice: Dictionary, pilot: String) -> void:
 	Net.player_name = pilot
-	Session.start_new_campaign(choice, pilot)
-	launcher().show_campaign()
+	Session.start_new_campaign(choice, pilot, is_classic())
+	launcher().show_started_campaign()

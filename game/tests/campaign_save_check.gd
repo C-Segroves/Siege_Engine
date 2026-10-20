@@ -100,11 +100,12 @@ func _check_explicit_continue() -> void:
 	if cont:
 		cont.pressed.emit()
 		await _frames()
-		_expect(Session.campaign is CampaignES2 and launcher.current_name == "briefing",
-			"Continue campaign loads the Earthsiege 2 save into its briefing (%s)" % launcher.current_name)
+		_expect(Session.campaign is CampaignES2 and launcher.current_name == "lobby",
+			"Continue campaign loads the Earthsiege 2 save into its campaign lobby (%s)" % launcher.current_name)
 		_expect(str(Session.campaign.current_mission()) == mission and not str(Session.briefing().get("briefing", "")).is_empty(),
-			"the briefing is Earthsiege 2 mission %s with its text" % mission)
+			"the lobby briefs Earthsiege 2 mission %s with its text" % mission)
 	Net.stop_discovery()
+	Net.leave()
 	launcher.queue_free()
 	await _frames()
 
@@ -140,10 +141,12 @@ func _check_coop_client() -> void:
 func _check_build_defaults() -> void:
 	for e in _playable_entries():
 		Session.start_stage_campaign(str(e.pack), str(e.variant))
+		if Session.garage() == null:
+			continue   # on-foot campaigns (Tribes) have no garage and no Herc to build
 		var launcher: Launcher = load(LAUNCHER_SCENE).instantiate()
 		add_child(launcher)
 		await _frames()
-		launcher.open_hangar("briefing")
+		launcher.open_hangar("lobby")
 		await _frames()
 		var picker: VehiclePicker = null
 		for c in launcher.current.find_children("*", "VehiclePicker", true, false):

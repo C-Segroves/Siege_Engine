@@ -13,6 +13,9 @@ extends RefCounted
 ##   carried_vehicles / carried_weapons   saga carry-over from earlier stages (count as earlier era)
 ##   mission_vehicles   vehicles the current mission hands the player (always offered)
 ##   cybrid_weapons_on_hercs  Cybrid-only weapons allowed on Hercs and tanks (by hardpoint size)
+##   classic            true = Classic campaign: the campaign game's own releases, weapons of games earlier in the story
+##                      order (CLASSIC_ORDER), Battledrome weapons similar to an allowed one (ES1 and ES2 campaigns)
+##                      and basic infantry weapons; later games' weapons are never offered, not even as "equivalent"
 ## The empty context {} means no limits on Hercs and weapons (arena / skirmish / versus / co-op
 ## skirmish); make_open_context(mode) adds the match mode's cybrid_weapons_on_hercs rule (§2:
 ## arena, versus and skirmish allow them, campaign and co-op keep Cybrid weapons on Cybrids).
@@ -36,6 +39,13 @@ const FIELDED_CATEGORIES := ["herc", "vehicle"]
 const GUIDANCE_SUFFIXES := ["_SARH", "_ARH", "_ARM", "_EO"]
 ## Ratings this close count as equal ("more or less equivalent").
 const RATING_TOLERANCE := 0.02
+## Classic mode: story order of the games (Packs.era ties Tribes 1 / 2 / Aerial Assault / Vengeance together).
+const CLASSIC_ORDER := {"es1": 1, "bd": 2, "es2": 3, "starsiege": 4, "tribes": 5, "tribes2": 6, "tribes_aa": 6, "tribes_v": 7}
+const BATTLEDROME_PACK := "bd"
+const CLASSIC_BD_CAMPAIGNS := ["es1", "es2"]
+const REASON_SIMILAR := "similar to %s"
+const REASON_INFANTRY := "basic infantry"
+const REF_SIMILAR := "_similar"
 
 
 ## A restricted context for a campaign of `native_pack` with nothing unlocked yet.
@@ -167,10 +177,55 @@ static func make_weapon_reason(ctx: Dictionary, wid: String, reference := {}) ->
 		return REASON_UNLOCKED
 	if (ctx.get("carried_weapons", []) as Array).has(base):
 		return REASON_CARRIED
+	if bool(ctx.get("classic", false)):
+		return _make_classic_weapon_reason(ctx, Packs.weapon(wid), base, reference)
 	var timeline := _make_foreign_weapon_reason(ctx, Packs.weapon(wid), reference)
 	if timeline != "":
 		return timeline
 	return REASON_STOCK if int(ctx.get("salvage_stock", {}).get(base, 0)) > 0 else ""
+
+
+## Classic rules for a weapon that is neither unlocked nor carried: basic infantry weapons, weapons of earlier games
+## (story order), Battledrome look-alikes of an allowed weapon, the campaign game's own salvaged stock. Later
+## games' weapons are never offered, not even as "equivalent" or from stock.
+static func _make_classic_weapon_reason(ctx: Dictionary, w: Dictionary, base: String, reference: Dictionary) -> String:
+	if w.is_empty():
+		return ""
+	if is_basic_infantry_weapon(w):
+		return REASON_INFANTRY
+	var pack := str(w.get("pack", ""))
+	var native := str(ctx.native_pack)
+	if pack == native:
+		return REASON_STOCK if int(ctx.get("salvage_stock", {}).get(base, 0)) > 0 else ""
+	if pack == BATTLEDROME_PACK and CLASSIC_BD_CAMPAIGNS.has(native):
+		if reference.is_empty():
+			reference = _make_weapon_reference(ctx)
+		var like := _find_similar(w, reference.get(REF_SIMILAR, []))
+		return REASON_SIMILAR % like if like != "" else ""
+	return REASON_OLDER if _classic_rank(pack) < _classic_rank(native) else ""
+
+
+static func _classic_rank(pack: String) -> int:
+	return int(CLASSIC_ORDER.get(pack, Packs.era(pack) * 10))
+
+
+## Default-loadout weapons of the infantry armors (Tribes' basic soldier kit).
+static func is_basic_infantry_weapon(w: Dictionary) -> bool:
+	if str(w.get("category", "")) != "infantry":
+		return false
+	for armor in InfantryCatalog.armors_of(str(w.get("pack", ""))):
+		if (armor.get("default_loadout", []) as Array).has(str(w.get("id", ""))):
+			return true
+	return false
+
+
+## Name of the first reference weapon `w` looks like (same WeaponLookalike archetype and size class: the look-alike rules a-c; raw stats differ by scale), "" if none.
+static func _find_similar(w: Dictionary, refs: Array) -> String:
+	var arch := WeaponLookalike.make_archetype(w)
+	for r in refs:
+		if WeaponLookalike.make_archetype(r) == arch and WeaponFit.size_of(r) == WeaponFit.size_of(w):
+			return str(r.get("display_name", r.get("name", r.get("id", ""))))
+	return ""
 
 
 static func _make_foreign_weapon_reason(ctx: Dictionary, w: Dictionary, reference: Dictionary) -> String:
@@ -205,8 +260,12 @@ static func _make_weapon_reference(ctx: Dictionary) -> Dictionary:
 	var ref := {}
 	if not is_restricted(ctx):
 		return ref
+	if bool(ctx.get("classic", false)):
+		ref[REF_SIMILAR] = []
 	for base in (ctx.get("unlocked_weapons", []) as Array) + (ctx.get("carried_weapons", []) as Array):
 		for w in _weapons_with_base(str(base)):
+			if ref.has(REF_SIMILAR):
+				ref[REF_SIMILAR].append(w)
 			_append_rated(ref, Packs.weapon_family(w), Packs.weapon_rating(w), str(w.get("display_name", w.get("name", base))))
 	return ref
 

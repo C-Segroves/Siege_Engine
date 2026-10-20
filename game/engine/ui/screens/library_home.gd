@@ -1,11 +1,9 @@
 extends RoutedScreen
 ## Library home: import discs, switch each game's content on/off, soundtracks, and play: the campaigns
-## (Continue / New campaign / Load game open the launcher's campaign pages), Host / Join a LAN game, co-op, the
-## original Earthsiege.
+## (Continue / New campaign / Load game open the launcher's campaign pages), Host / Join a LAN game, co-op (vs
+## Cybrids, campaign), skirmish and extraction (the standard lobby, offline), the original Earthsiege.
 
 const SHAPE_VIEWER := "res://tools/shape_viewer.tscn"
-const ES1_SHELL := "res://es1_shell.tscn"
-const ES1_SHELL_DATA := "shell/shell.json"
 const PACK_GRID_COLUMNS := 3
 const FILE_DIALOG_RATIO := 0.7
 const PERCENT := 100.0
@@ -179,29 +177,26 @@ func _add_play_section(can_play: bool) -> void:
 	var host := Widgets.button("Host LAN game", func() -> void: _library().open_launcher("host"))
 	host.disabled = not can_play
 	content.add_child(host)
-	var join := Widgets.button("Join LAN game", func() -> void: _library().open_launcher(Launcher.JOIN_START_MODE))
+	var join := Widgets.button("Join online game" if WebPlatform.is_active() else "Join LAN game", func() -> void: _library().open_launcher(Launcher.JOIN_START_MODE))
 	join.disabled = not can_play
 	content.add_child(join)
 	var coop := Widgets.button("Co-op missions (LAN)", func() -> void: _library().open_launcher("coop"))
 	coop.disabled = not can_play
 	content.add_child(coop)
+	var coop_campaign := Widgets.button("Co-op campaign (LAN)", func() -> void: _library().open_launcher("coop_campaign"))
+	coop_campaign.disabled = not can_play
+	content.add_child(coop_campaign)
 	if WebPlatform.is_active():
-		_disable_lan_buttons([host, join, coop])
+		_disable_lan_buttons([host, coop, coop_campaign])
 	var more := Widgets.button("Skirmish, training, extraction ...", func() -> void: _library().open_launcher(Launcher.MENU_START_MODE))
 	more.disabled = not can_play
 	content.add_child(more)
-	if Packs.packs.has("es1") and FileAccess.file_exists(Assets.path(ES1_SHELL_DATA, "es1")):
-		content.add_child(Widgets.button("Metaltech: Earthsiege (original game)", _play_es1))
 	var viewer := Widgets.button("Shape viewer", func() -> void: get_tree().change_scene_to_file(SHAPE_VIEWER))
 	viewer.disabled = Packs.packs.is_empty()
 	content.add_child(viewer)
 	content.add_child(Widgets.button("Options", func() -> void: router.go("options", {"home": "home"})))
 	content.add_child(Widgets.button("Tested game versions", func() -> void: router.go("versions")))
 
-
-func _play_es1() -> void:
-	Session.front_end = ES1_SHELL
-	get_tree().change_scene_to_file(ES1_SHELL)
 
 
 ## Browser build: no LAN play (WebPlatform); says why next to the buttons.

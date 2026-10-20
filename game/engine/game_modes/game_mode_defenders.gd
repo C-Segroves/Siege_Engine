@@ -25,6 +25,8 @@ func spawn_all() -> void:
 	for d in GameModes.make_mode_objects(director.mode_id, director.map_data):
 		if str(d.get("kind", "")) != ModeObject.KIND_DEFENDER or Packs.vehicle(str(d.get("vehicle", ""))).is_empty():
 			continue
+		if not BotBudget.admits(director.battle, BotBudget.Priority.MATCH):
+			break   # the server's bot cap
 		var xf := Transform3D(Basis(Vector3.UP, deg_to_rad(float(d.get("yaw", 0.0)))), _on_ground(d.get("pos", [0, 0, 0])))
 		var h := director.battle.spawn_ai(str(d.vehicle), int(d.team), xf, [], str(d.get("name", "Defender")),
 			{"skill": SKILL, "group": GROUP_BASE + k, "order": GUARD_ORDER})

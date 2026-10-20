@@ -8,10 +8,14 @@ extends ScreenRouter
 ## On LAN it follows the session: a match the host starts begins here too, and the host leaving
 ## returns to the front end with that message.
 ##   MatchResults.open_in_place_of(battle, summary)
+## A LAN pilot is paid the credits the match earned him (ResultsAward, EconomyNet) before the page opens; `award` holds
+## what he was paid ({} when nothing) and `credits_after` his new balance.
 
 const SCREENS := {"results": "res://engine/ui/screens/results_screen.gd"}
 
 var summary := {}
+var award := {}
+var credits_after := 0
 
 
 ## Replaces `old_scene` (the finished battle) with the results screen for `p_summary`.
@@ -27,11 +31,29 @@ func _ready() -> void:
 	super()
 	Net.game_starting.connect(start_battle)
 	Net.session_ended.connect(_on_session_ended)
+	pay_award()
 	go("results")
 
 
 func make_screen_paths() -> Dictionary:
 	return SCREENS
+
+
+## Pays the local pilot what this match earned him into his operator profile. Offline matches, dedicated servers and raids
+## (paid on extraction) pay nothing here.
+func pay_award() -> void:
+	if not Net.is_online() or Net.dedicated:
+		return
+	var picked: Array = (Net.roster.get(Net.my_id(), {}) as Dictionary).get("goals", [])
+	award = ResultsAward.make(summary, Net.settings, Net.player_name, picked, bool(Session.last_result.get("success", false)))
+	if award.is_empty():
+		return
+	var economy := EconomyNet.new()
+	economy.name = "EconomyNet"
+	economy.authority = LocalProfileAuthority.new(Net.player_name)
+	add_child(economy)
+	economy.send_award(Net.my_id(), award)
+	credits_after = OperatorProfile.load_for(Net.player_name).credits
 
 
 ## True when this peer may start a rematch.

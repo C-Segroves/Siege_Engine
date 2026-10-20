@@ -51,9 +51,16 @@ static func apply_jet(s: Infantry, wish: Vector3, delta: float) -> void:
 ##   Tribes 1  (impact - fall_min_speed) x fall_damage_per_mps ("fall_damage_above_min"; tribes.exe 0x4162d2:
 ##             (speed - minDamageSpeed) x damageScale)
 static func apply_fall_damage(s: Infantry, before: Vector3) -> void:
+	if before.length() <= float(s.armor.get("fall_min_speed", INF)):
+		return   # the impact along a surface normal is never more than the speed: no slide collision is read
 	var impact := 0.0
 	for i in s.get_slide_collision_count():
 		impact = maxf(impact, -before.dot(s.get_slide_collision(i).get_normal()))
+	apply_impact_damage(s, impact)
+
+
+## Damage of a fall that struck along a surface normal at `impact` m/s (the armour's fall rule).
+static func apply_impact_damage(s: Infantry, impact: float) -> void:
 	var dmg := make_fall_damage(s.armor, impact)
 	if dmg <= 0.0:
 		return

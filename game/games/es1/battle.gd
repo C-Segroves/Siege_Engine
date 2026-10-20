@@ -37,11 +37,16 @@ var initial_config := {}
 var world_info := {}
 var palette_id := "es1:WORLD0"
 var vehicles := {}            # net_id -> Herc
+## Every vehicle and soldier as packed arrays, updated once per physics tick (the server's view for the network).
+var entities := EntityTable.new()
 ## What the local player controls: his vehicle, or his soldier on foot (Infantry).
 var player: Herc
 var pilot: PlayerPilot
 var infantry: BattleInfantry
+var bot_sleep: BotSleep
 var occupancy: OccupancyDirector
+## A client's far bots: nodes dropped while FAR, drawn as proxies (null on a host and in single player).
+var far_units: BattleFarUnits
 ## The extraction raid (config mode "extraction"; null in other modes).
 var extraction: ExtractionDirector
 ## The game mode's rules, objects and HUD (config "game_mode" played by GameModeDirector; null otherwise).
@@ -76,6 +81,7 @@ static func default_config(vehicle := "es1:RAPTOR") -> Dictionary:
 
 
 func _ready() -> void:
+	set_process(false)   # _process reads the overlay and the cameras: it starts only when the build below has finished
 	name = "Battle"
 	ShapeInstance.world_palettes.clear()   # set again by MapBuilder for Darkstar maps
 	PersonalWaypoints.clear()
@@ -86,6 +92,9 @@ func _ready() -> void:
 	add_child(BattleNetSync.new(self))
 	occupancy = OccupancyDirector.new(self)
 	add_child(occupancy)
+	if not multiplayer.is_server():
+		far_units = BattleFarUnits.new(self)
+		add_child(far_units)
 	_exit = BattleExit.new(self)
 	add_child(_exit)
 	if config.is_empty():
@@ -99,15 +108,21 @@ func _ready() -> void:
 	if not mdef.is_empty():
 		BattleSetup.apply_mission_to_config(config, mdef)
 	var built := _build_world()
+	LoadKeepAlive.pump()
 	if not mdef.is_empty():
 		_start_mission(mdef)
 	_build_bounds(built, mdef)
+	LoadKeepAlive.pump()
 	spawner.build_spawn_points(built)
+	LoadKeepAlive.pump()
 	TribesBase.build_for(self, built)
+	LoadKeepAlive.pump()
 	add_child(TribesStations.new(self, built.get("stations", [])))
 	CommandProviders.build_for(self)
+	LoadKeepAlive.pump()
 	_add_map_pickups()
 	_build_ui()
+	LoadKeepAlive.pump()
 	_cockpit_messages = BdCockpitMessages.new(func(text: String) -> void:
 		overlay.show_message(text, BdCockpitMessages.TEXT_SECONDS))
 	if ExtractionRules.is_extraction(config):
@@ -116,13 +131,19 @@ func _ready() -> void:
 	if GameModes.uses_director(config):
 		game_mode = GameModeDirector.new(self, built)
 		add_child(game_mode)
+	bot_sleep = BotSleep.new(self)
+	LoadKeepAlive.pump()
+	add_child(bot_sleep)
 	if multiplayer.is_server():
 		spawner.spawn_roster()
+		LoadKeepAlive.pump()
 		infantry.spawn_bots()
+		LoadKeepAlive.pump()
 		if extraction:
 			extraction.start_host()
 	_music.start(config, mdef)
 	_start_screenshot_flag()
+	set_process(true)
 
 
 ## The playable area and the world floor (BattleBounds); a Tribes mission's scripts own its mission area.
@@ -211,6 +232,13 @@ func make_pilot_name(peer: int) -> String:
 
 @rpc("authority", "reliable", "call_local")
 func _spawn(spec: Dictionary) -> void:
+	if far_units:
+		far_units.note_spawn(spec)
+	build_unit(spec)
+
+
+## Builds the vehicle or soldier of a spawn spec on this peer and registers it (also when a client brings a far bot back).
+func build_unit(spec: Dictionary) -> Herc:
 	var h := infantry.build_soldier(spec) if spec.has("armor") else spawner.build_vehicle(spec)
 	if spec.get("parked", false):
 		BattleInfantry.apply_parked(h)
@@ -222,6 +250,7 @@ func _spawn(spec: Dictionary) -> void:
 		switch_control(h)   # a soldier made as the player leaves his vehicle: the vehicle's controls go
 	elif multiplayer.is_server():
 		spawner.attach_ai(h, spec)
+	return h
 
 
 ## Gives the local player control of `h` (boarding or leaving a vehicle): the old controls and view go.
@@ -306,6 +335,7 @@ func _process(delta: float) -> void:
 			cameras.apply_follow(player, delta)
 		else:
 			cameras.apply_sight(player)
+			cameras.apply_scope(player)
 	if overlay.scoreboard.visible:
 		overlay.update_scoreboard(vehicles)
 	_music.update(player, delta)
@@ -409,6 +439,10 @@ func finish_match() -> void:
 func _finish(p_result: Dictionary, summary: Dictionary) -> void:
 	result = p_result
 	_leave_battle_state()
+	if Net.dedicated:   # a dedicated server shows no results: the next match is its DedicatedServer's
+		Net.end_game()
+		queue_free()
+		return
 	if not result.is_empty():
 		Session.last_result = result
 		if not Net.is_online():
@@ -444,6 +478,9 @@ func remove_vehicle(net_id: int) -> void:
 func _remove_vehicle(net_id: int) -> void:
 	var h: Herc = vehicles.get(net_id)
 	vehicles.erase(net_id)
+	entities.unregister(net_id)
+	if far_units:
+		far_units.apply_removed(net_id)
 	if is_instance_valid(h):
 		h.queue_free()
 

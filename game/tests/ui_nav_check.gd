@@ -6,6 +6,8 @@ extends Node
 ##   godot --headless --audio-driver Dummy --path game res://tests/ui_nav_check.tscn
 
 const STEP_FRAMES := 2
+## The menu's lobby entries: [kind, offline].
+const LOBBY_ENTRIES := [["skirmish", true], ["extraction", true], ["vs", false], ["coop", false], ["campaign", false]]
 const SavedGuard := preload("res://tests/saved_campaign_guard.gd")
 
 var _fails := 0
@@ -198,13 +200,19 @@ func _check_launcher_routes() -> void:
 	await _frames(4)
 	_expect(launcher.current_name == "menu", "launcher opens on the menu")
 	_expect(_focus() != null and launcher.is_ancestor_of(_focus()), "launcher menu has focus (%s)" % _focus_name())
-	for page in ["armory", "host", "browser", "options", "new_campaign", "saves", "extraction"]:
+	for page in ["browser", "options", "new_campaign", "saves"]:
 		launcher.go(page)
 		await _frames(3)
 		_expect(_focus() != null and launcher.current.is_ancestor_of(_focus()), "%s: first control focused (%s)" % [page, _focus_name()])
 		_expect(_walks_to_footer(launcher.current), "%s: every control links down to the footer" % page)
 		await _send_action("menu_back")
 		_expect(launcher.current_name == "menu", "%s: menu_back returns to the menu (now %s)" % [page, launcher.current_name])
+	for entry in LOBBY_ENTRIES:
+		launcher.open_lobby(entry[0], entry[1])
+		await _frames(4)
+		_expect(launcher.current_name == "lobby" and _focus() != null and launcher.current.is_ancestor_of(_focus()), "%s lobby: first control focused (%s)" % [entry[0], _focus_name()])
+		await _send_action("menu_back")
+		_expect(launcher.current_name == "menu" and Net.roster.is_empty(), "%s lobby: menu_back leaves to the menu (now %s)" % [entry[0], launcher.current_name])
 	Net.stop_discovery()
 	launcher.queue_free()
 	await _frames()
@@ -331,14 +339,15 @@ func _expect_back(launcher: Launcher, from: String, expected: String) -> void:
 ## Every Back path of the menu map: Back returns to the screen the player came from; from a page the library
 ## opened (Arena / versus, Host, Join, campaign pages, the launcher's own menu) that is the library.
 func _check_back_paths() -> void:
-	for entry in [["arena", "host"], ["host", "host"], ["join", "browser"], ["new_campaign", "new_campaign"],
-			["load", "saves"], ["menu", "menu"]]:
+	for entry in [["arena", "lobby"], ["host", "lobby"], ["coop", "lobby"], ["coop_campaign", "lobby"],
+			["join", "browser"], ["new_campaign", "new_campaign"], ["load", "saves"], ["menu", "menu"]]:
 		var launcher := await _open_launcher_scene(entry[0])
 		_expect(launcher.current_name == entry[1], "library %s opens %s (%s)" % [entry[0], entry[1], launcher.current_name])
 		await _expect_back(launcher, "library %s: %s" % [entry[0], entry[1]], "library")
+		_expect(Net.roster.is_empty(), "library %s: Back closed the session" % entry[0])
 		await _close_scene()
 	var launcher := await _open_launcher_scene(Launcher.MENU_START_MODE)
-	for page in ["armory", "host", "browser", "options", "new_campaign", "saves", "extraction", "training"]:
+	for page in ["browser", "options", "new_campaign", "saves", "training"]:
 		launcher.go(page, {"pack": "tribes"} if page == "training" else {})
 		await _frames(3)
 		await _expect_back(launcher, "menu > %s" % page, "menu")
@@ -354,33 +363,31 @@ func _check_back_paths() -> void:
 	await _close_scene()
 
 
-## Host > Create lobby > Leave returns to the host page, then Back to the menu.
+## Host LAN game > lobby > Leave returns to the menu.
 func _check_lobby_back(launcher: Launcher) -> void:
-	var host: RoutedScreen = launcher.go("host")
-	await _frames(2)
-	host.call("create_lobby")
+	launcher.open_lobby("vs")
 	await _frames(3)
 	if launcher.current_name != "lobby":
-		_expect(false, "host > Create lobby opens the lobby (port busy?)")
+		_expect(false, "menu > Host LAN game opens the lobby (port busy?)")
 		return
-	await _expect_back(launcher, "menu > host > lobby (Leave)", "host")
+	await _expect_back(launcher, "menu > lobby (Leave)", "menu")
 	_expect(not Net.is_online(), "Leave closed the LAN session")
-	await _expect_back(launcher, "menu > host", "menu")
 
 
-## Campaign: briefing > Save game > Back returns to the briefing; briefing > Hangar > Back returns to the briefing.
+## Campaign: lobby > Save game > Back returns to the lobby; lobby > Hangar > Back returns to the lobby.
 func _check_campaign_back(launcher: Launcher) -> void:
 	Session.start_stage_campaign("es1")
 	Session.last_result = {}
-	launcher.go("briefing")
+	launcher.show_started_campaign()
 	await _frames(3)
-	launcher.go("saves", {"mode": "save", "return_to": "briefing"})
+	_expect(launcher.current_name == "lobby" and MatchFlow.is_solo_campaign(Net.settings), "a started campaign opens its offline lobby (%s)" % launcher.current_name)
+	launcher.go("saves", {"mode": "save", "return_to": "lobby"})
 	await _frames(2)
-	await _expect_back(launcher, "briefing > saves", "briefing")
-	launcher.open_hangar("briefing")
+	await _expect_back(launcher, "lobby > saves", "lobby")
+	launcher.open_hangar("lobby")
 	await _frames(3)
-	await _expect_back(launcher, "briefing > hangar", "briefing")
+	await _expect_back(launcher, "lobby > hangar", "lobby")
 	Session.clear_campaign()
-	launcher.back()   # briefing -> the menu it was opened from
+	Net.leave()   # the session ended under the lobby: the launcher goes back to the menu it was opened from
 	await _frames(2)
-	_expect(launcher.current_name == "menu", "briefing came from the menu: the stack leads back there (%s)" % launcher.current_name)
+	_expect(launcher.current_name == "menu", "the lobby came from the menu: the stack leads back there (%s)" % launcher.current_name)

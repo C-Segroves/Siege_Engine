@@ -25,6 +25,7 @@ Packs="*res://engine/packs.gd"
 Net="*res://engine/net.gd"
 Session="*res://engine/session.gd"
 TestWatchdog="*res://engine/testing/test_watchdog.gd"
+GamesBoot="*res://games/games_boot.gd"
 
 [display]
 
@@ -51,6 +52,18 @@ palette_lights={
 "value": ""
 }
 palette_light_count={
+"type": "int",
+"value": 0
+}
+scene_sun_color={
+"type": "vec3",
+"value": Vector3(0.6, 0.6, 0.6)
+}
+scene_ambient={
+"type": "vec3",
+"value": Vector3(0.4, 0.4, 0.4)
+}
+scene_tonemap={
 "type": "int",
 "value": 0
 }

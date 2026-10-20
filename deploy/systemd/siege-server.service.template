@@ -1,0 +1,17 @@
+# Rendered by deploy/install.sh into /etc/systemd/system/siege-server.service (GAME_SERVER=yes).
+[Unit]
+Description=Siege Engine dedicated game server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=@SERVICE_USER@
+Environment=HOME=@INSTALL_DIR@
+ExecStart=@GODOT_BIN@ --headless --audio-driver Dummy --path @REPO_DIR@/game res://server/dedicated_server.tscn -- --server --config=@GAME_SERVER_CONFIG@ --data_dir=@DATA_DIR@ --port=@GAME_SERVER_PORT@ --list_port=@GAME_SERVER_LIST_PORT@ --bind=127.0.0.1 --transport=ws
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

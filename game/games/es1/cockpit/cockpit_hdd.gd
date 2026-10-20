@@ -14,6 +14,9 @@ const DAMAGE_ROW_HEIGHT := 7
 const WINGMAN_WINDOWS := 3
 const STATIC_FRAMES := 5
 const STATIC_FPS := 12.0
+const TALK_FIRST := 2
+const TALK_FRAMES := 22
+const TALK_FPS := 10.0
 const BLINK_EVERY := 4.0            # seconds between a pilot's blinks
 const BLINK_LENGTH := 0.15
 const OCTANTS := 8
@@ -182,7 +185,7 @@ func _draw_wingmen(d: Dictionary) -> void:
 		var r := CockpitCanvas.rect_of(b[10 + k])
 		if k < wing.size():
 			var slot := WingmanRadio.slot_of(wing[k])
-			_draw_pilot(r, WingmanRadio.pilot_number(slot if slot >= 0 else k))
+			_draw_pilot(r, WingmanRadio.pilot_number(slot if slot >= 0 else k), is_transmitting(wing[k]))
 			if k < leds.size() and is_transmitting(wing[k]):
 				canvas.fill(CockpitCanvas.rect_of(leds[k]), skin_color("hdd", "led_color", C_GREEN_B))
 		else:
@@ -198,8 +201,19 @@ func is_transmitting(unit: Node) -> bool:
 	return radio != null and radio.is_speaker_talking(str(unit.get("display_name")))
 
 
+## The face frame of a comm window: while the pilot's line plays, the face frames (PILOTn.DBA 2..23, the mouth and
+## brow positions of the original's 24 face frames) run at TALK_FPS in a fixed pseudo-random order so the mouth
+## moves; idle: frame 0 with a blink (frame 1). The original's frame order is not traced (L).
+static func make_face_frame(pilot: int, talking: bool, time: float, face_count: int) -> int:
+	if not talking:
+		return 0 if fmod(time + pilot, BLINK_EVERY) > BLINK_LENGTH else 1
+	var n := maxi(face_count - TALK_FIRST, 1)
+	var step := int(time * TALK_FPS)
+	return TALK_FIRST + int(absi(step * 7 + (step * step) % 5 + pilot * 3) % n)
+
+
 ## Wingman `pilot`'s talking head: background picture plus the face (blinking now and then).
-func _draw_pilot(r: Rect2, pilot: int) -> void:
+func _draw_pilot(r: Rect2, pilot: int, talking := false) -> void:
 	var meta = canvas.assets.pilot_meta(pilot)
 	if meta == null:
 		return
@@ -212,6 +226,6 @@ func _draw_pilot(r: Rect2, pilot: int) -> void:
 		ofs[int(o[0])] = Vector2(float(o[1]), float(o[2]))
 	canvas.fill(r, Color.BLACK)
 	canvas.blit(canvas.assets.texture("pilots/%s_%d.png" % [setn, sizes.size() - 1]), r.position.x, r.position.y + 4, r)
-	var face := 0 if fmod(display.time + pilot, BLINK_EVERY) > BLINK_LENGTH else 1
+	var face := make_face_frame(pilot, talking, display.time, mini(sizes.size() - 4, TALK_FIRST + TALK_FRAMES))
 	var fo: Vector2 = ofs.get(face, Vector2.ZERO)
 	canvas.blit(canvas.assets.texture("pilots/%s_%d.png" % [setn, face]), r.position.x + fo.x, r.position.y + fo.y + 4, r)

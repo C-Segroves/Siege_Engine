@@ -18,6 +18,11 @@ const FONT_SIZE := 16
 const HINT_FONT_SIZE := 20
 const HINT_RISE := 160.0
 const LOW_FRACTION := 0.25
+const SCOPE_COLOR := Color(1.0, 0.25, 0.25)
+const SCOPE_CROSS_GAP := 8.0
+const SCOPE_CROSS_REACH := 0.2   # of the window height
+const SCOPE_TICKS := 4
+const SCOPE_TICK_HALF := 4.0
 
 var director: OccupancyDirector
 var font: Font
@@ -28,6 +33,7 @@ var hint := ""
 func _init(p_director: OccupancyDirector) -> void:
 	director = p_director
 	name = "InfantryHud"
+	ServerProfile.apply_client_only(self)
 
 
 func _ready() -> void:
@@ -63,6 +69,7 @@ func _draw() -> void:
 	var soldier := director.battle.player as Infantry
 	if soldier and soldier.alive:
 		_draw_soldier(soldier)
+		_draw_scope(soldier)
 	if is_drawing_hint():
 		var w := font.get_string_size(hint, HORIZONTAL_ALIGNMENT_LEFT, -1, HINT_FONT_SIZE).x
 		draw_string(font, Vector2((size.x - w) * 0.5, size.y - HINT_RISE), hint, HORIZONTAL_ALIGNMENT_LEFT, -1,
@@ -78,6 +85,42 @@ func _draw_soldier(soldier: Infantry) -> void:
 	draw_string(font, origin + Vector2(0, BAR_GAP * 2.0 + FONT_SIZE), text, HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE, TEXT_COLOR)
 	draw_string(font, origin + Vector2(0, BAR_GAP * 3.0 + FONT_SIZE), make_kit_text(soldier), HORIZONTAL_ALIGNMENT_LEFT,
 		-1, FONT_SIZE - 2, TEXT_COLOR)
+
+
+## True while the first-person view is the rifle scope's (zoomed and not in the chase view).
+static func is_scope_shown(battle: Node, soldier: Infantry) -> bool:
+	return soldier.scope.zoomed and RifleScope.is_scope_weapon(soldier.current_weapon()) and not battle.cameras.is_chasing()
+
+
+## The Laser Rifle scope: the ZoomHud box of a magnification just stepped (not zoomed), or the zoomed view's reticle
+## (a fine cross with range ticks at the aim point) and its magnification and range readout.
+func _draw_scope(soldier: Infantry) -> void:
+	var scope := soldier.scope
+	var box := scope.make_preview_rect(size)
+	if box.size != Vector2.ZERO:
+		draw_rect(box, RifleScope.PREVIEW_FILL)
+		draw_rect(box, RifleScope.PREVIEW_BORDER, false, 1.0)
+		return
+	if not is_scope_shown(director.battle, soldier):
+		return
+	var cam: Camera3D = director.battle.cameras.cockpit_cam
+	var c := size * 0.5
+	if is_instance_valid(cam):
+		var p := soldier.aim_origin() + (-soldier.aim_basis().z) * RifleScope.REACH_M
+		if not cam.is_position_behind(p):
+			c = cam.unproject_position(p)
+	var reach := size.y * SCOPE_CROSS_REACH
+	for d in [Vector2.RIGHT, Vector2.LEFT, Vector2.DOWN, Vector2.UP]:
+		draw_line(c + d * SCOPE_CROSS_GAP, c + d * reach, SCOPE_COLOR, 1.5)
+	for i in range(1, SCOPE_TICKS + 1):
+		var at := SCOPE_CROSS_GAP + (reach - SCOPE_CROSS_GAP) * float(i) / float(SCOPE_TICKS + 1)
+		for d in [Vector2.RIGHT, Vector2.LEFT, Vector2.DOWN, Vector2.UP]:
+			var perp := Vector2(d.y, d.x)
+			draw_line(c + d * at - perp * SCOPE_TICK_HALF, c + d * at + perp * SCOPE_TICK_HALF, SCOPE_COLOR, 1.0)
+	draw_circle(c, 1.5, SCOPE_COLOR)
+	var text := "ZOOM %dX  RANGE %d M" % [int(scope.magnification()), int(RifleScope.REACH_M)]
+	var w := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE).x
+	draw_string(font, Vector2(c.x - w * 0.5, c.y + reach + FONT_SIZE + 6.0), text, HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE, SCOPE_COLOR)
 
 
 ## The screen rects this HUD draws into on a window of size `s` (the chat panel's automatic placement avoids

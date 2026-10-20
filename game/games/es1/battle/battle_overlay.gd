@@ -244,5 +244,5 @@ func update_scoreboard(vehicles: Dictionary) -> void:
 	rows.sort_custom(func(a, b): return a.kills > b.kills)
 	var t := SCOREBOARD_HEADER % ["PILOT", "HERC", "TEAM", "KILLS", "DEATHS"]
 	for h in rows:
-		t += SCOREBOARD_ROW % [h.display_name.left(22), String(h.def.get("name", "")).left(12), h.team, h.kills, h.deaths]
+		t += SCOREBOARD_ROW % [h.display_name.left(22), String(h.def.get("name", "")).left(12), MapTeams.make_team_name(int(h.team)).left(6), h.kills, h.deaths]
 	scoreboard.text = t

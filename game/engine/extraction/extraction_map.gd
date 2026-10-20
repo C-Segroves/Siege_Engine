@@ -11,6 +11,8 @@ var battle: Battle
 var rng: RandomNumberGenerator
 var bounds_min := Vector2(-600, -600)
 var bounds_max := Vector2(600, 600)
+const DRY_TRIES := 24
+
 var areas: Array[Vector3] = []
 var zones: Array[Vector3] = []
 
@@ -20,8 +22,9 @@ static func make(p_battle: Battle, built: Dictionary, p_rng: RandomNumberGenerat
 	m.battle = p_battle
 	m.rng = p_rng
 	m._apply_bounds(built.get("map", {}) if built.get("map") is Dictionary else {})
-	m.areas = m._make_areas(m._make_landmarks(built))
-	m.zones = m._make_zones()
+	var map: Dictionary = built.get("map", {}) if built.get("map") is Dictionary else {}
+	m.areas = m._make_listed_areas(map) if map.has("loot_areas") else m._make_areas(m._make_landmarks(built))
+	m.zones = m._make_listed_zones(map) if map.has("exfil") else m._make_zones()
 	return m
 
 
@@ -56,11 +59,32 @@ func is_inside(p: Vector2) -> bool:
 	return absf(p.x - c.x) <= h.x and absf(p.y - c.y) <= h.y
 
 
-## A random point inside the inset area, on the ground.
+## A random point inside the inset area, on the ground and (when the map has water) not in it.
 func make_random_point() -> Vector3:
 	var c := make_center()
 	var h := make_inner_half()
-	return make_ground(c + Vector2(rng.randf_range(-h.x, h.x), rng.randf_range(-h.y, h.y)))
+	var p := make_ground(c + Vector2(rng.randf_range(-h.x, h.x), rng.randf_range(-h.y, h.y)))
+	for i in DRY_TRIES:
+		if not MapWater.is_in_water(battle.get_tree(), p):
+			break
+		p = make_ground(c + Vector2(rng.randf_range(-h.x, h.x), rng.randf_range(-h.y, h.y)))
+	return p
+
+
+## The map's own loot areas (map "loot_areas": faction sites' caches), on the ground.
+func _make_listed_areas(map: Dictionary) -> Array[Vector3]:
+	var out: Array[Vector3] = []
+	for a in map.loot_areas:
+		out.append(make_ground(Vector2(float(a.pos[0]), float(a.pos[1]))))
+	return out
+
+
+## The map's own extraction zones (map "exfil", labelled EXFIL A..), on the ground.
+func _make_listed_zones(map: Dictionary) -> Array[Vector3]:
+	var out: Array[Vector3] = []
+	for e in map.exfil:
+		out.append(make_ground(Vector2(float(e.pos[0]), float(e.pos[1]))))
+	return out
 
 
 ## Buildings and stations inside the play area (x, z).

@@ -181,3 +181,26 @@ class Disc:
         for _low, (name, sub_dir, _size) in sorted(self._list_real(real).items()):
             n += self._extract_real((real + '/' + name).strip('/'), sub_dir, os.path.join(dst, self._clean(name)), progress)
         return n
+
+
+class ZipSource:
+    """A game delivered as a zip (Tribes: Vengeance: an Inno Setup installer inside): only the path is used, by the game
+    module's own steps. Has the bits of Disc the importer touches."""
+    label = ''
+    audio = ()
+
+    def __init__(self, path):
+        if not os.path.isfile(path):
+            raise DiscError('%s was not found.' % path)
+        self.path = path
+
+    def close(self):
+        pass
+
+    def exists(self, _rel):
+        return False
+
+
+def open_source(path):
+    """A siege_iso.Disc for a disc image, a ZipSource for a .zip."""
+    return ZipSource(path) if path.lower().endswith('.zip') else Disc(path)

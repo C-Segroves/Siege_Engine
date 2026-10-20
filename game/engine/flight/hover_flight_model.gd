@@ -16,11 +16,6 @@ const ATTITUDE_RATE := 1.5
 ## Spring of the ground cushion and of the altitude limit (1/s: m/s per metre of error).
 const CUSHION_SPRING := 2.0
 const ALTITUDE_SPRING := 1.0
-## Autopilot gains: stick per rad of heading error, lift per metre of altitude error.
-const AUTO_YAW_PER_RAD := 2.0
-const AUTO_LIFT_PER_M := 0.2
-
-
 func _step_air(c: FlightControls, agl: float, delta: float) -> void:
 	_apply_speed(c, delta)
 	var turn := clampf(c.roll + c.yaw, -1.0, 1.0)
@@ -61,7 +56,20 @@ func make_ceiling() -> float:
 	return float(params.max_alt)
 
 
-func make_steering(heading_error: float, climb_error: float, throttle: float) -> FlightControls:
-	var yaw := clampf(-heading_error * AUTO_YAW_PER_RAD, -1.0, 1.0)
-	var lift := clampf(climb_error * AUTO_LIFT_PER_M, -1.0, 1.0)
-	return FlightControls.make(throttle, 0.0, Vector2(yaw, 0.0), lift)
+func make_climb_scale() -> float:
+	return float(params.max_vertical)
+
+
+func make_climb_accel() -> float:
+	return float(params.lift_accel)
+
+
+func make_vertical_rate() -> float:
+	return float(params.max_vertical)
+
+
+## Turns on the turn stick (banking up to maxBank), pitches the nose and lifts for the part of the climb the nose does not make.
+func make_controls(c: FlightCommand) -> FlightControls:
+	var nose := clampf(c.pitch / float(params.max_pitch), -1.0, 1.0)
+	var lift := clampf((c.climb - speed * sin(pitch)) / float(params.max_vertical), -1.0, 1.0)
+	return FlightControls.make(c.throttle, c.turn, Vector2(0.0, nose), lift)

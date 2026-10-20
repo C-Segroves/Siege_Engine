@@ -28,8 +28,8 @@ static func make(owner: Node3D, shape: ShapeInstance) -> TribesBaseLights:
 	for mi in shape.find_children("*", "MeshInstance3D", true, false):
 		var m := mi as MeshInstance3D
 		for i in m.mesh.get_surface_count():
-			var mat := m.get_active_material(i) as StandardMaterial3D
-			if mat and mat.shading_mode == BaseMaterial3D.SHADING_MODE_UNSHADED:
+			var mat := m.get_active_material(i)
+			if _is_glowing(mat):
 				lights._surfaces.append([m, i, _make_dark(mat)])
 				colour_sum += _make_average_colour(mat)
 				centre_sum += owner.global_transform.affine_inverse() * m.global_transform * m.mesh.get_aabb().get_center()
@@ -40,14 +40,48 @@ static func make(owner: Node3D, shape: ShapeInstance) -> TribesBaseLights:
 	return lights
 
 
-static func _make_dark(mat: StandardMaterial3D) -> StandardMaterial3D:
+## Glowing = drawn unshaded: a StandardMaterial3D, or the unified render path's ShaderMaterial with self_lit set.
+static func _is_glowing(mat: Material) -> bool:
+	if mat is StandardMaterial3D:
+		return (mat as StandardMaterial3D).shading_mode == BaseMaterial3D.SHADING_MODE_UNSHADED
+	if mat is ShaderMaterial:
+		return (mat as ShaderMaterial).get_shader_parameter("self_lit") == true   # null when never set (shader default false)
+	return false
+
+
+static func _make_dark(mat: Material) -> Material:
+	if mat is ShaderMaterial:
+		var dark_shader := mat.duplicate() as ShaderMaterial
+		dark_shader.set_shader_parameter("self_lit", false)
+		return dark_shader
 	var dark := mat.duplicate() as StandardMaterial3D
 	dark.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
 	dark.albedo_color = mat.albedo_color * Color(DARK_SHADE, DARK_SHADE, DARK_SHADE, 1.0)
 	return dark
 
 
-static func _make_average_colour(mat: StandardMaterial3D) -> Color:
+static func _make_average_colour(mat: Material) -> Color:
+	if mat is ShaderMaterial:
+		return _make_array_colour((mat as ShaderMaterial).get_shader_parameter("albedo_array"))
+	return _make_standard_colour(mat as StandardMaterial3D)
+
+
+## Average colour of the first layer of a unified material's texture array (white when it has none).
+static func _make_array_colour(arr: Variant) -> Color:
+	if not (arr is Texture2DArray) or (arr as Texture2DArray).get_layers() == 0:
+		return Color.WHITE
+	var img := (arr as Texture2DArray).get_layer_data(0)
+	if img == null or img.is_empty():
+		return Color.WHITE
+	img = img.duplicate()
+	if img.is_compressed():
+		img.decompress()
+	img.resize(1, 1, Image.INTERPOLATE_BILINEAR)
+	var c := img.get_pixel(0, 0)
+	return Color(c.r, c.g, c.b)
+
+
+static func _make_standard_colour(mat: StandardMaterial3D) -> Color:
 	var tex := mat.albedo_texture
 	if tex == null:
 		return mat.albedo_color

@@ -1,0 +1,16 @@
+{
+	"_comment": "Per-craft flying manners of the AI pilot (FlightProfile). Keys: clearance_m minimum height above the ground, look_ahead_s how far ahead along the path the ground is read, react_s the craft's pitch response time, max_bank_deg bank in a hard turn, bank_per_rad bank per rad of heading error, max_climb_deg / max_dive_deg flight path limits, climb_per_m the climb asked for per metre of height error (a jet: rad of nose, i.e. that share of its speed; a hover craft: that share of its vertical speed), edge_margin_s seconds of flight kept between the craft and the map edge, dive_clearance_m the height over the ground a strafing dive (FlyerAI, only on its final approach to the target) may go down to; everywhere else clearance_m is a floor. A craft takes the first rule whose pack and any name fragment match its vehicle id; the style default fills the rest.",
+	"styles": {
+		"es2": {"clearance_m": 18.0, "look_ahead_s": 9.0, "react_s": 1.2, "max_bank_deg": 55.0, "bank_per_rad": 1.2,
+			"max_climb_deg": 25.0, "max_dive_deg": 20.0, "climb_per_m": 0.02, "edge_margin_s": 5.0, "dive_clearance_m": 6.0},
+		"tribes": {"clearance_m": 14.0, "look_ahead_s": 10.0, "react_s": 1.0, "max_bank_deg": 17.0, "bank_per_rad": 1.0,
+			"max_climb_deg": 30.0, "max_dive_deg": 20.0, "climb_per_m": 0.2, "edge_margin_s": 5.0, "dive_clearance_m": 6.0}
+	},
+	"rules": [
+		{"pack": "tribes", "names": ["SHRIKE", "SCOUT"], "profile": {"clearance_m": 12.0, "look_ahead_s": 8.0, "max_bank_deg": 30.0, "max_climb_deg": 35.0, "dive_clearance_m": 6.0}},
+		{"pack": "tribes", "names": ["BOMBER", "THUNDERSWORD"], "profile": {"clearance_m": 22.0, "look_ahead_s": 11.0, "max_bank_deg": 22.0, "max_climb_deg": 20.0}},
+		{"pack": "tribes", "names": ["HAVOC", "HAPC", "LAPC", "TRANSPORT"], "profile": {"clearance_m": 20.0, "look_ahead_s": 12.0, "max_bank_deg": 14.0, "max_climb_deg": 18.0, "max_dive_deg": 14.0}},
+		{"pack": "starsiege", "names": [], "profile": {"clearance_m": 20.0, "look_ahead_s": 9.0, "max_bank_deg": 45.0, "max_climb_deg": 22.0}},
+		{"pack": "es1", "names": [], "profile": {"clearance_m": 14.0, "max_bank_deg": 50.0}}
+	]
+}

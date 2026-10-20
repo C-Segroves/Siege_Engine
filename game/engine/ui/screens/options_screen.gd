@@ -1,5 +1,5 @@
 extends RoutedScreen
-## Options: the player's name and soldier (PlayerProfile), control bindings (rebinding through the SiegeInput autoload when it is present),
+## Options: the player's name and Operator Setup, control bindings (rebinding through the SiegeInput autoload when it is present),
 ## master / music volume, music device, Battledrome arena music set, CRT gamma of the original screens and the game-data folder. args: {"home": screen to return to}.
 ## A new binding that another action of the same context already uses (SiegeInput.find_conflicts)
 ## is not applied silently: a dialog offers Swap (the other action takes the old control), Clear
@@ -38,12 +38,17 @@ func open(args: Dictionary) -> void:
 
 # ------------------------------------------------------------------ player
 
-## The player's name and soldier (PlayerProfile): the infantry game when both Tribes are installed, the starting
-## armour, the body and the skin.
+## The player's name, and the Operator Setup of his active character slot (armour, body, skin, Herc; OperatorProfile).
 func _add_player_section() -> void:
 	content.add_child(Widgets.section("Player"))
 	content.add_child(NameRow.new())
-	content.add_child(PilotPicker.new("", true))
+	content.add_child(Widgets.button("Operator Setup...", _open_operator_setup))
+
+
+func _open_operator_setup() -> void:
+	var profile := OperatorProfile.load_for(Net.player_name)
+	var ctx := LoadoutContext.make_for(GameOptionsModel.make_default_settings(GameOptionsModel.KIND_VERSUS), LoadoutContext.ROLE_PLAYER, profile.unlocks)
+	OperatorSetup.open(self, ctx, profile.active_slot, profile)
 
 
 # ------------------------------------------------------------------ audio

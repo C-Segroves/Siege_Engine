@@ -115,7 +115,7 @@ static func make_save(career: Dictionary, kind: String, save_name: String) -> Di
 	var record := career.duplicate(true)
 	record.erase(STATE)
 	var info := {"pilot": str(career.name), "playtime": float(career.get("playtime", 0.0)), "coop": false,
-		"kind": kind, "name": save_name}
+		"kind": kind, "name": save_name, "classic": bool(career.get("classic", false))}
 	var d := SaveGames.make_save(Campaign.from_dict(career[STATE]), null, info)
 	d["shell"] = record
 	return d

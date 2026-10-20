@@ -20,6 +20,8 @@ const STATE_DEPARTING := "departing"
 const TRANSPORT_PROTECTION := 100000.0
 const TRANSPORT_SKILL := 0.5
 const DROP_LANDING_SPACING := 35.0
+const DELIVERY_DROPSHIP := "dropship"
+const DELIVERY_TROOP := "troop"
 
 var director: ExtractionDirector
 var battle: Battle
@@ -42,6 +44,50 @@ static func pick_transport_id() -> String:
 	for id in ExtractionRules.transport().get("ids", []):
 		var v := Packs.vehicle(str(id))
 		if not v.is_empty() and Packs.is_enabled(str(v.pack), "vehicles" if str(v.get("category", "")) == "vehicle" else "hercs"):
+			return str(id)
+	return ""
+
+
+## The class of transport that flies `cargo_id` in: DELIVERY_DROPSHIP for Hercs, Cybrids and heavy vehicles,
+## DELIVERY_TROOP for the Tribes vehicles and raiders (anything unknown too).
+static func make_delivery_class(cargo_id: String) -> String:
+	var v := Packs.vehicle(cargo_id)
+	if v.is_empty():
+		return DELIVERY_TROOP
+	if str(v.get("category", "")) == "herc":
+		return DELIVERY_DROPSHIP
+	var large := str(ExtractionRules.transport().get("delivery", {}).get("large_class", CallinRules.CLASS_HEAVY))
+	return DELIVERY_DROPSHIP if CallinRules.make_vehicle_class(v) == large else DELIVERY_TROOP
+
+
+## The transports that may fly `cargo_id` in, best first: its class's own (a dropship by faction, then side, then the
+## default list), then the other class as the fallback for a missing pack.
+static func make_delivery_candidates(cargo_id: String) -> Array:
+	var rules: Dictionary = ExtractionRules.transport().get("delivery", {})
+	var v := Packs.vehicle(cargo_id)
+	var dropships: Array = []
+	var table: Dictionary = rules.get("dropships", {})
+	dropships.append_array((table.get("by_faction", {}) as Dictionary).get(str(v.get("faction", "")), []))
+	dropships.append_array((table.get("by_side", {}) as Dictionary).get(str(v.get("side", "")), []))
+	dropships.append_array(table.get("default", []))
+	var troop: Array = rules.get("troop", [])
+	var ordered := dropships + troop if make_delivery_class(cargo_id) == DELIVERY_DROPSHIP else troop + dropships
+	var out: Array = []
+	for id in ordered:
+		if not out.has(id):
+			out.append(id)
+	return out
+
+
+## The transport that flies `cargo_id` in, from the allowed `pool` (a flyer the pack set enables); "" when there is none
+## (a drop pod brings it). With no cargo named the first usable of the pool.
+static func pick_delivery_transport_id(cargo_id: String, pool: Array) -> String:
+	var candidates: Array = make_delivery_candidates(cargo_id) if cargo_id != "" else pool
+	for id in candidates:
+		if pool.has(id) and CallinAirframes.is_usable(str(id)):
+			return str(id)
+	for id in pool:
+		if CallinAirframes.is_usable(str(id)):
 			return str(id)
 	return ""
 
@@ -110,9 +156,19 @@ func _place_at_edge(peers: Array, drop: Vector3) -> void:
 
 ## A transport of `vehicle_id` appearing approach_m out from `landing`, flying in to land there.
 func spawn_transport(vehicle_id: String, landing: Vector3) -> Flyer:
+	return _spawn_flight(vehicle_id, landing, ExtractionRules.approach_distance(battle.config), 0.0)
+
+
+## A delivery transport (call-ins): appears `approach_m` out from `landing` and flies in to hold `hover_height` metres
+## above the ground over it (TransportFlight HOVER_DROP) until released.
+func spawn_delivery_transport(vehicle_id: String, landing: Vector3, approach_m: float, hover_height: float) -> Flyer:
+	return _spawn_flight(vehicle_id, landing, approach_m, hover_height)
+
+
+func _spawn_flight(vehicle_id: String, landing: Vector3, approach_m: float, hover_height: float) -> Flyer:
 	var rules := ExtractionRules.transport()
 	var height := float(rules.get("altitude_m", 45.0))
-	var from := director.map.make_approach_point(landing, ExtractionRules.approach_distance(battle.config))
+	var from := director.map.make_approach_point(landing, approach_m)
 	from.y = MapBuilder.ground_height(battle, from) + height
 	var to := landing - from
 	var exit := landing + Vector3(to.x, 0.0, to.z).normalized() * float(rules.get("leave_m", 500.0))
@@ -127,7 +183,9 @@ func spawn_transport(vehicle_id: String, landing: Vector3) -> Flyer:
 		return null
 	fl.set_meta("dormant", true)
 	fl.set_meta("transport", true)
-	fl.ai = TransportFlight.make(fl, landing, exit, height)
+	var flight := TransportFlight.make(fl, landing, exit, height)
+	flight.hover_height = hover_height
+	fl.ai = flight
 	return fl
 
 

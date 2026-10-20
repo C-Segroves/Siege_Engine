@@ -23,6 +23,8 @@ static func is_unit_known(viewer: Node, unit: Node) -> bool:
 static func is_structure_known(viewer: Node, s: Node, mission_known: Array) -> bool:
 	if s.get("team") != null and TeamRelations.is_allied(int(viewer.get("team")), int(s.get("team"))):
 		return true
+	if SensorTowers.is_turret(s) or SensorTowers.is_com_tower(s):
+		return not (s is TribesBaseObject and (s as TribesBaseObject).self_powered and TeamRelations.is_hostile(int(viewer.get("team")), int(s.get("team"))))
 	if s is TribesBaseObject:
 		return not (s as TribesBaseObject).self_powered
 	return s == viewer.get("target") or mission_known.has(s)

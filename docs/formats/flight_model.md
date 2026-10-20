@@ -12,7 +12,13 @@ the AI:
 | `game/engine/flight/flight_presets.gd` | parameters per catalog vehicle: FM decoding, Tribes datablocks, scaling for other games |
 | `game/engine/flight/flight_controls.gd` | one frame of stick input (throttle, roll, yaw, pitch, lift) |
 | `game/games/es1/flyer.gd` | `Flyer` vehicle: moves its body by the model, carries pitch/bank on the visual model |
-| `game/games/es1/flyer_ai.gd` | `FlyerAI`: patrol / strafing-run brain, steers through `FlightModel.make_steering` |
+| `game/engine/flight/flight_pilot.gd` | `FlightPilot`: the one AI autopilot (goal -> pitch / yaw / roll commands -> `FlightModel.make_controls`) |
+| `game/engine/flight/flight_goal.gd` | `FlightGoal`: point, path, orbit, line or descent, held at a height over the ground |
+| `game/engine/flight/flight_profile.gd` + `flight_profiles.json` | `FlightProfile`: per-craft flying manner as data (clearance, look-ahead, bank, climb / dive limits) |
+| `game/engine/flight/flight_terrain_scan.gd` | `FlightTerrainScan`: samples the heightfield along the path ahead, gives the climb the ground asks for and the safe speed |
+| `game/engine/flight/flight_avoidance.gd` | `FlightAvoidance`: ray casts for buildings / interiors and the map edge |
+| `game/engine/flight/flight_command.gd` | `FlightCommand`: wanted bank, pitch, turn, climb and throttle of one frame |
+| `game/games/es1/flyer_ai.gd` | `FlyerAI`: patrol / strafing-run brain, flies through `Flyer.apply_flight` (the `FlightPilot`) |
 | `game/games/es1/player_flight_pilot.gd` | `PlayerFlightPilot`: SiegeInput actions → stick input |
 | `game/tests/flight_check.tscn` | presets, hover model, injected-action flight (take-off → ceiling → turn → land), AI patrol |
 
@@ -114,8 +120,22 @@ Fire groups, targeting and `view_toggle` are unchanged. Strafe: neither original
   below 25 m with the stick centred a steeper dive eases to a −6° glide; any touchdown lands, faster than
   12 m/s sink is a hard landing (40 hull damage per m/s).
 - Player jets spawn 40 m up at cruise; hover craft spawn landed.
-- AI flyers steer with an autopilot on the same model (`make_steering`); patrol points count as reached
-  at 60 m (banked turns are wider than the old flat turns).
+- Every AI flyer in every mode (patrols, strafing, extraction transports, call-in bombers and attack craft)
+  flies through `FlightPilot`; patrol points count as reached at 60 m (banked turns are wider than flat ones).
+  - Steering: the goal's aim point gives a heading error; the bank is proportional to it (capped by the profile),
+    the rudder follows it (a jet) or the turn stick does (a hover craft), so the craft turns on its bank and the
+    velocity follows the nose (no sideslip). Climbs and dives are pitch commands (a hover craft adds lift).
+  - Terrain look-ahead: every 0.12 s the heightfield is sampled (at most 25 m apart) along the nose and towards the
+    aim for `look_ahead_s` seconds; the climb that clears every rise by the profile's clearance, allowing for the
+    craft's reaction and vertical acceleration, is commanded early. The craft sinks back smoothly to the goal's
+    height once past the ridge. A hover craft also slows to the speed it can brake from and still climb the rise.
+  - Avoidance: three ray casts (nose, +-35 deg) against static bodies other than the terrain turn the craft to the
+    clearer side or make it climb; the map edge (`MapBounds`) turns it back, except for craft that enter or leave
+    the map (bombing runs, exits).
+  - Per-game manner is data (`flight_profiles.json`): clearance, look-ahead, bank, climb / dive limits per style
+    and per vehicle (Shrike, Thundersword, Havoc, Starsiege, ES1); the craft's own limits (maxAlt, maxBank,
+    maxPitch) still cap it.
+  - Strafing runs fly lower and read less ahead (a goal's own clearance / look-ahead) only on the final approach.
 
 ## 5. Vehicles and presets
 | vehicle | preset |
@@ -131,3 +151,18 @@ Fire groups, targeting and `view_toggle` are unchanged. Strafe: neither original
 All catalog flyers are pilotable (`flyer` flag; Starsiege `kind: "flyer"`). Flyers without original
 cockpit art start in the chase view; the plain HUD shows a bank/pitch line, altitude above the ground
 (red above the ceiling), vertical speed and LANDED.
+
+## Starsiege dropship animation
+
+Only the cargo ship (`tr_carg`) has animation sequences (`Seq01_FLY`, `Seq02_LAND`); the `tr_drop`, `kn_drop` and `cy_drop`
+sequence lists are empty in the original data, so those dropships fly and land with a static shape. `DropshipAnimation`
+finds no sequence on them and does nothing; the gear and flaps are not faked.
+
+## Hover and landing goals
+
+A `FlightGoal.make_hover` goal (a delivery holding its load a few metres over the ground) and a `make_descent` goal are
+deliberate: the terrain look-ahead, the obstacle rays and the profile clearance do not lift them. A hover approaches its
+height at no more than the vertical braking the craft has, so it does not overshoot into the ground. Every other goal keeps
+`clearance_m` as a floor (the scan, a reactive climb below it, and a sink limited by the braking left); only a strafing
+dive lowers it, to the profile's `dive_clearance_m`. A path is also scanned along its next leg, so a corner is not taken
+blind at full speed.

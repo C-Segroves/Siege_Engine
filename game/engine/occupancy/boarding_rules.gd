@@ -39,6 +39,10 @@ const REASON_FULL := "No free seat"
 const REASON_ENEMY := "Enemy vehicle: no access"
 const REASON_DESTROYED := "Vehicle destroyed"
 const REASON_OUT_OF_REACH := "Out of reach"
+## A vehicle reserved for one soldier (a called-in vehicle during its owner claim) carries this meta:
+## {soldier_id: net id of the holder, left: seconds, holder: his name}. Dictionaries are shared, so whoever counts `left` down
+## changes what the rules read.
+const CLAIM_META := "boarding_claim"
 
 
 static func family(vdef: Dictionary) -> Family:
@@ -75,6 +79,9 @@ static func make_check(soldier: Infantry, vehicle: Herc, occ: VehicleOccupancy) 
 static func make_seat_choice(soldier: Infantry, vehicle: Herc, occ: VehicleOccupancy) -> Dictionary:
 	if not vehicle.alive:
 		return refuse(REASON_DESTROYED)
+	var reserved := make_claim_reason(soldier, vehicle)
+	if reserved != "":
+		return refuse(reserved)
 	match family(vehicle.def):
 		Family.TRIBES:
 			return _make_tribes_check(soldier, vehicle, occ)
@@ -97,6 +104,23 @@ static func is_seat_allowed(soldier: Infantry, vehicle: Herc, seat: int) -> bool
 				return false
 			return not (size == "heavy" and _sitting_seats(crew).has(seat))
 	return seat == VehicleOccupancy.PILOT_SEAT and is_light(soldier)
+
+
+## "" when `soldier` may board `vehicle` as far as a reservation goes, else why not (only the holder boards during a claim).
+static func make_claim_reason(soldier: Infantry, vehicle: Herc) -> String:
+	var claim: Dictionary = vehicle.get_meta(CLAIM_META, {})
+	if claim.is_empty() or float(claim.get("left", 0.0)) <= 0.0 or int(claim.get("soldier_id", -1)) == soldier.net_id:
+		return ""
+	return "Reserved for %s for %d more seconds." % [str(claim.get("holder", "its caller")), int(ceil(float(claim.left)))]
+
+
+## Reserves `vehicle` for `soldier_id` (`claim` = {soldier_id, left, holder}); apply_release_claim ends it.
+static func apply_claim(vehicle: Herc, claim: Dictionary) -> void:
+	vehicle.set_meta(CLAIM_META, claim)
+
+
+static func apply_release_claim(vehicle: Herc) -> void:
+	vehicle.remove_meta(CLAIM_META)
 
 
 static func _sitting_seats(crew: Dictionary) -> Array:

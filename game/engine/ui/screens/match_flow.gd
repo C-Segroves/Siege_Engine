@@ -1,8 +1,8 @@
 class_name MatchFlow
-## The launcher's game logic, kept out of its screens: hosting a LAN lobby, building battle configs
+## The launcher's game logic, kept out of its screens: opening a lobby session, building battle configs
 ## (skirmish, hosted match, campaign mission) and where a campaign goes after a debriefing.
 
-## Lobby modes, in the order of the host screen's mode picker.
+## Lobby modes, in the order of the lobby's mode picker.
 ## Versus first: a LAN game is a deathmatch unless the host picks otherwise (the map's game modes, LobbySettings).
 const MODES := ["vs", "coop", "campaign", ExtractionRules.MODE]
 const MODE_NAMES := ["Versus (the map's game modes)", "Co-op vs Cybrids", "Co-op campaign", "Extraction raid (loot, exfil, PvPvE)"]
@@ -45,6 +45,9 @@ const CAMPAIGN_DESCRIPTIONS := {
 		+ "to the assault on Luna, with flying Razors and a growing squad.",
 	"starsiege_human": "Starsiege (1999), Human campaign. Fight for the free colonies across the solar "
 		+ "system against the Imperial forces and the Cybrid threat.",
+	"tribes_v": "Tribes: Vengeance (2004, PC). The story campaign on foot: 16 chapters, 33 maps in story order with their "
+		+ "objectives, on placeholder flat ground (terrain and models are not converted yet). Needs Tribes 2 installed "
+		+ "for the soldiers; the scripted mission logic is not reproduced.",
 	"tribes_aa": "Tribes: Aerial Assault (2002, PS2). Five training missions, then the Blood Eagle campaign on foot. "
 		+ "Needs Tribes 2 installed for the soldiers and base equipment; the scripted mission logic is not "
 		+ "reproduced: each mission is a reach-and-destroy run.",
@@ -55,17 +58,60 @@ const CAMPAIGN_DESCRIPTIONS := {
 
 # ------------------------------------------------------------------ hosting
 
-## Opens the LAN lobby with `settings` (see make_lobby_settings) and announces our Herc.
-static func host_lobby(settings: Dictionary, vehicle_id: String) -> Error:
-	var err := Net.host()
-	if err != OK:
-		return err
-	if settings.mode == "campaign":
-		Session.start_campaign(0, true)
-	Net.set_settings(settings)
+## Opens a lobby of `kind` (GameOptionsModel.KIND_*) with its default settings at once; the host edits them in Game
+## Options (docs/design/lobby_loadout_economy.md section 5.6). `solo` makes an offline session (skirmish, a single player
+## campaign or raid): the roster holds this pilot alone. A LAN co-op campaign starts a new Earthsiege career, a single
+## player campaign uses the one that is running.
+static func open_lobby_session(kind: String, solo := false) -> Error:
+	Net.password = ""
+	if solo:
+		Net.host_offline()
+	else:
+		var err := Net.host()
+		if err != OK:
+			NetLog.write("host_failed", "error %d" % err)
+			return err
+		if kind == GameOptionsModel.KIND_CAMPAIGN:
+			Session.start_campaign(0, true)
+	Net.set_settings(GameOptionsModel.make_default_settings(kind, solo))
 	Net.set_my_info("team", Net.make_join_team())
-	Net.set_my_info("vehicle", vehicle_id if vehicle_id != "" else DEFAULT_VEHICLE)
+	Net.set_my_info("vehicle", DEFAULT_VEHICLE)
 	return OK
+
+
+## Host, after the settings changed from `old_settings` to `new_settings`: pilots whose build the new settings treat
+## differently (the parts they may not field) must ready up again. Returns the peers cleared.
+static func apply_revalidate_ready(old_settings: Dictionary, new_settings: Dictionary) -> Array:
+	var old_ctx := LoadoutContext.make_for(old_settings, LoadoutContext.ROLE_BOT)
+	var new_ctx := LoadoutContext.make_for(new_settings, LoadoutContext.ROLE_BOT)
+	var cleared := []
+	for peer in Net.roster:
+		var entry: Dictionary = Net.roster[peer]
+		if int(peer) == HOST_ID or not entry.get("slot") is Dictionary or not bool(entry.get("ready", false)):
+			continue
+		var slot := CharacterSlot.make_from_snapshot(entry.slot)
+		if make_block_ids(slot, old_ctx) != make_block_ids(slot, new_ctx):
+			entry["ready"] = false
+			cleared.append(int(peer))
+	return cleared
+
+
+## Host, when the lobby switches into a team match (or out of one): every pilot is unassigned again (he picks a team on his
+## card or the host places him), or all are on the one side. Nothing changes while the kind of match stays.
+static func apply_teams_for_settings(old_settings: Dictionary, new_settings: Dictionary) -> void:
+	var was := LobbySettings.is_team_match(old_settings)
+	var now := LobbySettings.is_team_match(new_settings)
+	if was == now:
+		return
+	for id in Net.roster:
+		Net.roster[id]["team"] = TeamAssignment.UNASSIGNED if now else 0
+
+
+## The parts of `slot` that `ctx` forbids, as sorted "part" strings (ownership is not asked of a roster entry).
+static func make_block_ids(slot: CharacterSlot, ctx: LoadoutContext) -> Array:
+	var ids := slot.make_blocks(ctx).map(func(b: Dictionary) -> String: return "%s=%s" % [b.part, b.id])
+	ids.sort()
+	return ids
 
 
 ## Why the host may not start yet ("" = everybody is ready and, in a team match, on a team): the pilots without
@@ -83,9 +129,43 @@ static func make_start_block_reason() -> String:
 ## Host, from the lobby: starts the match when every pilot is ready; returns why not otherwise ("" = started).
 static func try_start_hosted_match() -> String:
 	var reason := make_start_block_reason()
-	if reason == "":
+	if reason == "" and is_solo_campaign(Net.settings):
+		reason = start_solo_campaign_mission()
+	elif reason == "":
 		start_hosted_match()
+	else:
+		NetLog.write("start_blocked", reason)
 	return reason
+
+
+## True for a single player campaign lobby (an offline session of the campaign mode).
+static func is_solo_campaign(s: Dictionary) -> bool:
+	return str(s.get("mode", "")) == "campaign" and bool(s.get("solo", false))
+
+
+## Single player campaign, from the lobby's Start mission: the "before mission" restore point a killed pilot replays
+## from, then the mission with the Herc (or the soldier an on-foot mission issues) in the pilot's roster entry.
+## Returns why it cannot start ("" = started).
+static func start_solo_campaign_mission() -> String:
+	var entry: Dictionary = Net.roster.get(HOST_ID, {})
+	var vehicle := str(entry.get("vehicle", ""))
+	var loadout: Array = entry.get("loadout", [])
+	var garage_tag: Dictionary = entry.get("garage", {}) if entry.get("garage") is Dictionary else {}
+	if Session.campaign != null and Session.campaign.has_method("on_foot") and bool(Session.campaign.call("on_foot")):
+		var herc := make_issued_soldier()
+		if herc.is_empty() or not Assets.has_pack(str(herc.vehicle).get_slice(":", 0)):
+			return "This mission needs Tribes 2 installed for its soldiers."
+		vehicle = str(herc.vehicle)
+		loadout = herc.get("loadout", [])
+		garage_tag = {}
+	Session.save_restore_point({"vehicle": vehicle, "loadout": loadout, "garage": garage_tag})
+	if not Net.roster.has(HOST_ID):
+		return "No pilot in the lobby."
+	Net.roster[HOST_ID]["vehicle"] = vehicle   # Net.start_game takes the roster as it is: the pilot's entry carries the mission's Herc
+	Net.roster[HOST_ID]["loadout"] = loadout.duplicate()
+	Net.roster[HOST_ID]["garage"] = garage_tag.duplicate(true)
+	Net.start_game(make_mission_config(vehicle, loadout, garage_tag))
+	return ""
 
 
 ## Host: applies `teams` ({peer: team}, TeamAssignment) to the roster.
@@ -98,6 +178,7 @@ static func apply_team_choices(teams: Dictionary) -> void:
 ## the results screen starts at once, everybody is on that screen).
 static func start_hosted_match() -> void:
 	var s := Net.settings
+	RosterValidator.apply(Net.roster, s)   # strips parts the mode forbids, never blocks the start
 	if s.mode == "campaign":
 		Net.start_game(make_campaign_match_config())
 		return
@@ -121,11 +202,13 @@ static func publish_campaign_offer() -> void:
 
 
 ## {"garage": the campaign garage (Garage.to_dict()), "mission_herc": {vehicle, loadout} or {},
-##  "heading": "Campaign 1  -  mission ..."}
+##  "heading": "Campaign 1  -  mission ...", "briefing": {text, objectives}} (the lobby's right pane shows the briefing)
 static func make_campaign_offer() -> Dictionary:
 	var garage := Session.garage()
+	var texts := Session.briefing()
 	return {"garage": garage.to_dict() if garage != null else {}, "mission_herc": Session.mission_herc(),
-		"heading": make_mission_heading()}
+		"heading": make_mission_heading(),
+		"briefing": {"text": str(texts.get("briefing", "")), "objectives": texts.get("objectives", [])}}
 
 
 static func make_campaign_match_config() -> Dictionary:
@@ -143,13 +226,16 @@ static func make_campaign_match_config() -> Dictionary:
 ## Battle config for a co-op / versus match with `settings`; AI drawn from `vehicles`.
 static func make_match_config(s: Dictionary, vehicles: Array) -> Dictionary:
 	var cfg := {"mode": s.mode, "teams": s.get("teams", false), LobbySettings.TEAM_COUNT_KEY: LobbySettings.make_team_count(s),
-		LobbySettings.GAME_MODE_KEY: str(s.get(LobbySettings.GAME_MODE_KEY, GameModes.DEFAULT)),
 		GameModes.SCORE_LIMIT_KEY: int(s.get(GameModes.SCORE_LIMIT_KEY, 0)),
 		GameModes.TIME_LIMIT_KEY: int(s.get(GameModes.TIME_LIMIT_KEY, 0)),
 		"frag_limit": s.get("frag_limit", DEFAULT_FRAG_LIMIT),
 		"balance": s.get("balance", BALANCES[0]), "respawn": s.mode == "vs", "ai": make_ai_roster(s, vehicles),
-		"start": BattleInfantry.START_ON_FOOT, InfantryBots.CONFIG_KEY: int(s.get(InfantryBots.CONFIG_KEY, 0))}
+		"start": BattleInfantry.START_ON_FOOT, InfantryBots.CONFIG_KEY: int(s.get(InfantryBots.CONFIG_KEY, 0)),
+		InfantryBots.MEMBER_TEAMS_KEY: s.get(InfantryBots.MEMBER_TEAMS_KEY, {}), BotBudget.CONFIG_KEY: int(s.get(BotBudget.CONFIG_KEY, 0))}
+	if s.mode == "vs":   # only versus plays a game mode; a default one would turn co-op into deathmatch
+		cfg[LobbySettings.GAME_MODE_KEY] = str(s.get(LobbySettings.GAME_MODE_KEY, GameModes.DEFAULT))
 	cfg.merge(MapPicker.config_at(int(s.get("world_idx", 0))), true)
+	cfg["respawn"] = s.mode == "vs"   # the map entry says respawn: true; co-op has no respawns and ends when the Cybrids are gone
 	_apply_infantry_pack(cfg, s)
 	return cfg
 
@@ -193,7 +279,7 @@ static func _make_skill(curve: Array, i: int) -> float:
 static func make_extraction_config(s: Dictionary) -> Dictionary:
 	var cfg := {"mode": ExtractionRules.MODE, "teams": bool(s.get("teams", false)), "balance": s.get("balance", BALANCES[0]),
 		"ai": [], ExtractionSquads.VEHICLES_KEY: int(s.get("ai", 0)), InfantryBots.CONFIG_KEY: int(s.get(InfantryBots.CONFIG_KEY, 0)),
-		"start": BattleInfantry.START_ON_FOOT}
+		"start": BattleInfantry.START_ON_FOOT, BotBudget.CONFIG_KEY: int(s.get(BotBudget.CONFIG_KEY, 0))}
 	cfg.merge(MapPicker.config_at(int(s.get("world_idx", 0))), true)
 	cfg["respawn"] = false
 	cfg[ExtractionFactions.CONFIG_KEY] = str(s.get(ExtractionFactions.CONFIG_KEY, ExtractionFactions.DEFAULT_PRESET))
@@ -301,7 +387,7 @@ static func apply_mission_result() -> void:
 	Session.last_result = {}
 
 
-## Where to go after a debriefing: {"screen": "end"|"briefing"|"lobby", "text": end-page text, "replay": the
+## Where to go after a debriefing: {"screen": "end"|"lobby", "text": end-page text, "replay": the
 ## lost campaign can be replayed from its restore point}.
 static func make_next_after_debrief() -> Dictionary:
 	if Session.saga != null:
@@ -309,12 +395,12 @@ static func make_next_after_debrief() -> Dictionary:
 			return {"screen": "end", "text": "THE SAGA IS COMPLETE."}
 		if Session.campaign != null and Session.campaign.is_over() and not Session.campaign.is_victory():
 			return make_campaign_lost_page()
-		return {"screen": "briefing"}
+		return {"screen": "lobby"}
 	if Session.campaign.is_victory():
 		return {"screen": "end", "text": str(CampaignPresentation.of(Session.campaign).victory_text)}
 	if Session.campaign.is_over():
 		return make_campaign_lost_page()
-	return {"screen": "lobby" if Net.is_online() else "briefing"}
+	return {"screen": "lobby"}
 
 
 ## The war is lost: Earthsiege 2 asks "replay the mission?" (reloads its launch autosave, VSHELL game state 0),
@@ -325,7 +411,7 @@ static func make_campaign_lost_page() -> Dictionary:
 
 
 ## Replays the running campaign's last mission from its restore point, in the Herc it was launched in
-## (the briefing when the launch was not recorded).
+## (the campaign lobby when the launch was not recorded).
 static func replay_mission(launcher: Launcher) -> void:
 	var launch := Session.replay_from_restore_point()
 	Session.last_result = {}

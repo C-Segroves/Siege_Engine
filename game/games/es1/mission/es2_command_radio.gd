@@ -52,7 +52,7 @@ func announce_region(region: Dictionary) -> void:
 		return
 	var line := _lesson_table.make_joined_line(w39 - 1)
 	if not line.is_empty():
-		rt.battle.radio(INSTRUCTOR_SPEAKER, str(line.text), str(line.voice))
+		_say(INSTRUCTOR_SPEAKER, line)
 
 
 ## Listens to a friendly structure for the base-under-attack call.
@@ -67,4 +67,10 @@ func _on_base_damaged(st: Structure, attacker: Node) -> void:
 	_base_warned = true
 	var rows := _base_table.message_numbers()
 	var line := _base_table.make_random_line(int(rows[randi() % rows.size()]))
-	rt.battle.radio(BASE_SPEAKER, str(line.text), str(line.voice))
+	_say(BASE_SPEAKER, line)
+
+
+## `line` ({text, voice}) on the mission's radio, spoken by `speaker`.
+func _say(speaker: String, line: Dictionary) -> void:
+	var voice := MissionVoice.make_voice(str(line.voice)) if str(line.voice) != "" else null
+	rt.get_announcer().apply_say(MissionMessage.make_message(str(line.text), 0.0, MissionMessage.CHANNEL_RADIO, speaker, voice))

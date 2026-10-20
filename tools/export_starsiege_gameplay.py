@@ -21,7 +21,8 @@ Conversions (see damage_scale_note / notes in the JSON):
   * hardpoint sizes S/M/L/X -> masks 7/15/31/63 (a weapon fits when hardpoint mask >= weapon mask, so S weapons
     fit every hardpoint and X hardpoints take everything); turret-only / internal weapons get 127 (never fit).
 
-Usage: python tools/export_starsiege_gameplay.py [--no-shapes] [--shapes-only] [shape ...]
+Usage: python tools/export_starsiege_gameplay.py [--no-shapes] [--shapes-only] [--cloak-only] [shape ...]
+  gameplay/cloak.json            the cloak components (export_cloak); --cloak-only writes just this file.
 """
 import glob, json, math, os, re, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -521,6 +522,58 @@ def component_table(S):
     return table
 
 
+# ------------------------------------------------------------------ cloaks
+
+SENSOR_MODE_FIELDS = ('base', 'range', 'shutdown', 'squat', 'stop', 'slow', 'fast', 'activ', 'camo', 'jam', 'shld', 'tjam')
+STANDARD_SENSOR_ID = 408
+CLOAK_SPEC_TAGS = {830: 'IDSPEC_CLK1', 831: 'IDSPEC_CLK2'}
+CLOAK_ORDER = 'cloak'
+MASK_RATING_RX = re.compile(r'Mask Rating:\s*<Jr>(\d+)')
+
+
+def sensor_modes():
+    """datSensor.cs: {sensor id: {'a'|'p': {sweep_s, base, range, ..., camo, ...}}} from newSensor / sensorMode."""
+    out, current, sweep = {}, None, 0.0
+    for call, args in calls_text(read('datSensor.cs')):
+        if call == 'newSensor':
+            current, sweep = int(args[0]), float(args[1])
+            out[current] = {}
+        elif call == 'sensorMode' and current is not None:
+            mode = dict(zip(SENSOR_MODE_FIELDS, [float(a) for a in args[1:]]))
+            out[current][str(args[0]).lower()] = dict(mode, sweep_s=sweep)
+    return out
+
+
+def export_cloak(S, SFX, comps):
+    """gameplay/cloak.json: the Chameleon / Cuttlefish cloaks (datIntMounts.cs newCloak: id, rating, dmg_amt_glitch,
+    glitch_coef, dmg_amt_fail, fail_coef) with the sensors' `camo` modifiers (datSensor.cs sensorMode) the cloak earns
+    against a standard sensor, every sensor's modes (a Herc's own sensor decides how well it sees a cloak: the Emission
+    Scanning and Cybrid Motion sensors have camo -0.5), and the action's sound (sound.cs IDSFX_CAMOUFLAGE)."""
+    sensors = sensor_modes()
+    standard = sensors.get(STANDARD_SENSOR_ID, {})
+    camo = {m: [min(x[m]['camo'] for x in sensors.values() if m in x), max(x[m]['camo'] for x in sensors.values() if m in x)]
+            for m in ('a', 'p')}
+    profiles = {}
+    for cid, c in sorted(comps.items()):
+        if c['kind'] != 'cloak':
+            continue
+        raw = c['raw']
+        rating = MASK_RATING_RX.search(S.get(CLOAK_SPEC_TAGS.get(cid, ''), ''))
+        profiles['starsiege:%d' % cid] = {
+            'id': 'starsiege:%d' % cid, 'name': c['name'], 'kind': 'component', 'component_id': cid,
+            'source': 'scripts/datIntMounts.cs newCloak (%s)' % ', '.join(str(x) for x in raw),
+            'mask_rating': int(rating.group(1)) if rating else int(raw[1]) // 10,
+            'glitch_health': r(raw[2]), 'glitch_coef': r(raw[3]), 'fail_health': r(raw[4]), 'fail_coef': r(raw[5]),
+            'sensor_modes': standard, 'sensor_camo_range': camo, 'sensor_id': STANDARD_SENSOR_ID,
+            'energy_per_s': 0.0, 'breaks_on': [], 'reveal_range_m': 0.0, 'ai_uses': True, 'ai_order': CLOAK_ORDER,
+            'sound_toggle': 'starsiege:' + str(sound(SFX.get('IDSFX_CAMOUFLAGE', ''))).replace('sim/', ''),
+            'note': 'No energy, firing or damage rule exists in the data; the camo modifier of each sensor is the rule.'}
+    sensor_table = {'starsiege:%d' % sid: dict(modes, name=comps.get(sid, {}).get('name', '')) for sid, modes in sorted(sensors.items())}
+    wjson(os.path.join(OUT, 'gameplay', 'cloak.json'),
+          {'pack': 'starsiege', 'engine_schema': 1, 'profiles': profiles, 'sensors': sensor_table}, indent=1)
+    return len(profiles)
+
+
 def export_vehicles(S, W, comps):
     ids = vehicle_ids()
     wby_id = {w['ss_id']: w for w in W}
@@ -746,6 +799,10 @@ def _existing_shapes():
 def main():
     args = [a for a in sys.argv[1:]]
     no_shapes = '--no-shapes' in args
+    if '--cloak-only' in args:
+        S, SFX = strings(), sound_files()
+        print('cloaks', export_cloak(S, SFX, component_table(S)))
+        return
     shapes_only = '--shapes-only' in args
     names = [a for a in args if not a.startswith('--')]
     if not shapes_only:
@@ -772,6 +829,7 @@ def main():
             'weapons': {str(w['ss_id']): w['name'] for w in W},
             'components': {str(k): {'kind': v['kind'], 'name': v.get('name')} for k, v in sorted(comps.items())},
         }, indent=1)
+        print('cloaks', export_cloak(S, SFX, comps))
         kinds = {}
         for v in V.values():
             kinds[v['kind']] = kinds.get(v['kind'], 0) + 1

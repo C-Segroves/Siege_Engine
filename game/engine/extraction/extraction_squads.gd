@@ -136,6 +136,8 @@ static func _make_size(k: int, squad: Dictionary) -> String:
 
 
 func _spawn_vehicle(vehicle_id: String, faction: Dictionary, team: int, area: Vector3, radius: float, squad: Dictionary) -> Herc:
+	if not BotBudget.admits(battle, BotBudget.make_distance_priority(battle, area)):
+		return null   # the server's bot cap
 	_vehicles_left -= 1
 	var vdef := Packs.vehicle(vehicle_id)
 	var spec := {"net_id": battle.spawner.allocate_id(), "vehicle": vehicle_id, "team": team, "owner": 1,
@@ -151,6 +153,21 @@ func _spawn_vehicle(vehicle_id: String, faction: Dictionary, team: int, area: Ve
 			(c as AIPilot).order = AIPilot.Order.GUARD
 			(c as AIPilot).guard_point = area
 	return h
+
+
+## One soldier of faction `faction_id` (team `team`) at `at`, guarding `guard` within `guard_radius` (SiteSpawner: site
+## populations). `k` picks the armour size like a squad's soldier index. Ignores the raid's bot caps; null when the
+## faction fields no infantry here.
+func spawn_site_soldier(faction_id: String, team: int, at: Vector3, k: int, guard: Vector3, guard_radius: float) -> InfantryBot:
+	var faction := ExtractionFactions.find(faction_id)
+	var pack := ExtractionFactions.make_infantry_pack(faction)
+	if faction.is_empty() or pack == "":
+		return null
+	var brain := _spawn_soldier(faction, pack, team, at, k, ExtractionFactions.make_squad_rules(faction))
+	if brain:
+		brain.guard_point = guard
+		brain.guard_radius = guard_radius
+	return brain
 
 
 ## A flag-theft response squad of faction `faction_id` (team `team`) at `at`: `soldiers` infantry bots and, when

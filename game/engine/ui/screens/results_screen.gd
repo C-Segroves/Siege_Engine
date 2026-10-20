@@ -1,3 +1,4 @@
+class_name ResultsScreen
 extends RoutedScreen
 ## Results of the match just played (MatchResults.summary, see BattleSummary): headline and winner,
 ## the end message, the match time, a table of every pilot's kills / deaths / score, a won mission's
@@ -21,6 +22,7 @@ func open(_args: Dictionary) -> void:
 	content.add_child(_build_pilot_table(s.get("pilots", [])))
 	if bool(s.get("campaign", false)):
 		_add_salvage(s.get("salvage", []))
+	_add_credits()
 	_add_rematch()
 
 
@@ -66,6 +68,23 @@ func _add_salvage(names: Array) -> void:
 	content.add_child(Widgets.section("Salvage recovered"))
 	var text := ", ".join(PackedStringArray(names)) if not names.is_empty() else "none"
 	content.add_child(Widgets.paragraph(text))
+
+
+## "Credits earned": one line per part of the award, the total and the new balance (LAN matches that paid).
+func _add_credits() -> void:
+	var award: Dictionary = (router as MatchResults).award
+	if award.is_empty():
+		return
+	content.add_child(Widgets.section("Credits earned"))
+	for line in make_award_lines(award):
+		content.add_child(Widgets.label(line, "DimLabel"))
+	content.add_child(Widgets.row([Widgets.label("Total +%s" % EconomyRules.make_money_text(int(award.total)), "StatusLabel"),
+		CreditsBadge.new((router as MatchResults).credits_after)]))
+
+
+## "Kills 12 x 16  +192 cr" per line of `award` ({total, lines: [{text, amount}]}).
+static func make_award_lines(award: Dictionary) -> Array:
+	return (award.get("lines", []) as Array).map(func(l: Dictionary) -> String: return "%s   %+d cr" % [l.text, int(l.amount)])
 
 
 func _add_rematch() -> void:

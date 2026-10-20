@@ -17,6 +17,9 @@ const RENAMED_ACTIONS_V1 := {"loot_pickup": "interact"}
 ## pad button is held, seconds]. The keyboard keeps its own key for the held action.
 const HELD_ACTIONS := {"inventory_toggle": ["interact", 0.5], "exfil_call": ["torso_center", 1.0],
 	"command_map": ["view_toggle", 0.5]}
+## Gamepad chords (ChordAction): chord action -> the pad buttons held together. The keyboard has its own key for
+## the action; no single pad button is free on foot, so the pad fires it from LB + RB (docs/design/lobby_loadout_economy.md §11).
+const CHORD_ACTIONS := {"callin_menu": [JOY_BUTTON_LEFT_SHOULDER, JOY_BUTTON_RIGHT_SHOULDER]}
 const MOVED_PAD_ACTIONS_V1 := ["weapon_next", "interact", "inventory_toggle", "exfil_call"]
 const STICK_DEADZONE := 0.2
 const TRIGGER_DEADZONE := 0.1
@@ -60,6 +63,15 @@ func make_default_bindings() -> Dictionary:
 		"menu_scroll_up": [_mouse_button(MOUSE_BUTTON_WHEEL_UP)],
 		"menu_scroll_down": [_mouse_button(MOUSE_BUTTON_WHEEL_DOWN)],
 		"ui_click": [_mouse_button(MOUSE_BUTTON_LEFT)],
+		"menu_secondary": [_mouse_button(MOUSE_BUTTON_RIGHT), _joy_button(JOY_BUTTON_X)],
+		"menu_info": [_key(KEY_F1), _joy_button(JOY_BUTTON_Y)],
+		"menu_tab_prev": [_key_with(KEY_PAGEUP, KEY_MASK_CTRL), _joy_button(JOY_BUTTON_LEFT_SHOULDER)],
+		"menu_tab_next": [_key_with(KEY_PAGEDOWN, KEY_MASK_CTRL), _joy_button(JOY_BUTTON_RIGHT_SHOULDER)],
+		"menu_zone_prev": [_key_with(KEY_TAB, KEY_MASK_SHIFT), _joy_axis(JOY_AXIS_TRIGGER_LEFT, 1.0)],
+		"menu_zone_next": [_key(KEY_TAB), _joy_axis(JOY_AXIS_TRIGGER_RIGHT, 1.0)],
+		"menu_switch_kind": [_key(KEY_V), _joy_button(JOY_BUTTON_BACK)],
+		"menu_primary": [_key_with(KEY_ENTER, KEY_MASK_CTRL), _joy_button(JOY_BUTTON_START)],
+		"callin_menu": [_key(KEY_L)],
 		"throttle_up": [_physical_key(KEY_W), _joy_axis(JOY_AXIS_TRIGGER_RIGHT, 1.0)],
 		"throttle_down": [_physical_key(KEY_S), _joy_axis(JOY_AXIS_TRIGGER_LEFT, 1.0)],
 		"throttle_stop": [_physical_key(KEY_X), _joy_button(JOY_BUTTON_LEFT_STICK)],
@@ -82,6 +94,8 @@ func make_default_bindings() -> Dictionary:
 		"mine_drop": [_physical_key(KEY_B), _joy_button(JOY_BUTTON_DPAD_DOWN)],
 		"pack_use": [_physical_key(KEY_R), _joy_button(JOY_BUTTON_DPAD_RIGHT)],
 		"repair_kit_use": [_physical_key(KEY_H), _joy_button(JOY_BUTTON_LEFT_STICK)],
+		"scope_zoom": [_mouse_button(MOUSE_BUTTON_MIDDLE), _joy_button(JOY_BUTTON_PADDLE1)],
+		"scope_level": [_physical_key(KEY_X), _joy_button(JOY_BUTTON_PADDLE2)],
 		"interact": [_physical_key(KEY_E), _joy_button(JOY_BUTTON_X)],
 		"inventory_toggle": [_physical_key(KEY_I)],
 		"exfil_call": [_physical_key(KEY_O)],
@@ -98,6 +112,8 @@ func make_default_bindings() -> Dictionary:
 		"cockpit_mode_4": [_key(KEY_F4)],
 		"cockpit_mode_5": [_key(KEY_F5)],
 		"cockpit_mode_6": [_key(KEY_F6)],
+		"radar_mode_toggle": [_key(KEY_SEMICOLON)],
+		"cloak_toggle": [_key_with(KEY_X, KEY_MASK_CTRL)],
 		"cockpit_mode_next": [_joy_button(JOY_BUTTON_DPAD_RIGHT)],
 		"hdd_page_1": [_key(KEY_F7)],
 		"hdd_page_2": [_key(KEY_F8)],
@@ -106,10 +122,10 @@ func make_default_bindings() -> Dictionary:
 		"look_left": [_key(KEY_KP_4)],
 		"look_right": [_key(KEY_KP_6)],
 		"orbit": [_mouse_button(MOUSE_BUTTON_LEFT), _mouse_button(MOUSE_BUTTON_RIGHT)],
-		"orbit_left": [_joy_axis(JOY_AXIS_RIGHT_X, -1.0)],
-		"orbit_right": [_joy_axis(JOY_AXIS_RIGHT_X, 1.0)],
-		"orbit_up": [_joy_axis(JOY_AXIS_RIGHT_Y, -1.0)],
-		"orbit_down": [_joy_axis(JOY_AXIS_RIGHT_Y, 1.0)],
+		"orbit_left": [_physical_key(KEY_Q), _joy_axis(JOY_AXIS_RIGHT_X, -1.0)],
+		"orbit_right": [_physical_key(KEY_E), _joy_axis(JOY_AXIS_RIGHT_X, 1.0)],
+		"orbit_up": [_physical_key(KEY_R), _joy_axis(JOY_AXIS_RIGHT_Y, -1.0)],
+		"orbit_down": [_physical_key(KEY_F), _joy_axis(JOY_AXIS_RIGHT_Y, 1.0)],
 		"zoom_in": [_mouse_button(MOUSE_BUTTON_WHEEL_UP), _joy_axis(JOY_AXIS_TRIGGER_RIGHT, 1.0)],
 		"zoom_out": [_mouse_button(MOUSE_BUTTON_WHEEL_DOWN), _joy_axis(JOY_AXIS_TRIGGER_LEFT, 1.0)],
 		"viewer_next_lod": [_key(KEY_L)],
@@ -142,7 +158,8 @@ func make_builtin_ui_extras() -> Dictionary:
 
 
 static func make_deadzone(action: String) -> float:
-	return TRIGGER_DEADZONE if action.begins_with("throttle_") or action.begins_with("zoom_") else STICK_DEADZONE
+	var is_trigger := action.begins_with("throttle_") or action.begins_with("zoom_") or action.begins_with("menu_zone_")
+	return TRIGGER_DEADZONE if is_trigger else STICK_DEADZONE
 
 
 ## Every action this script owns (the table above), in table order.
@@ -305,7 +322,10 @@ func _apply_saved_events(action: String, saved: Array) -> void:
 ## InputEvent -> JSON-friendly dictionary ({} for event types that are not bindable).
 static func make_event_dict(ev: InputEvent) -> Dictionary:
 	if ev is InputEventKey:
-		return {"type": "key", "keycode": int(ev.keycode), "physical_keycode": int(ev.physical_keycode)}
+		var d := {"type": "key", "keycode": int(ev.keycode), "physical_keycode": int(ev.physical_keycode)}
+		if ev.get_modifiers_mask() != 0:
+			d["modifiers"] = int(ev.get_modifiers_mask())
+		return d
 	if ev is InputEventMouseButton:
 		return {"type": "mouse_button", "button": int(ev.button_index)}
 	if ev is InputEventJoypadButton:
@@ -323,6 +343,7 @@ static func make_event(d: Dictionary) -> InputEvent:
 			k.keycode = int(d.get("keycode", 0)) as Key
 			k.physical_keycode = int(d.get("physical_keycode", 0)) as Key
 			k.device = ANY_DEVICE
+			_apply_modifiers(k, int(d.get("modifiers", 0)))
 			return k
 		"mouse_button":
 			return _mouse_button(int(d.get("button", 0)))
@@ -404,6 +425,20 @@ static func _physical_key(code: Key) -> InputEventKey:
 	ev.physical_keycode = code
 	ev.device = ANY_DEVICE
 	return ev
+
+
+## A key with modifiers (`modifiers` = KeyModifierMask bits, e.g. KEY_MASK_CTRL).
+static func _key_with(code: Key, modifiers: int) -> InputEventKey:
+	var ev := _key(code)
+	_apply_modifiers(ev, modifiers)
+	return ev
+
+
+static func _apply_modifiers(ev: InputEventKey, modifiers: int) -> void:
+	ev.shift_pressed = (modifiers & KEY_MASK_SHIFT) != 0
+	ev.ctrl_pressed = (modifiers & KEY_MASK_CTRL) != 0
+	ev.alt_pressed = (modifiers & KEY_MASK_ALT) != 0
+	ev.meta_pressed = (modifiers & KEY_MASK_META) != 0
 
 
 static func _mouse_button(button: int) -> InputEventMouseButton:

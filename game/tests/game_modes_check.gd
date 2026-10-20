@@ -93,6 +93,10 @@ func _check_map_modes() -> void:
 	var bad := []
 	for m in maps:
 		var ids := GameModes.make_mode_ids_for_map(m)
+		if m.has("remake_modes"):   # a map made for certain modes only (Varuna's Fall: extraction)
+			if ids != (m.remake_modes as Array):
+				bad.append(m.id)
+			continue
 		if ids.is_empty() or ids[0] != GameModes.DEFAULT or not m.get("modes", []).all(func(x) -> bool: return ids.has(x)):
 			bad.append(m.id)
 	_expect(bad.is_empty(), "every map offers deathmatch first plus its own modes %s" % [bad.slice(0, 5)])
@@ -642,7 +646,8 @@ func _check_bots_play_ctf() -> void:
 		Engine.time_scale = 4.0
 		var after := before   # the closest he came: base turrets may kill him on the way, and he respawns at home
 		for k in 80:
-			await get_tree().create_timer(0.5).timeout
+			for f in 30:   # half a second of game time in physics frames (a timer follows frame time, which lags under time_scale)
+				await get_tree().physics_frame
 			after = minf(after, grabber.global_position.distance_to(goal) if grabber.alive else after)
 		Engine.time_scale = 1.0
 		var bot_ids := bots.map(func(s: Infantry) -> int: return s.net_id)

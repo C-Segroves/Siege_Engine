@@ -7,7 +7,7 @@ extends Node
 ##   #11 Starsiege say3D ambient sounds print no "0" lines
 ##   P3  HUD weapon display names, chase camera spring arm, LAN RPC after the battle left the tree,
 ##       launcher automation runs once per process
-##   godot --headless --audio-driver Dummy --path game res://tests/qa_fix_check.tscn -- --page=options
+##   godot --headless --audio-driver Dummy --path game res://tests/qa_fix_check.tscn 
 
 const CALDERA := "tribes2:Caldera"
 ## Caldera's vehicle pad deck (station shape top, measured from its collision mesh).
@@ -77,9 +77,9 @@ func _map_config(vehicle: String, map_id: String) -> Dictionary:
 
 func _check_launcher_automation_once() -> void:
 	print("launcher automation (--page=options):")
-	if ScreenRouter.arg_value("page") != "options":
-		_expect(false, "run with -- --page=options")
-		return
+	# the check sets the argument itself (and lets the first launcher of the process act on it), so no command line is needed
+	ScreenRouter.arg_overrides["page"] = "options"
+	LauncherAutomation._consumed = false
 	var pages := []
 	for i in 2:
 		var launcher: Launcher = load("res://launcher.tscn").instantiate()
@@ -88,6 +88,7 @@ func _check_launcher_automation_once() -> void:
 		pages.append(launcher.current_name)
 		launcher.queue_free()
 		await get_tree().process_frame
+	ScreenRouter.arg_overrides.erase("page")
 	_expect(pages[0] == "options" and pages[1] != "options", "only the first launcher opens --page (%s)" % [pages])
 
 

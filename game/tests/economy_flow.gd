@@ -44,8 +44,8 @@ func flow_es2_economy() -> void:
 	var l := open_scene("res://launcher.tscn") as Launcher
 	await wait_screen("menu")
 	LauncherAutomation._start_campaign_of("es2")
-	l.show_campaign()
-	if not await wait_screen("briefing", 30):
+	l.show_started_campaign()
+	if not await wait_screen("lobby", 30):
 		return
 	await wait(1.0)
 	var g := Session.garage()
@@ -76,6 +76,7 @@ func flow_es2_economy() -> void:
 	await pass_results("es2_m1")
 	if not await wait_screen("debrief", 40):
 		return
+	await skip_movies()
 	await click_text("Continue")
 	await wait(1.5)
 	g = Session.garage()
@@ -94,19 +95,22 @@ func flow_es2_economy() -> void:
 	r = await win_keeping_damage(b)
 	await pass_results("es2_m2")
 	if await wait_screen("debrief", 40):
+		await skip_movies()
 		await click_text("Continue")
 		await wait(1.5)
 	log_line("after mission 2: pool %d -> %d kg, salvage %s" % [pool1, Session.garage().salvage_kg, r.get("salvage_kg")])
 	expect(Session.garage().salvage_kg != pool1, "tonnage changed again after mission 2 (%d -> %d)" % [pool1, Session.garage().salvage_kg])
 
 
-## From the briefing: Launch mission, wait for the battle to settle.
+## From the campaign lobby: Start mission, wait for the battle to settle.
 func launch_from_briefing() -> Battle:
-	if not await wait_screen("briefing", 30):
+	if not await wait_screen("lobby", 30):
 		return null
 	await wait(0.8)
-	(cur().current as Object).get("_garage_picker").select_garage()   # the garage's Herc, not the mission's
-	await click_text("Launch mission")
+	(cur().current as LobbyScreen).herc_row.picker.select_garage()   # the garage's Herc, not the mission's
+	await wait(0.6)
+	await skip_movies()
+	await click_text("Start mission")
 	if not await wait_scene_class("Battle", 90):
 		return null
 	await wait(3.0)
@@ -145,11 +149,12 @@ func win_keeping_damage(b: Battle, sec := 25.0) -> Dictionary:
 	return b.result
 
 
-## Briefing -> Hangar: the economy (pool, condition, Repair) and the Crew tab, screenshots, repair.
+## Lobby -> Hangar: the economy (pool, condition, Repair) and the Crew tab, screenshots, repair.
 func hangar_repair_and_shots() -> void:
-	if not await wait_screen("briefing", 30):
+	if not await wait_screen("lobby", 30):
 		return
-	await click_text("Hangar: build, scrap, arm")
+	await skip_movies()
+	await click_text("Hangar")
 	if not await wait_screen("hangar", 5):
 		return
 	await wait(1.5)
@@ -169,8 +174,8 @@ func hangar_repair_and_shots() -> void:
 	hs.show_tab(HangarScreen.TAB_CREW)
 	await wait(1.0)
 	await save_shot("crew")
-	await click(hs.primary_button, "Back to briefing")
-	await wait_screen("briefing", 5)
+	await click(hs.primary_button, "Back to lobby")
+	await wait_screen("lobby", 5)
 
 
 # ------------------------------------------------------------------ Earthsiege shell
@@ -179,7 +184,9 @@ func flow_es1_crew() -> void:
 	open_scene("res://library.tscn")
 	await wait_screen("home")
 	await wait(1.0)
-	await click_text("Metaltech: Earthsiege (original game)")
+	# the library no longer offers the original shell; open it directly (developer / test path)
+	Session.front_end = "res://es1_shell.tscn"
+	get_tree().change_scene_to_file("res://es1_shell.tscn")
 	await wait_scene_class("EsShell", 20)
 	if not await shell_wait_menu(EsShell.MAIN_MENU, 120):
 		return

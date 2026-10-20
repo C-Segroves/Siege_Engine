@@ -15,19 +15,34 @@ const FALLBACK_VEHICLE := ES2UnitCatalog.FALLBACK_VEHICLE
 const WEAPON_NAMES := ES2UnitCatalog.WEAPON_NAMES
 const GUIDANCE := ES2UnitCatalog.GUIDANCE
 ## Region param: how a dormant group arrives relative to the player (DBSIM 0x4236c4):
-## param -> [distance (original units), spread (rad), centre bearing (rad)].
-const ARRIVALS := {2: [150000.0, PI / 2.0, 0.0], 3: [150000.0, PI / 8.0, PI / 8.0],
+## param -> [distance (original units), spread (rad), centre bearing (rad)]; make_arrival_waves turns it into SpawnWaves.
+const ARRIVAL_UNITS := {2: [150000.0, PI / 2.0, 0.0], 3: [150000.0, PI / 8.0, PI / 8.0],
 	4: [90000.0, PI / 8.0, PI], 5: [150000.0, PI / 4.0, 0.0]}
 const DEFAULT_HERC_TYPE := "MONGOOSE"
-const FIRST_MESSAGE_DELAY := 1.0
 const DEFAULT_STRUCTURE_HP := 15000.0
+## Seconds the objectives line (the one queued message) stays up.
+const OBJECTIVES_MESSAGE_SECONDS := 10.0
+## Mission variable change tables (docs/formats/es2.md 10.5): {op: change} and {op: operand}. Unit and group deaths use
+## the Earthsiege 1 table (VAR_OPS / VAR_OPERANDS).
+const TABLE_OBJECTIVE := "objective"
+const TABLE_REGION := "region"
+const TABLE_DEATH := "death"
+const OBJECTIVE_OPS := {4: OP_SET, 5: OP_SET, 6: OP_ADD, 7: "sub"}
+const OBJECTIVE_OPERANDS := {4: 1, 5: 0, 6: 1, 7: 1}
+const REGION_OPS := {5: OP_SET, 6: OP_ADD}
+const REGION_OPERANDS := {5: 0, 6: 1}
 
-var timers := []                  # [{def, armed, t}]
 var orders: ES2GroupOrders
 var rules: ES2Objectives
 ## Training instructor and base-under-attack lines (created in setup).
 var command_radio: ES2CommandRadio
-var _msg_queue := []
+## Region-armed countdowns by timer index; the payload is the list of regions it fires (setup).
+## The objectives line, played in turn after the first-message delay (setup).
+var _briefing_radio: MissionAnnouncer = null
+## Region param -> the SpawnWave that places an arriving group around the player.
+var _arrivals := make_arrival_waves()
+var _objective_vars := MissionVars.new(NVARS, OBJECTIVE_OPS, {})
+var _region_vars := MissionVars.new(NVARS, REGION_OPS, {})
 ## The debriefing's clip (VSHELL clip index) of the final compile, -1 none (make_result_extra).
 var _debrief_clip := -1
 
@@ -45,9 +60,19 @@ var group_done_paths: Dictionary:
 
 
 func _init() -> void:
+	super()
 	orders = ES2GroupOrders.new(self)
 	targets = MissionTargets.new(self)
 	rules = ES2Objectives.new(self)
+
+
+## The arrival waves of ARRIVAL_UNITS by region param: distance in metres, spread and bearing in radians.
+static func make_arrival_waves() -> Dictionary:
+	var waves := {}
+	for param in ARRIVAL_UNITS:
+		var a: Array = ARRIVAL_UNITS[param]
+		waves[param] = SpawnWave.make_placed_wave("", "arrival:%d" % param, a[0] * Assets.UNIT, a[1], a[2])
+	return waves
 
 
 ## Vehicle id for an ES2 herc record (see ES2UnitCatalog.vehicle_for).
@@ -107,12 +132,11 @@ func setup(p_battle: Node3D, mission: Dictionary, vars := PackedInt32Array()) ->
 	_load_nav_points(ps)
 	_build_nav_markers()
 	_init_regions()
-	for t in _arr(m.get("timers")):
-		timers.append({"def": t, "armed": t.get("trigger") == null, "t": float(t.get("delay", 0))})
+	_add_timers()
+	_briefing_radio = MissionAnnouncer.new(get_sink(), MissionAnnouncer.Discipline.FIFO)
 	rules.load_objectives(_arr(m.get("objectives")))
 	command_radio = ES2CommandRadio.new(self)
 	_build_structures()
-	_queue_objectives_message()
 
 
 func _player_herc_index(ps: Dictionary) -> int:
@@ -132,11 +156,13 @@ func _load_nav_points(ps: Dictionary) -> void:
 		nav_points.append(on_ground(to_godot(ps.position)))
 
 
-func _queue_objectives_message() -> void:
+## The mission's objectives line, the first message of the mission (host).
+func _say_objectives() -> void:
 	var brief: Dictionary = m.get("texts", {}) if m.get("texts") is Dictionary else {}
 	var objs: Array = _arr(brief.get("objectives"))
 	if not objs.is_empty():
-		_msg_queue.append(["Objectives: " + " ".join(objs).replace("\n", " ").strip_edges(), 10.0])
+		var line := "Objectives: " + " ".join(objs).replace("\n", " ").strip_edges()
+		_briefing_radio.apply_say(MissionMessage.make_message(line, OBJECTIVES_MESSAGE_SECONDS, MissionMessage.CHANNEL_INFO))
 
 
 ## The point dropped onto the terrain (heightmap packs); flat packs keep y.
@@ -201,7 +227,7 @@ func _formation_offset(kind: String, form: int, k: int, yaw: float) -> Vector3:
 func spawn_units() -> void:
 	_spawn_start_groups(0)   # group 0 also holds the player's squadmates
 	start_wingman_radio(group_units.get(0, []))
-	_flush_messages()
+	_say_objectives()
 
 
 ## The briefing's objective lines, done once the mission status is complete (ES2Objectives).
@@ -258,12 +284,11 @@ func _group_path(g: Dictionary, ai: Dictionary) -> Array[Vector3]:
 ## Region param 2..5: the group arrives at a distance around the player, facing them (DBSIM 0x4236c4).
 func _apply_arrival(spawn: Dictionary) -> void:
 	var me := _living_player()
-	if not ARRIVALS.has(spawn.arrival) or me == null:
+	if not _arrivals.has(spawn.arrival) or me == null:
 		return
-	var a: Array = ARRIVALS[spawn.arrival]
-	var dist: float = a[0] * Assets.UNIT
-	var ang: float = me.global_rotation.y + a[2] + randf_range(-a[1], a[1])
-	spawn.base = me.global_position + Basis(Vector3.UP, ang) * Vector3(0, 0, -dist)
+	var place: Dictionary = _arrivals[spawn.arrival].placement
+	var ang: float = me.global_rotation.y + place.bearing + randf_range(-place.spread, place.spread)
+	spawn.base = me.global_position + Basis(Vector3.UP, ang) * Vector3(0, 0, -place.distance)
 	spawn.yaw = yaw_towards(spawn.base, me.global_position)
 
 
@@ -372,13 +397,12 @@ static func _set_pilot_start(unit: Herc, ai: Dictionary, alerted: bool) -> void:
 func _physics_process(delta: float) -> void:
 	if _over or not multiplayer.is_server():
 		return
-	_elapsed += delta
-	_run_timers(delta)
-	var dt := make_rules_step(delta, RULES_INTERVAL)
+	kit.clock.apply_advance(delta)
+	_apply_fired_timers(kit.timers.apply_tick(delta))
+	var dt := kit.clock.make_step(delta, RULES_INTERVAL)
 	if dt <= 0.0:
 		return
-	if _elapsed > FIRST_MESSAGE_DELAY:
-		_flush_messages()
+	_briefing_radio.apply_tick(dt)
 	rules.update_detection()
 	_check_regions()
 	_update_nav()
@@ -387,21 +411,31 @@ func _physics_process(delta: float) -> void:
 	rules.check_end(dt)
 
 
-## Armed timers count down and fire their regions once.
-func _run_timers(delta: float) -> void:
-	for t in timers:
-		if t.armed and t.t > 0.0:
-			t.t -= delta
-			if t.t <= 0.0:
-				for ri in _arr(t.def.get("fire")):
-					fire_region(int(ri))
+## One timer per mission timer record, armed at once unless a region arms it; it fires its regions once. A record with
+## no delay never fires.
+func _add_timers() -> void:
+	var defs: Array = _arr(m.get("timers"))
+	for i in defs.size():
+		var delay := float(defs[i].get("delay", 0))
+		var timer := MissionTimer.make_timer(delay if delay > 0.0 else INF, MissionTimer.Mode.ONE_SHOT, _arr(defs[i].get("fire")))
+		timer.armed = defs[i].get("trigger") == null
+		kit.timers.apply_add(i, timer)
 
 
-func _flush_messages() -> void:
-	if battle == null or _msg_queue.is_empty():
-		return
-	var mm = _msg_queue.pop_front()
-	battle.fx("message", [mm[0], mm[1]], true)
+func _apply_fired_timers(fire_lists: Array) -> void:
+	for fire_list in fire_lists:
+		for ri in fire_list:
+			fire_region(int(ri))
+
+
+func get_timer_count() -> int:
+	return _arr(m.get("timers")).size()
+
+
+## True while timer `i` counts or has run out (it was armed); false while it waits for its region.
+func is_timer_armed(i: int) -> bool:
+	var timer := kit.timers.get_timer(i)
+	return timer == null or timer.armed
 
 
 func fire_region(ri: int) -> void:
@@ -413,27 +447,14 @@ func fire_region(ri: int) -> void:
 	r.fired = true
 	var d: Dictionary = r.def
 	for a in _arr(d.get("on_fire")):
-		_var_op(int(a[0]), int(a[1]), "region")
+		_var_op(int(a[0]), int(a[1]), TABLE_REGION)
 	# region text ids (w34..w38) are discarded by the sim (DBSIM 0x424a8e): only the message word speaks
 	command_radio.announce_region(d)
 	_wake_groups(d, int(d.get("param", 0)))
-	for t in timers:
-		if t.def.get("trigger") != null and int(t.def.trigger) == ri:
-			t.armed = true
-	_flush_messages()
-
-
-func _region_occupied(d: Dictionary) -> bool:
-	var areas: Array = _arr(d.get("areas"))
-	if areas.is_empty():
-		return false
-	for v in _region_candidates(d):
-		if not is_instance_valid(v) or not v.alive:
-			continue
-		for a in areas:
-			if _in_area(v.global_position, a):
-				return true
-	return false
+	var defs: Array = _arr(m.get("timers"))
+	for i in defs.size():
+		if defs[i].get("trigger") != null and int(defs[i].trigger) == ri and kit.timers.get_timer(i) != null:
+			kit.timers.get_timer(i).apply_arm()
 
 
 ## What a region reacts to: types 0..6 classes of units (6 = structures), 7+ its own target.
@@ -465,28 +486,22 @@ func _region_type_counts(ty: int, v: Node) -> bool:
 	return false
 
 
-## Mission variable update; three op tables (docs/formats/es2.md 10.5):
+## Mission variable update by one of three op tables (docs/formats/es2.md 10.5):
 ## objective 4 =1, 5 =0, 6 +=1, 7 -=1; region 5 =0, 6 +=1; unit/group death 1 =0, 2 +=1, 13..16 =1..4.
-func _var_op(v: int, op, table := "death") -> void:
-	if v < 0 or v >= mission_vars.size():
-		return
-	var o := int(op)
+func _var_op(v: int, op, table := TABLE_DEATH) -> void:
 	match table:
-		"objective":
-			match o:
-				4: mission_vars[v] = 1
-				5: mission_vars[v] = 0
-				6: mission_vars[v] += 1
-				7: mission_vars[v] -= 1
-		"region":
-			match o:
-				5: mission_vars[v] = 0
-				6: mission_vars[v] += 1
+		TABLE_OBJECTIVE:
+			_apply_table_op(_objective_vars, OBJECTIVE_OPERANDS, v, int(op))
+		TABLE_REGION:
+			_apply_table_op(_region_vars, REGION_OPERANDS, v, int(op))
 		_:
-			match o:
-				1: mission_vars[v] = 0
-				2: mission_vars[v] += 1
-				13, 14, 15, 16: mission_vars[v] = o - 12
+			super._var_op(v, op)
+
+
+func _apply_table_op(vars: MissionVars, operands: Dictionary, v: int, op: int) -> void:
+	vars.values = mission_vars
+	if vars.apply_op(op, v, int(operands.get(op, 0))):
+		mission_vars = vars.values
 
 
 func _run_actions(actions, table: String) -> void:
@@ -506,18 +521,18 @@ func on_unit_destroyed(h: Herc) -> void:
 	rules.mark_detected(h)
 	var rec = _unit_record(h)
 	if rec is Dictionary:
-		_run_actions(rec.get("on_death"), "death")
+		_run_actions(rec.get("on_death"), TABLE_DEATH)
 		if int(rec.get("death_region", -1)) >= 0:
 			fire_region(int(rec.death_region))
 	var gi := int(h.get_meta("group", -1))
 	if gi >= 0 and _group_wiped_out(gi):
-		_run_actions(m.groups[gi].get("on_destroyed"), "death")
+		_run_actions(m.groups[gi].get("on_destroyed"), TABLE_DEATH)
 
 
 func _on_structure_destroyed(st: Structure, _killer: Node, i: int) -> void:
 	rules.mark_detected(st)     # destroyed means found (detection flag stays set)
 	var s: Dictionary = m.structures[i]
-	_run_actions(s.get("on_death"), "death")
+	_run_actions(s.get("on_death"), TABLE_DEATH)
 	if int(s.get("death_region", -1)) >= 0:
 		fire_region(int(s.death_region))
 	if multiplayer.is_server():

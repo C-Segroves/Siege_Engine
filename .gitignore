@@ -283,3 +283,9 @@ user_data/
 *.7z
 *.tpz
 *.stackdump
+
+# server settings of a deployment (deploy/server.json.example is the template)
+deploy/server.json
+
+# innoextract is downloaded at import time (tools/tv_unpack.py), never committed
+tools/innoextract/

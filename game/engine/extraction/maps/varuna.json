@@ -1,0 +1,968 @@
+{
+ "id": "varuna",
+ "name": "Varuna's Fall",
+ "pack": "tribes2",
+ "notes": "Remake-original extraction map (docs/design/extraction_map_varuna.md). Layout, terrain recipe, sites and spawn data are our own work. Shapes, textures and the sky are only referenced from the user's installed tribes2 pack at runtime: VarunaMap expands this file into the engine map schema (docs/formats/map_schema.md); the heightfield is generated from the seed and the region masks below.",
+ "seed": 20431,
+ "bounds": {
+  "min": [
+   -3072,
+   -3072
+  ],
+  "max": [
+   3072,
+   3072
+  ]
+ },
+ "terrain": {
+  "samples": 385,
+  "square": 16.0,
+  "water_level": 8.0,
+  "albedo_size": 768,
+  "regions": [
+   {
+    "id": "north_mountains",
+    "center": [
+     0,
+     -2300
+    ],
+    "scale": 1500,
+    "kind": "ridged",
+    "base": 150,
+    "amp": 340,
+    "freq": 0.0011
+   },
+   {
+    "id": "central_plains",
+    "center": [
+     0,
+     -100
+    ],
+    "scale": 1250,
+    "kind": "rolling",
+    "base": 36,
+    "amp": 14,
+    "freq": 0.0007
+   },
+   {
+    "id": "south_lakes",
+    "center": [
+     0,
+     2300
+    ],
+    "scale": 1500,
+    "kind": "rolling",
+    "base": 20,
+    "amp": 9,
+    "freq": 0.0009
+   },
+   {
+    "id": "east_uplands",
+    "center": [
+     2400,
+     0
+    ],
+    "scale": 1100,
+    "kind": "terraced",
+    "base": 80,
+    "amp": 90,
+    "freq": 0.0016,
+    "steps": 5
+   },
+   {
+    "id": "west_caves",
+    "center": [
+     -2400,
+     0
+    ],
+    "scale": 1100,
+    "kind": "steep",
+    "base": 120,
+    "amp": 300,
+    "freq": 0.0017
+   }
+  ],
+  "craters": [
+   {
+    "id": "impact_crater",
+    "center": [
+     -300,
+     2350
+    ],
+    "radius": 700,
+    "floor": -22,
+    "rim": 18
+   },
+   {
+    "id": "east_pond",
+    "center": [
+     1500,
+     2050
+    ],
+    "radius": 300,
+    "floor": -6,
+    "rim": 8
+   }
+  ],
+  "tarns": [
+   {
+    "id": "mountain_tarn",
+    "center": [
+     -950,
+     -1950
+    ],
+    "floor": 198,
+    "level": 214,
+    "half": 150
+   }
+  ],
+  "rivers": [
+   {
+    "id": "river",
+    "width": 22,
+    "bank": 70,
+    "depth": 5,
+    "points": [
+     [
+      1000,
+      150
+     ],
+     [
+      850,
+      800
+     ],
+     [
+      550,
+      1300
+     ],
+     [
+      250,
+      1650
+     ],
+     [
+      -100,
+      1900
+     ]
+    ]
+   },
+   {
+    "id": "outflow",
+    "width": 24,
+    "bank": 80,
+    "depth": 6,
+    "points": [
+     [
+      -300,
+      2850
+     ],
+     [
+      -330,
+      3000
+     ],
+     [
+      -340,
+      3100
+     ]
+    ]
+   },
+   {
+    "id": "ford_creek",
+    "width": 14,
+    "bank": 50,
+    "depth": 4,
+    "points": [
+     [
+      1250,
+      1500
+     ],
+     [
+      1330,
+      1850
+     ],
+     [
+      1500,
+      2050
+     ]
+    ]
+   }
+  ],
+  "coast": {
+   "z0": 2750,
+   "z1": 3072,
+   "drop": 60
+  },
+  "pad_blend": 1.7
+ },
+ "textures": {
+  "north_mountains": {
+   "map": "Katabatic",
+   "at": [
+    900,
+    900
+   ]
+  },
+  "central_plains": {
+   "map": "Sirocco",
+   "at": [
+    800,
+    1000
+   ]
+  },
+  "south_lakes": {
+   "map": "Alcatraz",
+   "at": [
+    800,
+    800
+   ]
+  },
+  "east_uplands": {
+   "map": "Talus",
+   "at": [
+    500,
+    500
+   ]
+  },
+  "west_caves": {
+   "map": "Fracas",
+   "at": [
+    600,
+    700
+   ]
+  },
+  "cliff": {
+   "map": "Fracas",
+   "at": [
+    300,
+    300
+   ]
+  },
+  "patch_px": 384,
+  "cliff_slope": 0.62
+ },
+ "sky_from": "Alcatraz",
+ "environment": {
+  "gravity": 20.0,
+  "sky_color": [
+   0.45,
+   0.55,
+   0.72
+  ],
+  "horizon_color": [
+   0.72,
+   0.76,
+   0.82
+  ],
+  "fog_color": [
+   0.72,
+   0.76,
+   0.82
+  ],
+  "fog_start": 900,
+  "fog_end": 4200,
+  "visible_distance": 4200,
+  "sun_dir": [
+   0.45,
+   -0.7,
+   -0.55
+  ],
+  "sun_color": [
+   0.95,
+   0.92,
+   0.85
+  ],
+  "ambient": [
+   0.42,
+   0.44,
+   0.48
+  ],
+  "fog_sky_affect": 0.6
+ },
+ "water": [
+  {
+   "id": "sea_and_lakes",
+   "min": [
+    -3072,
+    -3072
+   ],
+   "max": [
+    3072,
+    3072
+   ],
+   "bottom": -300,
+   "level": 8.0,
+   "visible": true
+  },
+  {
+   "id": "tarn",
+   "min": [
+    -1100,
+    -2100
+   ],
+   "max": [
+    -800,
+    -1800
+   ],
+   "bottom": 150,
+   "level": 214.0,
+   "visible": true
+  }
+ ],
+ "site_sizes": {
+  "small": {
+   "headcount": [
+    2,
+    4
+   ],
+   "areas": 2,
+   "loot_areas": 1,
+   "reinforce_s": [
+    60,
+    90
+   ]
+  },
+  "medium": {
+   "headcount": [
+    4,
+    8
+   ],
+   "areas": 3,
+   "loot_areas": 2,
+   "reinforce_s": [
+    75,
+    105
+   ]
+  },
+  "large": {
+   "headcount": [
+    8,
+    16
+   ],
+   "areas": 4,
+   "loot_areas": 3,
+   "reinforce_s": [
+    90,
+    120
+   ],
+   "vehicles": 2
+  }
+ },
+ "equipment": {
+  "large": [
+   {
+    "kind": "generator",
+    "a": 200
+   },
+   {
+    "kind": "generator",
+    "a": 215
+   },
+   {
+    "kind": "inventory",
+    "a": 20
+   },
+   {
+    "kind": "inventory",
+    "a": 160
+   },
+   {
+    "kind": "turret",
+    "a": 0
+   },
+   {
+    "kind": "turret",
+    "a": 90
+   },
+   {
+    "kind": "turret",
+    "a": 180
+   },
+   {
+    "kind": "turret",
+    "a": 270
+   },
+   {
+    "kind": "sensor",
+    "a": 45
+   },
+   {
+    "kind": "vehicle",
+    "a": 315
+   }
+  ],
+  "medium": [
+   {
+    "kind": "generator",
+    "a": 200
+   },
+   {
+    "kind": "inventory",
+    "a": 20
+   },
+   {
+    "kind": "turret",
+    "a": 90
+   },
+   {
+    "kind": "turret",
+    "a": 270
+   }
+  ],
+  "small": [
+   {
+    "kind": "generator",
+    "a": 90
+   },
+   {
+    "kind": "sentry",
+    "a": 0
+   },
+   {
+    "kind": "sentry",
+    "a": 180
+   }
+  ]
+ },
+ "sites": [
+  {
+   "id": "prow_fortress",
+   "name": "Prow Fortress",
+   "faction": "blood_eagle",
+   "size": "large",
+   "pos": [
+    -300,
+    -2250
+   ],
+   "yaw": 20,
+   "pad_radius": 170,
+   "ring_m": 150,
+   "flag": true,
+   "interiors": [
+    {
+     "shape": "tribes2:int_sbase5",
+     "dx": 0,
+     "dz": 0,
+     "yaw": 0
+    },
+    {
+     "shape": "tribes2:int_svpad",
+     "dx": 120,
+     "dz": 170,
+     "yaw": 90
+    }
+   ],
+   "outposts": [
+    {
+     "shape": "tribes2:int_stowr6",
+     "dx": -400,
+     "dz": 300,
+     "pad": 40
+    },
+    {
+     "shape": "tribes2:int_stowr6",
+     "dx": 450,
+     "dz": 350,
+     "pad": 40
+    }
+   ]
+  },
+  {
+   "id": "pass_station_north",
+   "name": "Pass Station North",
+   "faction": "blood_eagle",
+   "size": "medium",
+   "pos": [
+    900,
+    -1500
+   ],
+   "yaw": 100,
+   "pad_radius": 80,
+   "ring_m": 60,
+   "interiors": [
+    {
+     "shape": "tribes2:int_sbase1",
+     "dx": 0,
+     "dz": 0,
+     "yaw": 0
+    }
+   ]
+  },
+  {
+   "id": "eastern_ridge_watch",
+   "name": "Eastern Ridge Watchtower",
+   "faction": "blood_eagle",
+   "size": "small",
+   "pos": [
+    1800,
+    -1900
+   ],
+   "yaw": 0,
+   "pad_radius": 35,
+   "ring_m": 30,
+   "interiors": [
+    {
+     "shape": "tribes2:int_stowr6",
+     "dx": 0,
+     "dz": 0,
+     "yaw": 0
+    }
+   ]
+  },
+  {
+   "id": "airfield",
+   "name": "Airfield",
+   "faction": "diamond_sword",
+   "size": "large",
+   "pos": [
+    0,
+    -250
+   ],
+   "yaw": 0,
+   "pad_radius": 130,
+   "ring_m": 120,
+   "flag": true,
+   "interiors": [
+    {
+     "shape": "tribes2:int_dbase4",
+     "dx": 0,
+     "dz": 0,
+     "yaw": 0
+    },
+    {
+     "shape": "tribes2:int_dvpad",
+     "dx": 140,
+     "dz": 40,
+     "yaw": 90
+    },
+    {
+     "shape": "tribes2:int_dvpad",
+     "dx": -140,
+     "dz": 40,
+     "yaw": 90
+    },
+    {
+     "shape": "tribes2:int_dtowr1",
+     "dx": 0,
+     "dz": -150,
+     "yaw": 0
+    }
+   ]
+  },
+  {
+   "id": "salvage_yard",
+   "name": "Salvage Yard",
+   "faction": "diamond_sword",
+   "size": "medium",
+   "pos": [
+    -1200,
+    450
+   ],
+   "yaw": 40,
+   "pad_radius": 80,
+   "ring_m": 60,
+   "interiors": [
+    {
+     "shape": "tribes2:int_dbunk5",
+     "dx": 0,
+     "dz": 0,
+     "yaw": 0
+    }
+   ]
+  },
+  {
+   "id": "plains_watch_east",
+   "name": "Plains Watchtower East",
+   "faction": "diamond_sword",
+   "size": "small",
+   "pos": [
+    1200,
+    -600
+   ],
+   "yaw": 0,
+   "pad_radius": 35,
+   "ring_m": 30,
+   "interiors": [
+    {
+     "shape": "tribes2:int_dtowr1",
+     "dx": 0,
+     "dz": 0,
+     "yaw": 0
+    }
+   ]
+  },
+  {
+   "id": "plains_watch_west",
+   "name": "Plains Watchtower West",
+   "faction": "diamond_sword",
+   "size": "small",
+   "pos": [
+    -900,
+    -900
+   ],
+   "yaw": 0,
+   "pad_radius": 35,
+   "ring_m": 30,
+   "interiors": [
+    {
+     "shape": "tribes2:int_dtowr1",
+     "dx": 0,
+     "dz": 0,
+     "yaw": 0
+    }
+   ]
+  },
+  {
+   "id": "crater_docks",
+   "name": "Crater Docks",
+   "faction": "starwolf",
+   "size": "large",
+   "pos": [
+    -250,
+    1700
+   ],
+   "yaw": 180,
+   "pad_radius": 110,
+   "ring_m": 100,
+   "flag": true,
+   "pad_h": 11.0,
+   "interiors": [
+    {
+     "shape": "tribes2:int_bbase7",
+     "dx": 0,
+     "dz": 0,
+     "yaw": 0
+    },
+    {
+     "shape": "tribes2:int_btowr2",
+     "dx": 90,
+     "dz": 90,
+     "yaw": 0
+    },
+    {
+     "shape": "tribes2:int_btowr2",
+     "dx": -90,
+     "dz": 90,
+     "yaw": 0
+    },
+    {
+     "shape": "tribes2:int_bplat4",
+     "dx": 0,
+     "dz": 150,
+     "yaw": 0
+    }
+   ],
+   "pontoons": [
+    {
+     "shape": "tribes2:int_dbrdg10",
+     "dx": 0,
+     "dz": 190,
+     "yaw": 90
+    },
+    {
+     "shape": "tribes2:int_dbrdg10",
+     "dx": 0,
+     "dz": 250,
+     "yaw": 90
+    }
+   ]
+  },
+  {
+   "id": "ford_camp",
+   "name": "Ford Camp",
+   "faction": "starwolf",
+   "size": "medium",
+   "pos": [
+    1250,
+    1450
+   ],
+   "yaw": 0,
+   "pad_radius": 70,
+   "ring_m": 55,
+   "pad_h": 11.0,
+   "interiors": [
+    {
+     "shape": "tribes2:int_bbunk8",
+     "dx": 0,
+     "dz": 0,
+     "yaw": 0
+    }
+   ]
+  },
+  {
+   "id": "river_watch",
+   "name": "River Watchtower",
+   "faction": "starwolf",
+   "size": "small",
+   "pos": [
+    -80,
+    2650
+   ],
+   "yaw": 0,
+   "pad_radius": 35,
+   "ring_m": 30,
+   "pad_h": 11.0,
+   "interiors": [
+    {
+     "shape": "tribes2:int_btowr8",
+     "dx": 0,
+     "dz": 0,
+     "yaw": 0
+    }
+   ]
+  },
+  {
+   "id": "chapel_fortress",
+   "name": "Chapel Fortress",
+   "faction": "phoenix",
+   "size": "large",
+   "pos": [
+    2300,
+    -200
+   ],
+   "yaw": 270,
+   "pad_radius": 120,
+   "ring_m": 105,
+   "flag": true,
+   "interiors": [
+    {
+     "shape": "tribes2:int_pbase3",
+     "dx": 0,
+     "dz": 0,
+     "yaw": 0
+    },
+    {
+     "shape": "tribes2:int_pspir3",
+     "dx": 130,
+     "dz": 0,
+     "yaw": 0
+    },
+    {
+     "shape": "tribes2:int_ptowr1",
+     "dx": -130,
+     "dz": 80,
+     "yaw": 0
+    }
+   ]
+  },
+  {
+   "id": "relic_shrine",
+   "name": "Relic Shrine",
+   "faction": "phoenix",
+   "size": "medium",
+   "pos": [
+    2300,
+    900
+   ],
+   "yaw": 0,
+   "pad_radius": 70,
+   "ring_m": 55,
+   "interiors": [
+    {
+     "shape": "tribes2:int_pbunk7",
+     "dx": 0,
+     "dz": 0,
+     "yaw": 0
+    },
+    {
+     "shape": "tribes2:int_pspir2",
+     "dx": 40,
+     "dz": 0,
+     "yaw": 0
+    }
+   ]
+  },
+  {
+   "id": "pilgrim_tower",
+   "name": "Pilgrim Tower",
+   "faction": "phoenix",
+   "size": "small",
+   "pos": [
+    2650,
+    -900
+   ],
+   "yaw": 0,
+   "pad_radius": 35,
+   "ring_m": 30,
+   "interiors": [
+    {
+     "shape": "tribes2:int_ptowr2",
+     "dx": 0,
+     "dz": 0,
+     "yaw": 0
+    }
+   ]
+  },
+  {
+   "id": "cave_warren",
+   "name": "Cave Warren",
+   "faction": "bioderm",
+   "size": "medium",
+   "pos": [
+    -2450,
+    -200
+   ],
+   "yaw": 90,
+   "pad_radius": 80,
+   "ring_m": 60,
+   "bare": true,
+   "interiors": [
+    {
+     "shape": "tribes2:int_procka",
+     "dx": 0,
+     "dz": 0,
+     "yaw": 0
+    },
+    {
+     "shape": "tribes2:int_srockb",
+     "dx": 70,
+     "dz": 40,
+     "yaw": 0
+    }
+   ]
+  },
+  {
+   "id": "cave_mouth_north",
+   "name": "North Cave Mouth",
+   "faction": "bioderm",
+   "size": "small",
+   "pos": [
+    -2200,
+    -1200
+   ],
+   "yaw": 0,
+   "pad_radius": 40,
+   "ring_m": 30,
+   "bare": true,
+   "interiors": [
+    {
+     "shape": "tribes2:int_brocka",
+     "dx": 0,
+     "dz": 0,
+     "yaw": 0
+    }
+   ]
+  },
+  {
+   "id": "cave_mouth_south",
+   "name": "South Cave Mouth",
+   "faction": "bioderm",
+   "size": "small",
+   "pos": [
+    -2500,
+    1100
+   ],
+   "yaw": 0,
+   "pad_radius": 40,
+   "ring_m": 30,
+   "bare": true,
+   "interiors": [
+    {
+     "shape": "tribes2:int_srockc",
+     "dx": 0,
+     "dz": 0,
+     "yaw": 0
+    }
+   ]
+  }
+ ],
+ "exfil": [
+  {
+   "label": "EXFIL A",
+   "pos": [
+    -1816,
+    -1624
+   ]
+  },
+  {
+   "label": "EXFIL B",
+   "pos": [
+    -500,
+    650
+   ]
+  },
+  {
+   "label": "EXFIL C",
+   "pos": [
+    904,
+    2504
+   ]
+  },
+  {
+   "label": "EXFIL D",
+   "pos": [
+    -1796,
+    -300
+   ]
+  },
+  {
+   "label": "EXFIL E",
+   "pos": [
+    2304,
+    -1464
+   ]
+  }
+ ],
+ "rules": {
+  "min_flag_exfil_m": 600,
+  "min_site_exfil_m": 300,
+  "spawn_min_exfil_m": 120,
+  "spawn_exfil_sight_m": 500
+ },
+ "equipment_kinds": {
+  "generator": {
+   "kind": "generator",
+   "shape": "tribes2:station_generator_large",
+   "datablock": "GeneratorLarge",
+   "spec": "generatorlarge"
+  },
+  "inventory": {
+   "kind": "inventory",
+   "shape": "tribes2:station_inv_human",
+   "datablock": "StationInventory",
+   "spec": "stationinventory"
+  },
+  "turret": {
+   "kind": "turret",
+   "shape": "tribes2:turret_base_large",
+   "datablock": "TurretBaseLarge",
+   "spec": "turretbaselarge"
+  },
+  "sentry": {
+   "kind": "turret",
+   "shape": "tribes2:turret_sentry",
+   "datablock": "SentryTurret",
+   "spec": "sentryturret",
+   "barrel": "SentryTurretBarrel",
+   "barrel_spec": "sentryturretbarrel"
+  },
+  "sensor": {
+   "kind": "sensor",
+   "shape": "tribes2:sensor_pulse_large",
+   "datablock": "SensorLargePulse",
+   "spec": "sensorlargepulse"
+  },
+  "vehicle": {
+   "kind": "vehicle",
+   "shape": "tribes2:vehicle_pad",
+   "datablock": "StationVehiclePad",
+   "spec": "stationvehiclepad"
+  }
+ },
+ "turret_barrels": [
+  {
+   "barrel": "AABarrelLarge",
+   "spec": "aabarrellarge"
+  },
+  {
+   "barrel": "PlasmaBarrelLarge",
+   "spec": "plasmabarrellarge"
+  },
+  {
+   "barrel": "MissileBarrelLarge",
+   "spec": "missilebarrellarge"
+  },
+  {
+   "barrel": "MortarBarrelLarge",
+   "spec": "mortarbarrellarge"
+  }
+ ]
+}

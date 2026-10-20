@@ -91,7 +91,7 @@ func build(p_shape: Dictionary, p_lod := 0, p_palette := "WORLD0") -> void:
 	var l: Dictionary = shape.lods[lod]
 	_init_cells(l.cells)
 	var texset := []
-	if shape.get("texset") != null:
+	if shape.get("texset") != null and not ServerProfile.is_collision_only():
 		texset = Assets.texture_set(Assets.qualify(shape.texset, shape.get("pack", "")))
 	for piece in l.pieces:
 		_build_piece(piece, texset)
@@ -143,6 +143,8 @@ func _build_piece(piece: Dictionary, texset: Array) -> void:
 		return
 	var mi := MeshInstance3D.new()
 	mi.mesh = mesh
+	if RenderUnified.enabled():
+		mi.layers |= SceneLighting.UNIFIED_LIT_LAYER
 	parent_node.add_child(mi)
 	var piece_name := str(piece.get("name", ""))
 	if not _piece_meshes.has(piece_name):
@@ -208,9 +210,15 @@ func _rgba_material(idx: int) -> Material:
 
 
 func _material_for(m: Dictionary, texset: Array) -> Material:
+	if ServerProfile.is_collision_only():
+		return null   # the server never draws: faces and cells only
 	var skinned := _override_material(int(m.index))
 	if skinned:
 		return skinned
+	if RenderUnified.enabled():
+		var um := _unified_material(m, texset)
+		if um:
+			return um
 	if m.kind == "rgba":
 		var rm := _rgba_material(int(m.index))
 		if rm:
@@ -218,6 +226,18 @@ func _material_for(m: Dictionary, texset: Array) -> Material:
 	var tkey := "%s/%s" % [shape.get("pack"), shape.get("texset")] if m.kind == "tex" else ""
 	var pal := _tex_palette(int(m.index)) if m.kind == "tex" else palette_name
 	return Palette.material(pal, m, tkey, texset)
+
+
+## The shared material (UnifiedMaterial) for a polygon colour; null when the prototype leaves it to the game's own path.
+func _unified_material(m: Dictionary, texset: Array) -> Material:
+	var pack: String = shape.get("pack", Assets.default_pack)
+	if m.kind == "rgba":
+		var mats: Array = shape.get("materials", [])
+		var idx := int(m.index)
+		return UnifiedMaterial.from_rgba(pack, mats[idx]) if idx >= 0 and idx < mats.size() else null
+	var tkey := "%s/%s" % [shape.get("pack"), shape.get("texset")] if m.kind == "tex" else ""
+	var pal := _tex_palette(int(m.index)) if m.kind == "tex" else palette_name
+	return UnifiedMaterial.from_palette(pal, m, tkey, texset)
 
 
 ## The skin's material for material `idx` (texture_overrides), null when the skin leaves it alone.
@@ -232,6 +252,10 @@ func _override_material(idx: int) -> Material:
 	if not texture_overrides.has(file):
 		return null
 	var pack: String = shape.get("pack", Assets.default_pack)
+	if RenderUnified.enabled():
+		var um := UnifiedMaterial.from_texture(pack, str(texture_overrides[file]), int(md.get("flags", 0)))
+		if um:
+			return um
 	var key := "%s/%s" % [pack, texture_overrides[file]]
 	if not _rgba_cache.has(key):
 		var mat := StandardMaterial3D.new()

@@ -7,8 +7,10 @@ extends Node3D
 ##   3. LAN: a puppet's damage and weapon triggers follow the host's snapshots (BattleNetSync,
 ##      HercSnapshots), and the damage block is only resent around changes;
 ##   4. the plain HUD (a flyer) shows its target's model too.
-## Needs a window (rendering); --shots=<dir> also saves the cockpit / HUD screenshots:
-##   godot --audio-driver Dummy --path game res://tests/target_view_check.tscn [-- --shots=<dir>]
+## The picture checks (coverage, screenshots) need a window; --headless runs everything else (the render waits use
+## plain frames there, since a headless renderer never draws) and says which checks it skipped.
+##   godot --headless --audio-driver Dummy --path game res://tests/target_view_check.tscn
+##   godot --audio-driver Dummy --path game res://tests/target_view_check.tscn [-- --shots=<dir>]   (window: all checks)
 
 const HOST := "es1:RAPTOR"
 const NATIVE_TARGET := "es1:APOLLO"
@@ -27,12 +29,16 @@ const THREE_SPACE_LEFT_LEG := [7, 9, 11]
 var _failures := 0
 var _shots_dir := ""
 var _layer: CanvasLayer
+## No window: nothing is drawn, so the picture checks are skipped.
+var _headless := DisplayServer.get_name() == "headless"
 
 
 func _ready() -> void:
 	for a in OS.get_cmdline_user_args():
-		if a.begins_with("--shots="):
+		if a.begins_with("--shots=") and not _headless:
 			_shots_dir = a.substr(8)
+	if _headless:
+		print("  (headless: the picture coverage checks and the screenshots are skipped)")
 	_layer = CanvasLayer.new()
 	add_child(_layer)
 	var cam := Camera3D.new()
@@ -84,7 +90,10 @@ func _spawn(id: String, at: Vector3, flyer: bool) -> Herc:
 
 func _settle() -> void:
 	for i in SETTLE_FRAMES:
-		await RenderingServer.frame_post_draw
+		if _headless:
+			await get_tree().process_frame   # frame_post_draw never fires without a window
+		else:
+			await RenderingServer.frame_post_draw
 
 
 # ------------------------------------------------------------------ levels and native art
@@ -139,8 +148,9 @@ func _check_foreign(cockpit: CockpitDisplay, host: Herc, id: String) -> void:
 	img.follow(t, 1.0)
 	_expect(img.view.has_target(), "%s: target view follows it" % id)
 	await _settle()
-	var coverage := _coverage(img.view.get_texture().get_image())
-	_expect(coverage >= MIN_COVERAGE, "%s renders in the picture area (%.0f %% covered)" % [id, coverage * 100.0])
+	if not _headless:
+		var coverage := _coverage(img.view.get_texture().get_image())
+		_expect(coverage >= MIN_COVERAGE, "%s renders in the picture area (%.0f %% covered)" % [id, coverage * 100.0])
 	_check_tint(img.view, t, id)
 	host.target = null
 	img.follow(null, 1.0)
@@ -237,8 +247,9 @@ func _check_hud(cam: Camera3D) -> void:
 	await get_tree().create_timer(0.3).timeout
 	await _settle()
 	_expect(hud.target_view.has_target(), "plain HUD follows the flyer's target")
-	var coverage := _coverage(hud.target_view.get_texture().get_image())
-	_expect(coverage >= MIN_COVERAGE, "plain HUD renders the target (%.0f %% covered)" % [coverage * 100.0])
+	if not _headless:
+		var coverage := _coverage(hud.target_view.get_texture().get_image())
+		_expect(coverage >= MIN_COVERAGE, "plain HUD renders the target (%.0f %% covered)" % [coverage * 100.0])
 	if _shots_dir != "":
 		_save("target_view_hud_flyer.png")
 	hud.queue_free()

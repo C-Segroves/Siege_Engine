@@ -20,15 +20,15 @@ var saga: Saga = null             # series campaign (ES1 -> ES2 -> Starsiege) wh
 const ES1_PACK := "es1"
 
 var coop := false
+## Classic campaign: only weapons the campaign's own game has released so far, earlier games' weapons, similar
+## Battledrome weapons and basic infantry weapons (CampaignAvailability "classic"). Kept in the save.
+var classic := false
 ## The pilot (and save) name the campaign is flown under.
 var pilot_name := SaveGames.DEFAULT_PILOT
 var last_result := {}            # {success, code, vars, mission, text}
 var last_mission := {}           # the resolved mission dict of the battle just played
 ## Message for the front end's status line after a battle was left (e.g. "The host left the match.").
 var front_end_status := ""
-## The launcher page to open after a battle instead of the menu ("" = the usual first page): the extraction mode
-## returns to its stash screen.
-var launcher_page := ""
 
 
 func _ready() -> void:
@@ -65,6 +65,7 @@ var launcher_home := "res://library.tscn"
 func start_campaign(battle_set := 0, p_coop := false) -> void:
 	saga = null
 	campaign = Campaign.start(battle_set)
+	classic = false
 	coop = p_coop
 	last_result = {}
 	SaveGames.reset_clock(0.0)
@@ -72,11 +73,12 @@ func start_campaign(battle_set := 0, p_coop := false) -> void:
 
 ## New campaign flown by `pilot`: `choice` is a MatchFlow.make_new_campaign_choices() entry (the saga, or
 ## one game's campaign); written to the pilot's autosave at once.
-func start_new_campaign(choice: Dictionary, pilot: String) -> void:
+func start_new_campaign(choice: Dictionary, pilot: String, p_classic := false) -> void:
 	if bool(choice.get("saga", false)):
 		start_saga()
 	else:
 		start_stage_campaign(str(choice.pack), str(choice.get("variant", "")))
+	classic = p_classic
 	pilot_name = pilot if pilot.strip_edges() != "" else SaveGames.DEFAULT_PILOT
 	autosave()
 
@@ -89,6 +91,7 @@ func start_stage_campaign(pack: String, variant := "") -> void:
 		return
 	saga = null
 	campaign = load(Saga.PROVIDERS[pack]).start(variant)
+	classic = false
 	coop = false
 	last_result = {}
 	last_mission = {}
@@ -106,6 +109,7 @@ func start_saga() -> void:
 	saga = Saga.start_new()
 	campaign = saga.campaign
 	coop = false
+	classic = false
 	last_result = {}
 	SaveGames.reset_clock(0.0)
 
@@ -172,11 +176,14 @@ func mission_herc() -> Dictionary:
 ## What the campaign lets the player build and arm now (CampaignAvailability context, its stock the
 ## garage's armory); {} = no limits (no campaign, or a provider without availability).
 func availability_context() -> Dictionary:
+	var ctx := {}
 	if saga != null:
-		return saga.availability_context()
-	if campaign != null and campaign.has_method("availability_context"):
-		return campaign.availability_context()
-	return {}
+		ctx = saga.availability_context()
+	elif campaign != null and campaign.has_method("availability_context"):
+		ctx = campaign.availability_context()
+	if classic and CampaignAvailability.is_restricted(ctx):
+		ctx["classic"] = true
+	return ctx
 
 
 ## The running campaign's garage (null when no campaign runs).
@@ -263,7 +270,7 @@ func make_save(kind: String, save_name: String) -> Dictionary:
 	if saga == null and campaign == null:
 		return {}
 	return SaveGames.make_save(campaign, saga, {"pilot": pilot_name, "playtime": SaveGames.clock_seconds(),
-		"coop": coop, "kind": kind, "name": save_name})
+		"coop": coop, "kind": kind, "name": save_name, "classic": classic})
 
 
 ## The running campaign's save as an autosave ({} when none runs).
@@ -338,6 +345,7 @@ func apply_save_dict(d: Dictionary) -> void:
 		var pack := str(d.get("pack", guess_pack(d.campaign)))
 		campaign = load(Saga.PROVIDERS.get(pack, Saga.PROVIDERS.es1)).restore(d.campaign)
 	coop = d.get("coop", false)
+	classic = bool(d.get("classic", false))
 	pilot_name = str(d.get("pilot", pilot_name))
 	SaveGames.reset_clock(float(d.get("playtime", 0.0)))
 

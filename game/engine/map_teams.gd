@@ -65,12 +65,10 @@ static func make_team_color(i: int) -> Color:
 	return COLOR_BY_NAME[DEFAULT_COLOR_NAMES[i]]
 
 
-## Display name of team `i`: the map's own team name when `map_config` names one (Starsiege "teams"),
-## else the default colour name ("Red", "Blue" ...).
-static func make_team_name(i: int, map_config: Dictionary = {}) -> String:
-	var named = load_map_data(map_config).get("teams", {}) if not map_config.is_empty() else {}
-	if named is Dictionary and named.has(str(i)):
-		return str(named[str(i)]).capitalize()
+## Display name of team `i`: always the colour name of make_team_color(i) ("Red" is red), so lobby, HUD,
+## scoreboard and kill text agree. A map's own team names (map.json "teams") are not used: they follow the
+## mission's team records, not the colours the engine paints. `map_config` is kept for callers' signature.
+static func make_team_name(i: int, _map_config: Dictionary = {}) -> String:
 	if i >= 0 and i < DEFAULT_COLOR_NAMES.size():
 		return str(DEFAULT_COLOR_NAMES[i]).capitalize()
 	return "Team %d" % (i + 1)

@@ -27,7 +27,7 @@ func _run() -> void:
 	await _shoot_launcher("load", func(l: Launcher) -> void: l.go("saves", {"mode": "load"}))
 	await _shoot_launcher("save", func(l: Launcher) -> void:
 		Session.load_save(SaveGames.make_autosave_id("es2", PILOT))
-		l.go("saves", {"mode": "save", "return_to": "briefing"}))
+		l.go("saves", {"mode": "save", "return_to": "lobby"}))
 	for pack in ["es1", "es2"]:
 		await _shoot_launcher("killed_%s" % pack, func(l: Launcher) -> void:
 			Session.start_new_campaign({"pack": pack, "variant": ""}, PILOT)

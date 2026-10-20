@@ -64,3 +64,15 @@ GODOT_RELEASE_URL="https://github.com/godotengine/godot/releases/download"
 # Optional SHA-512 pins. Empty = check the downloads against the release's own SHA512-SUMS.txt.
 GODOT_SHA512=""
 TEMPLATES_SHA512=""
+
+# ------------------------------------------------------------------ game server (optional)
+# "yes" also runs the dedicated game server on this machine (systemd service siege-server) and publishes it through
+# the same nginx page: browsers join wss://<this page>/ws, the match list is <this page>/matches, desktop players join
+# ws://<machine>:<HTTP_PORT>/ws. This is the LAN profile: it serves the web build and game data too. For a public
+# server use the container's "public" profile instead (docs/SERVER_DEPLOY.md): it never serves game data.
+GAME_SERVER="no"
+# Settings file (name, map, mode, bots, password, ...). Created from deploy/server.json.example on the first run.
+GAME_SERVER_CONFIG="/etc/siege-engine/server.json"
+# Local ports of the game (WebSocket) and of the match list; nginx forwards to them. Not opened to the network.
+GAME_SERVER_PORT="47700"
+GAME_SERVER_LIST_PORT="47702"

@@ -27,6 +27,9 @@ var by_peer := {}
 var mine: Array = []
 var response: FlagResponse
 var _generator_of := {}      # host: task id -> TribesBaseObject
+## Host: task key ("<peer>:<task id>") -> the task's Objective (KillCount, Destroy or Carry); a void task has none.
+var _objectives := {}
+var _world := RaidTaskWorld.new()
 
 
 func _init(p_director: ExtractionDirector) -> void:
@@ -93,6 +96,7 @@ func start_host(faction_areas: Dictionary) -> void:
 		for t in kit.get("tasks", []).slice(0, RaidTaskBoard.make_max_picked()):
 			if t is Dictionary:
 				states.append(_bind(t.duplicate(), faction_areas))
+				_add_objective(int(peer), states.back())
 		by_peer[int(peer)] = states
 		_send_state(int(peer))
 
@@ -192,6 +196,36 @@ static func _distance_to_areas(p: Vector3, areas: Array) -> float:
 
 # ------------------------------------------------------------------ host: progress
 
+static func make_key(peer: int, task: Dictionary) -> String:
+	return "%d:%s" % [peer, str(task.id)]
+
+
+## The objective a bound task is judged by: kill N (KillCount), destroy the generator (Destroy), carry the flag out
+## (Carry; anywhere, because the payout happens at the extraction).
+func _add_objective(peer: int, task: Dictionary) -> void:
+	if bool(task.void):
+		return
+	var key := make_key(peer, task)
+	var text := RaidTaskBoard.make_text(task)
+	match str(task.kind):
+		RaidTaskBoard.KIND_GENERATOR:
+			_objectives[key] = DestroyObjective.new(key, text, [key] as Array[String])
+		RaidTaskBoard.KIND_FLAG:
+			_objectives[key] = CarryObjective.new(key, text, FLAG_ITEM, AreaShape.make_circle(Vector3.ZERO, INF))
+		_:
+			_objectives[key] = KillCountObjective.new(key, text, key, int(task.count))
+
+
+## Ticks the task's objective against the raid facts; the task is done once its objective is.
+func _apply_objective(peer: int, task: Dictionary) -> void:
+	var objective: Objective = _objectives.get(make_key(peer, task))
+	if objective != null:
+		objective.apply_tick(_world, 0.0)
+		var was_done := bool(task.done)
+		task.done = objective.is_done()
+		if task.done and not was_done:
+			director.callins.points.apply_task_done(peer, task)
+
 ## Host (ExtractionDirector._on_destroyed): `h` was destroyed by `killer`.
 func on_unit_destroyed(h: Herc, killer: Node) -> void:
 	var peer := _peer_of_killer(killer)
@@ -202,7 +236,8 @@ func on_unit_destroyed(h: Herc, killer: Node) -> void:
 		if not task.done and not task.void and str(task.kind) in [RaidTaskBoard.KIND_KILL_INFANTRY, RaidTaskBoard.KIND_KILL_VEHICLES] \
 				and _is_task_target(task, h):
 			task.progress = int(task.progress) + 1
-			task.done = int(task.progress) >= int(task.count)
+			_world.kills[make_key(peer, task)] = int(task.progress)
+			_apply_objective(peer, task)
 			changed = true
 	if changed:
 		_send_state(peer)
@@ -210,18 +245,20 @@ func on_unit_destroyed(h: Herc, killer: Node) -> void:
 
 ## The raid player whose soldier is `killer` or who sits in the vehicle `killer` (0: none).
 func _peer_of_killer(killer: Node) -> int:
-	for peer in director.make_raid_peers():
-		if killer != null and (director.battle.occupancy.soldier_of(int(peer)) == killer or director.battle.occupancy.vehicle_of(int(peer)) == killer):
-			return int(peer)
-	return 0
+	return director.peer_of_unit(killer)
 
 
-func _on_base_object_destroyed(obj: Node, _killer: Node) -> void:
+func _on_base_object_destroyed(obj: Node, killer: Node) -> void:
+	if director.site_spawner != null and obj is Node3D:
+		director.site_spawner.apply_object_destroyed((obj as Node3D).global_position)
+	if str(obj.get("kind")) == "generator":
+		director.callins.points.apply_generator_destroyed(killer)
 	for peer in by_peer:
 		for task in by_peer[peer]:
 			if _generator_of.get(str(task.id)) == obj and not task.done:
 				task.progress = 1
-				task.done = true
+				_world.destroyed[make_key(int(peer), task)] = true
+				_apply_objective(int(peer), task)
 				_send_state(int(peer))
 
 
@@ -236,7 +273,9 @@ func make_payout(peer: int, stacks: Array) -> int:
 		if str(task.kind) == RaidTaskBoard.KIND_FLAG and not task.void and not task.done and flags > 0:
 			flags -= 1
 			task.progress = 1
-			task.done = true
+			_world.flags_carried = 1
+			_apply_objective(peer, task)
+			_world.flags_carried = 0
 		if task.done and not task.void:
 			total += int(task.reward)
 	_send_state(peer)

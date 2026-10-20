@@ -550,7 +550,7 @@ def _convert(game, infos, out, job):
     hb = Heartbeat()
     try:
         for n, (p, _info) in infos.items():
-            discs[n] = siege_iso.Disc(p)
+            discs[n] = siege_iso.open_source(p)
         ctx = Context(game, discs, job['work'], job['staging'], job['log_path'])
         seed_pack_meta(ctx)
         steps = game.steps(ctx) + [cd_audio_step(ctx)]
@@ -768,7 +768,7 @@ def cmd_identify_release(args):
     try:
         meta = json.load(open(meta_path, encoding='utf-8'))
         game, info = identify_disc(iso, meta.get('game', os.path.basename(pack_dir)))
-        if meta.get('game', os.path.basename(pack_dir)) != game.GAME['game']:   # older pack.json: no "game"
+        if meta.get('game', os.path.basename(pack_dir)) not in (game.GAME['game'], game.GAME['pack']):   # older pack.json: no "game", or the pack name (tools/tv_import.py)
             raise ImportFailed('%s is a %s disc, but %s holds %s.' % (
                 os.path.basename(iso), game.GAME['name'], pack_dir, meta.get('name', meta.get('game'))))
         release = _make_release_in_scratch(game, iso, info)
@@ -794,7 +794,7 @@ def _make_release_in_scratch(game, iso, info):
     import siege_iso
     pack = game.GAME['pack']
     work, staging = _prepare_work(None, pack)
-    disc = siege_iso.Disc(iso)
+    disc = siege_iso.open_source(iso)
     try:
         ctx = Context(game, {info['disc']: disc}, work, staging, os.devnull)
         PROTO.emit({'stage': 'identify', 'progress': 0.1, 'message': 'Reading the %s executable...' % game.GAME['name']})

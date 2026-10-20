@@ -23,10 +23,15 @@ const DESTROY_OBJECTIVES := {"skirmish": "Skirmish: destroy all Cybrids.", "coop
 const EXTRACTION_OBJECTIVE := "Extraction raid: loot what you can (%s), call an exfil transport (%s) and get out alive. Inventory: %s."
 const SQUAD_WINNER := "Your squad"
 const CYBRID_WINNER := "The Cybrids"
+## Verdict codes of the match rules (the match end carries the text and the winner; the codes only name the rule).
+const CODE_FRAG_LIMIT := 1
+const CODE_CYBRIDS_DESTROYED := 2
+const CODE_SQUAD_DESTROYED := 3
 
 var battle: Battle
 var _respawn_queue := []            # [net_id, seconds left]
 var salvage := BattleSalvage.new()
+var _score_world := MissionWorld.new()   # the frag limit reads its points from the objective's source, not from a world
 
 
 func _init(p_battle: Battle) -> void:
@@ -56,14 +61,18 @@ func on_destroyed(h: Herc, killer: Node) -> void:
 func _check_frag_limit(killer: Node) -> void:
 	if not (killer is Herc):
 		return
-	var limit := frag_limit(battle.config)
-	if not plays_in_teams(battle.config):
-		if killer.kills >= limit:
-			battle.end_match("%s wins the match!" % killer.display_name, {}, killer.display_name)
+	var by_team := plays_in_teams(battle.config)
+	var objective := ScoreObjective.new("frag_limit", "", killer.team if by_team else killer.display_name, frag_limit(battle.config))
+	if by_team:
+		objective.source = func(team: int) -> float: return make_team_kills(battle.vehicles.values(), team)
+	else:
+		objective.source = func(_pilot: String) -> float: return killer.kills
+	objective.apply_tick(_score_world, 0.0)
+	if not objective.is_done():
 		return
-	if make_team_kills(battle.vehicles.values(), killer.team) >= limit:
-		var team_name := MapTeams.make_team_name(killer.team, battle.config)
-		battle.end_match(TEAM_WIN % team_name, {}, team_name)
+	var winner: String = MapTeams.make_team_name(killer.team, battle.config) if by_team else killer.display_name
+	var verdict := MissionVerdict.make_win(CODE_FRAG_LIMIT, TEAM_WIN % winner if by_team else "%s wins the match!" % winner)
+	battle.end_match(verdict.text, {}, winner)
 
 
 ## True when the match is played in teams (versus "teams", or a team count chosen on the host screen).
@@ -112,16 +121,24 @@ static func make_objective_text(config: Dictionary) -> String:
 	return str(DESTROY_OBJECTIVES.get(mode, DESTROY_OBJECTIVES.skirmish))
 
 
-func _check_coop_end() -> void:
+## The co-op rule: the verdict when one side is gone (a win when the Cybrids are), else null.
+func _make_coop_verdict() -> MissionVerdict:
 	var alive_teams := {}
 	for id in battle.vehicles:
 		var v: Herc = battle.vehicles[id]
 		if v.alive and not (v is Infantry):   # soldiers always respawn: a squad is its vehicles
 			alive_teams[v.team] = true
 	if not alive_teams.has(CYBRID_TEAM):
-		battle.end_match("All Cybrids destroyed. Mission complete.", {}, SQUAD_WINNER)
-	elif not alive_teams.has(PLAYER_TEAM):
-		battle.end_match("Your squad has been destroyed. Mission failed.", {}, CYBRID_WINNER)
+		return MissionVerdict.make_win(CODE_CYBRIDS_DESTROYED, "All Cybrids destroyed. Mission complete.")
+	if not alive_teams.has(PLAYER_TEAM):
+		return MissionVerdict.make_loss(CODE_SQUAD_DESTROYED, "Your squad has been destroyed. Mission failed.")
+	return null
+
+
+func _check_coop_end() -> void:
+	var verdict := _make_coop_verdict()
+	if verdict != null:
+		battle.end_match(verdict.text, {}, SQUAD_WINNER if verdict.success else CYBRID_WINNER)
 
 
 ## Counts down the respawn queue and respawns the Hercs whose time is up.

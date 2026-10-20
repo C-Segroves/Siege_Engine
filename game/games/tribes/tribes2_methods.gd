@@ -72,6 +72,8 @@ func _register_shapebase() -> void:
 	_on(["shapebase::setdamagestate"], func(_n, a): rt.set_damage_state(_id(a), _s(a, 1)); return "")
 	_on(["shapebase::getvelocity"], func(_n, a): return rt.transforms.make_velocity_string(_id(a)))
 	_on(["shapebase::setvelocity"], func(_n, a): rt.transforms.apply_velocity(_id(a), DarkstarStdLib.make_vector(_s(a, 1))); return "")
+	_on(["shapebase::setcloaked"], func(_n, a): _set_cloaked(_id(a), DarkstarScript.truthy(_arg(a, 1, 1))); return "")
+	_on(["shapebase::iscloaked"], func(_n, a): return 1 if _is_cloaked(_id(a)) else 0)
 	_on(["shapebase::mountobject"], func(_n, a): actors.mount(_id(a), sim.resolve(_arg(a, 1))); return "")
 	_on(["shapebase::unmount"], func(_n, a): actors.unmount(_id(a)); return "")
 	_on(["player::setarmor"], func(_n, a): actors.set_armor(_id(a), _s(a, 1)); return "")
@@ -157,3 +159,17 @@ func _client_killed(_n: String, a: Array):
 	if actors.is_ai(victim):
 		rt.vm.call_method(_id(a), "onaikilled", a.slice(1))
 	return ""
+
+
+## Player.setCloaked(on): the script-driven cloak (respawn, station, new vehicle: scripts/defaultGame.cs, station.cs);
+## an object that is no soldier has none.
+func _set_cloaked(id: int, on: bool) -> void:
+	var s := actors.soldier_of(id)
+	if s != null:
+		InfantryPack.apply_cloak_profile(s)
+		s.cloak.apply_scripted(on)
+
+
+func _is_cloaked(id: int) -> bool:
+	var s := actors.soldier_of(id)
+	return s != null and s.cloak.is_cloaked()

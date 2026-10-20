@@ -7,7 +7,7 @@ extends RefCounted
 ## in-memory file system before the engine starts; mount_packs() mounts them so every pack appears
 ## under DATA_ROOT, and Assets reads them there with the same FileAccess / DirAccess calls as on
 ## desktop. Discs cannot be imported, folders cannot be browsed and LAN play (ENet, UDP discovery)
-## does not exist in a browser. Setup: docs/WEB_DEPLOY.md.
+## does not exist in a browser: it joins a game server over WebSocket (Net.join with a ws:// or wss:// address). Setup: docs/WEB_DEPLOY.md.
 
 ## Where the page shell writes the downloaded pack files (PACK_DIR in game/web/siege_shell.html).
 const PACK_DIR := "/siege_packs"
@@ -15,7 +15,7 @@ const PACK_DIR := "/siege_packs"
 const DATA_ROOT := "res://gamedata"
 
 const NO_IMPORT_TEXT := "Browser version: discs are imported on the server that hosts this page."
-const NO_LAN_TEXT := "LAN multiplayer needs the desktop app; the browser version plays solo."
+const NO_LAN_TEXT := "Hosting needs the desktop app; the browser version plays solo or joins a game server."
 const NO_DATA_FOLDER_TEXT := "Browser version: game data is downloaded from the server."
 const NO_REMOVE_TEXT := "Browser version: packs are managed on the server."
 

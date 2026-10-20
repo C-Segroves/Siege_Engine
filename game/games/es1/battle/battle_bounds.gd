@@ -28,6 +28,9 @@ const WARNING_SOUND := "target_unlock"
 ## A vehicle is left alone this long after it first appears or respawns: missions and spawners may still be
 ## moving it to its start (a Starsiege player Herc is built at the origin and placed by the mission script).
 const SETTLE_SECONDS := 2.0
+## A dedicated server applies the rules to each unit every this many ticks (with the time they covered): the world-floor
+## test walks every building box.
+const SERVER_STRIDE := 4
 
 ## Area rules (MissionKinds.make_area_rule): Tribes' warnings and damage (matches, Starsiege missions), warnings only
 ## while the mission's own rules decide (Earthsiege 1 / 2: the mission ends), or none (Tribes missions: their
@@ -43,6 +46,7 @@ var area_rule := AREA_DAMAGE
 var checks_area: bool:
 	get: return area_rule != AREA_NONE
 var _out_seconds := {}     # net_id -> seconds outside
+var _ticks := 0
 var _settle := {}          # net_id -> seconds left before the rules apply (refilled when it is dead)
 
 
@@ -55,13 +59,15 @@ func _init(p_battle: Battle, p_bounds: MapBounds) -> void:
 func _physics_process(delta: float) -> void:
 	if not battle.multiplayer.is_server() or battle.is_over():
 		return
+	_ticks += 1
+	var stride := SERVER_STRIDE if ServerProfile.is_collision_only() else 1   # a server checks each unit every few ticks
 	for v in battle.vehicles.values():
 		if not is_instance_valid(v) or v.is_puppet:
 			continue
 		if not v.alive:
 			_settle[v.net_id] = SETTLE_SECONDS
-		elif _is_settled(v, delta) and v.is_in_group("vehicles"):
-			_apply_rules(v, delta)
+		elif _is_settled(v, delta) and v.is_in_group("vehicles") and (v.net_id + _ticks) % stride == 0:
+			_apply_rules(v, delta * stride)
 
 
 ## Counts down `v`'s settling time (SETTLE_SECONDS); true once it is over.

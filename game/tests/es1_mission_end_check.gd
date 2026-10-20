@@ -21,7 +21,7 @@ const END_WAIT_FRAMES := 60
 const RESCUE_PILOT := 4
 const RESCUE_WAVE_GROUPS := [4, 5, 6]
 const MAX_KILL_ROUNDS := 20
-const CASES := 12
+const CASES := 17
 const ESCORT_MISSIONS := ["B0_C2_00", "B0_C2_11", "B0_C4_00", "B0_C4_50", "B0_C6_2A"]
 ## Sim seconds an escort may take (the slowest original route is about 520 s at the escort's patrol speed).
 const ESCORT_TIMEOUT := 900.0
@@ -53,9 +53,19 @@ func _ready() -> void:
 	await _check_coop_destroy_all()
 	await _check_recon_flag()
 	await _check_datalink_flag()
-	for name in ESCORT_MISSIONS:
-		await _check_escort(name)
-	_expect(_cases_done == CASES, "all %d cases ran to the end (%d)" % [CASES, _cases_done])
+	await _check_datalink_interrupt()
+	for types in [ES1WinRules.NAV_TYPES, ES1WinRules.DESTROY_TYPES]:
+		var name := _first_mission_of_types(types)
+		_expect(name != "", "a mission of type %s exists" % [types])
+		if name != "":
+			await _check_type_won(name, types)
+			await _check_player_lost(name)
+	var skip_escorts := OS.get_cmdline_user_args().has("--skip-escorts")   # quick run: the escorts take minutes
+	if not skip_escorts:
+		for name in ESCORT_MISSIONS:
+			await _check_escort(name)
+	var cases := CASES - (ESCORT_MISSIONS.size() if skip_escorts else 0)
+	_expect(_cases_done == cases, "all %d cases ran to the end (%d)" % [cases, _cases_done])
 	print("es1_mission_end_check: %s (%d failures)" % ["OK" if _failures == 0 else "FAILED", _failures])
 	get_tree().quit(1 if _failures > 0 else 0)
 
@@ -218,6 +228,14 @@ func _check_coop_destroy_all() -> void:
 			second = v
 	_expect(second != null, "the second pilot's Herc is spawned")
 	var walker: Herc = second if second else battle.player
+	# recon is won on its flag (a player targets the order target) plus safety, not by clearing the area
+	_expect(not rt.win_rules.objective_met(), "not met before the order target is identified")
+	var wanted := rt.target_nodes(rt.win_rules.squad_target())
+	if not wanted.is_empty():
+		battle.player.target = wanted[0]
+	for i in 30:
+		await get_tree().physics_frame
+	_expect(rt.win_rules.recon_flag, "the flag latches before the target is destroyed")
 	for round in COOP_TIMEOUT_ROUNDS:
 		if not battle.get_meta("result").is_empty():
 			break
@@ -240,6 +258,8 @@ func _check_recon_flag() -> void:
 	print("B0_C0_1A recon: target the squad's order target:")
 	var battle := await _start("B0_C0_1A")
 	var rt: MissionRuntime = battle.mission
+	var log := []
+	_record_messages(battle, log)
 	var wanted := rt.target_nodes(rt.win_rules.squad_target())
 	_expect(not wanted.is_empty(), "the order target is on the map")
 	_expect(not rt.win_rules.objective_met(), "not met before the target is identified")
@@ -248,31 +268,168 @@ func _check_recon_flag() -> void:
 	for i in 30:
 		await get_tree().physics_frame
 	_expect(rt.win_rules.recon_flag and rt.win_rules.objective_met(), "targeting it sets the recon flag and meets the objective")
+	_expect(_all_texts(log).has("Target identified."), "the identification is announced")
 	await _end(battle)
 
 
+## Holds the player `standoff` metres from the link, facing it (or turned `turn` radians away), still.
+func _hold_at_link(battle: Battle, link: Node3D, standoff: float, turn := 0.0) -> void:
+	var p: Herc = battle.player
+	_protect_player(battle)
+	_protect_structure(link)   # the Cybrids' fire at the player also lands on their own listening post
+	p.global_position = link.global_position + Vector3(0, 2.0, standoff)
+	p.velocity = Vector3.ZERO
+	p.throttle = 0.0
+	p.look_at(Vector3(link.global_position.x, p.global_position.y, link.global_position.z))
+	p.rotate_y(turn)
+	p.torso_yaw = 0.0
+
+
+## System-channel texts the battle shows from now on, as [physics frame, text].
+func _record_messages(battle: Battle, into: Array) -> void:
+	battle.overlay.chat_log.added.connect(func(e: Dictionary):
+		if e.get("channel") == ChatChannels.SYSTEM:
+			into.append([Engine.get_physics_frames(), str(e.get("text"))]))
+
+
+## The datalink texts (stages and abort) of a message log, in order.
+func _all_texts(log: Array) -> Array:
+	return log.map(func(e): return e[1])
+
+
+func _texts(log: Array) -> Array:
+	var link_texts: Array = ES1WinRules.DATALINK_TEXTS + [ES1WinRules.DATALINK_ABORT_TEXT]
+	return log.map(func(e): return e[1]).filter(func(t): return t in link_texts)
+
+
 func _check_datalink_flag() -> void:
-	print("B0_C0_3A datalink: stand at the listening post, facing it:")
+	print("B0_C0_3A datalink (DBSIM 0x15f80): stages, messages, win only on the link plus safety:")
 	var battle := await _start("B0_C0_3A")
 	var rt: MissionRuntime = battle.mission
+	var log := []
+	_record_messages(battle, log)
 	var link: Node3D = rt.win_rules._datalink_node()
 	_expect(link != null, "the datalink target is on the map")
 	_expect(not rt.win_rules.objective_met(), "not met before the link")
+	var first := Engine.get_physics_frames()
 	var frames := 0
-	var max_frames := int(DATALINK_WAIT * Engine.physics_ticks_per_second)
-	while link != null and not rt.win_rules.datalink_flag and frames < max_frames:
+	while link != null and not rt.win_rules.datalink_flag and frames < int(DATALINK_WAIT * Engine.physics_ticks_per_second):
 		frames += 1
-		_protect_player(battle)
-		_protect_structure(link)   # the Cybrids' fire at the player also lands on their own listening post
-		var p: Herc = battle.player
-		var back := Vector3(0, 0, DATALINK_STANDOFF)
-		p.global_position = link.global_position + back + Vector3.UP * 2.0
-		p.velocity = Vector3.ZERO
-		p.throttle = 0.0
-		p.look_at(Vector3(link.global_position.x, p.global_position.y, link.global_position.z))
-		p.torso_yaw = 0.0
+		_hold_at_link(battle, link, DATALINK_STANDOFF)
 		await get_tree().physics_frame
-	_expect(rt.win_rules.datalink_flag and rt.win_rules.objective_met(), "the link completes after %.1f s of game time" % (float(frames) / Engine.physics_ticks_per_second))
+	var texts := _texts(log).filter(func(t): return t in ES1WinRules.DATALINK_TEXTS)
+	_expect(texts == ES1WinRules.DATALINK_TEXTS, "messages in order: %s" % [texts])
+	var times := log.filter(func(e): return e[1] in ES1WinRules.DATALINK_TEXTS).map(func(e): return float(e[0] - first) / Engine.physics_ticks_per_second)
+	# the rules tick runs a few times a second, so each stage lands within a tick of 0 / 5 / 10 s
+	_expect(times.size() == 4 and absf(times[1] - times[0] - 5.0) < 0.6 and absf(times[2] - times[0] - 10.0) < 0.8 and times[3] - times[2] < 0.6,
+		"stage times 0 / 5 / 10 s, completion right after: %s" % [times])
+	_expect(rt.win_rules.datalink_flag and rt.win_rules.objective_met(), "the link sets the flag and meets the objective")
+	_expect(not _texts(log).has(ES1WinRules.DATALINK_ABORT_TEXT), "no abort message while holding the position")
+	# the mission ends only with the players safe (status 9 vs 10)
+	for i in END_WAIT_FRAMES:
+		_hold_at_link(battle, link, DATALINK_STANDOFF)
+		await get_tree().physics_frame
+	var result: Dictionary = battle.get_meta("result")
+	if rt.win_rules.players_safe():
+		_expect(bool(result.get("success", false)), "link done and safe: the mission is won")
+	else:
+		_expect(result.is_empty(), "link done but an enemy is close: the mission goes on")
+		await _clear_waves(battle)
+		result = await _wait_end(battle)
+		_expect(bool(result.get("success", false)), "once the players are safe the mission is won")
+	await _end(battle)
+
+
+func _check_datalink_interrupt() -> void:
+	print("B0_C0_3A datalink interrupted: turning away or leaving restarts from stage 0:")
+	var battle := await _start("B0_C0_3A")
+	var rt: MissionRuntime = battle.mission
+	var log := []
+	_record_messages(battle, log)
+	var link: Node3D = rt.win_rules._datalink_node()
+	var ticks := Engine.physics_ticks_per_second
+	for i in int(7.0 * ticks):
+		_hold_at_link(battle, link, DATALINK_STANDOFF)
+		await get_tree().physics_frame
+	_expect(_texts(log) == ES1WinRules.DATALINK_TEXTS.slice(0, 2), "after 7 s stages 0 and 1 have spoken: %s" % [_texts(log)])
+	for i in int(1.0 * ticks):   # facing away (beyond 45 degrees)
+		_hold_at_link(battle, link, DATALINK_STANDOFF, PI)
+		await get_tree().physics_frame
+	_expect(_texts(log).back() == ES1WinRules.DATALINK_ABORT_TEXT, "turning away shows the abort message")
+	_expect(_texts(log).count(ES1WinRules.DATALINK_ABORT_TEXT) == 1 and rt.win_rules._datalink_stage == 0, "the link is reset, once")
+	var again := Engine.get_physics_frames()
+	var frames := 0
+	while not rt.win_rules.datalink_flag and frames < int(DATALINK_WAIT * ticks):
+		frames += 1
+		_hold_at_link(battle, link, DATALINK_STANDOFF)
+		await get_tree().physics_frame
+	_expect(rt.win_rules.datalink_flag and float(frames) / ticks > 9.5, "it restarts from zero: %.1f s again" % (float(frames) / ticks))
+	_expect(_texts(log).count(ES1WinRules.DATALINK_TEXTS[0]) == 2, "stage 0 speaks again")
+	await _end(battle)
+
+
+# ------------------------------------------------------------------ nav and destroy types
+
+func _first_mission_of_types(types: Array) -> String:
+	var idx = JSON.parse_string(FileAccess.get_file_as_string("res://../gamedata/es1/missions/index.json"))
+	for n in idx.missions:
+		var m: Dictionary = MissionCompiler.load_mission(n)
+		if int(m.get("header", {}).get("mission_type", -1)) in types:
+			return n
+	return ""
+
+
+## Nav types: the player visits every nav point; destroy types: the order target is destroyed. Either way the mission
+## is won only once the players are safe, so the waves are cleared too.
+func _check_type_won(mission_name: String, types: Array) -> void:
+	print("%s (types %s) objective met, players safe:" % [mission_name, types])
+	var battle := await _start(mission_name)
+	var rt: MissionRuntime = battle.mission
+	_expect(not rt.win_rules.objective_met(), "not met at the start")
+	_expect(battle.get_meta("result").is_empty(), "the mission does not end by itself")
+	if types == ES1WinRules.NAV_TYPES:
+		for i in rt.nav_points.size() + 1:
+			if rt.nav_index < rt.nav_points.size():
+				_protect_player(battle)
+				battle.player.global_position = rt.nav_points[rt.nav_index] + Vector3.UP * 2.0
+			for f in COOP_ROUND_FRAMES:
+				await get_tree().physics_frame
+		_expect(rt.nav_index >= rt.nav_points.size(), "every nav point was reached")
+	else:
+		for n in rt.target_nodes(rt.win_rules.squad_target()):
+			if n is Structure:
+				n.destroy(battle.player)
+			else:
+				await _destroy(n)
+		for f in COOP_ROUND_FRAMES:
+			await get_tree().physics_frame
+		_expect(rt.win_rules.target_status(rt.win_rules.squad_target()) == ES1WinRules.STATUS_DESTROYED, "the order target is destroyed")
+	_expect(rt.win_rules.objective_met(), "the objective is met")
+	if not rt.win_rules.players_safe():
+		_expect(battle.get_meta("result").is_empty(), "an enemy is close: the mission goes on")
+		await _clear_waves(battle)
+	var result := await _wait_end(battle)
+	_expect(bool(result.get("success", false)) or Campaign.is_failure(int(result.get("code", 0)), rt.win_rules.mission_type()) == false,
+		"the mission ends in success (%s)" % str(result.get("code", "-")))
+	await _end(battle)
+
+
+func _check_player_lost(mission_name: String) -> void:
+	print("%s the player is destroyed:" % mission_name)
+	var battle := await _start(mission_name)
+	var p: Herc = battle.player
+	for i in 100:
+		if not p.alive:
+			break
+		p.apply_hit(1e6, 1e6, null, p.global_position)
+	_expect(not p.alive, "the player's Herc is destroyed")
+	battle.mission._check_end()   # the rules tick, before anything else can revive the Herc
+	var result: Dictionary = battle.get_meta("result")
+	for i in END_WAIT_FRAMES * 4:
+		if not result.is_empty():
+			break
+		await get_tree().physics_frame
+	_expect(not result.is_empty() and not bool(result.get("success", true)), "losing the player fails the mission")
 	await _end(battle)
 
 

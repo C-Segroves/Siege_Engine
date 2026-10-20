@@ -31,6 +31,7 @@ static func apply(parent: Node3D, building_group: StringName) -> int:
 	var sealed := 0
 	var w := int(d.w)
 	for row in int(d.h) - 1:
+		LoadKeepAlive.pump()
 		for col in w - 1:
 			if holes[row * (w - 1) + col] == MapTerrain.HOLE:
 				sealed += _seal_square(d, Vector2i(col, row), buckets.get(Vector2i(col, row), []), patch)
@@ -45,6 +46,7 @@ static func _make_face_buckets(parent: Node3D, building_group: StringName, d: Di
 	for body in parent.get_tree().get_nodes_in_group(building_group):
 		if not parent.is_ancestor_of(body):
 			continue
+		LoadKeepAlive.pump()
 		for col in body.find_children("*", "CollisionShape3D", true, false):
 			var shape := (col as CollisionShape3D).shape as ConcavePolygonShape3D
 			if shape == null:

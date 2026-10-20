@@ -6,11 +6,15 @@ extends RefCounted
 ##             object.schedule(ms, "method", args...)            -> a method call later
 ## An event bound to an object is dropped when the object is gone by then (Torque cancels the schedules of a
 ## deleted object; object 0 = none). Each event has an id for cancel() / isEventPending().
+## The counting is MissionTimers' (one-shot timers, the event id is the timer id); this class keeps the absolute
+## time scripts speak in (`at` on the sim clock) and the event records.
 
 const FIRST_EVENT_ID := 1
 
 var _events := {}            # id -> {at, kind, code / name, args, object}
 var _next_id := FIRST_EVENT_ID
+var _timers := MissionTimers.new()
+var _now := 0.0              # the sim time the timers have been moved on to
 
 
 func add_code(at: float, code: String) -> int:
@@ -29,11 +33,13 @@ func _add(event: Dictionary) -> int:
 	var id := _next_id
 	_next_id += 1
 	_events[id] = event
+	_timers.apply_add(id, MissionTimer.make_timer(float(event.at) - _now, MissionTimer.Mode.ONE_SHOT, id))
 	return id
 
 
 func cancel(id: int) -> void:
 	_events.erase(id)
+	_timers.apply_cancel(id)
 
 
 func is_pending(id: int) -> bool:
@@ -46,6 +52,7 @@ func time_left(id: int, now: float) -> float:
 
 func clear() -> void:
 	_events.clear()
+	_timers.apply_clear()
 
 
 func count() -> int:
@@ -54,10 +61,8 @@ func count() -> int:
 
 ## The events due at `now`, earliest first (in the order they were made when due together); they are removed.
 func take_due(now: float) -> Array:
-	var due := []
-	for id in _events:
-		if float(_events[id].at) <= now:
-			due.append(id)
+	var due: Array = _timers.apply_tick(now - _now)
+	_now = now
 	due.sort_custom(func(a: int, b: int) -> bool:
 		return float(_events[a].at) < float(_events[b].at) or (_events[a].at == _events[b].at and a < b))
 	var out := []

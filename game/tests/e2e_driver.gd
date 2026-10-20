@@ -7,13 +7,28 @@ extends Node
 ##        | pause [--mapname= --veh=] (in-battle menu, leave, results, rematch)
 ##        | abort --game=es1|es2|starsiege|starsiege-cybrid (abort a campaign mission from the menu)
 ##        | continue [--expect_pack=es2] | lan_host / lan_join [--mode=vs|team_vs|coop|campaign] [--leave=host|client]
+##        | lobby_host / lobby_join: the same LAN match through the standard lobby (the host opens it with its default
+##          settings at once, no host page; the client reads the host's options as text, readies and plays)
 ##          [--bots=<n> on the host: infantry bots, a thrown grenade and a client gunner seat over the LAN]
+##          [--transport=ws on lan_join: joins ws://127.0.0.1:<--port=47700> (a WebSocket server) instead of discovering
+##           an ENet host; --dedicated: the server has no host pilot (res://tests/server_ws_check.tscn plays it)]
 ##        | extraction_host / extraction_join (both with -- --extraction-fast): a LAN raid, both loot, the client
 ##          extracts (his stash gets the haul), the host is killed; saves and profiles are kept
 ## Every match ends on the results screen (MatchResults); pass_results() checks it and presses Continue.
 ## Prints "E2E: ..." progress, "E2E FAIL: ..." problems and "E2E DONE <n> failures" at the end.
 
 const STEP := 0.4
+## The vehicle the LAN extraction client has bought and calls in (a call-in, not a starter vehicle: it can be at risk).
+const CALLIN_VEHICLE := "es1:RAPTOR"
+const CALLIN_POD_SECONDS := 120.0
+const CALLIN_VEHICLE_SECONDS := 240.0
+const CALLIN_START_POINTS := 5000
+const CALLIN_RINGS_M := [12.0, 24.0, 40.0, 60.0, 90.0]
+const CALLIN_DIRECTIONS := 12
+const CALLIN_ANSWER_SECONDS := 1.5
+const MOVIE_START_MSEC := 2500
+const MOVIE_NEXT_MSEC := 600
+const MOVIE_ROUNDS := 6
 
 var flow := ""
 var shots := ""
@@ -90,9 +105,9 @@ func _run() -> void:
 				log_line("continue -> screen '%s' heading %s campaign script %s" % [screen(), MatchFlow.make_mission_heading() if Session.campaign else "-", Session.campaign.get_script().resource_path if Session.campaign else "-"])
 				if _arg("expect_pack") != "" and Session.campaign:
 					expect(Session.campaign.pack_id() == _arg("expect_pack"), "Continue campaign resumes the %s campaign (got %s)" % [_arg("expect_pack"), Session.campaign.pack_id()])
-					expect(not str(Session.briefing().get("briefing", "")).is_empty(), "the continued briefing has its text")
+					expect(not str(Session.briefing().get("briefing", "")).is_empty(), "the continued lobby's briefing has its text")
 				await shot("continue")
-				await click_text("Launch mission")
+				await click_text("Start mission")
 				if await wait_scene_class("Battle", 40):
 					await wait(3.0)
 					log_line("continued battle: %s mission=%s" % [describe_battle(battle()), battle().config.get("mission", {}).get("name", battle().config.get("mission", {}).get("id", "?")) if battle().config.get("mission") is Dictionary else battle().config.get("mission")])
@@ -103,7 +118,7 @@ func _run() -> void:
 					await shot("continue_battle")
 		"coop_host", "coop_join":
 			await flow_coop()
-		"lan_host", "lan_join":
+		"lan_host", "lan_join", "lobby_host", "lobby_join":
 			var guard := SavedGuard.new()   # the lobby saves the pilot name (PlayerProfile)
 			guard.back_up()
 			await flow_lan()
@@ -233,6 +248,22 @@ func find_button(text: String, root: Node = null) -> BaseButton:
 		if c is BaseButton and c.is_visible_in_tree() and str(c.get("text")).to_lower().contains(text.to_lower()):
 			return c
 	return null
+
+
+## Skips the movies playing (a click or key press would be eaten by them): the campaign briefing and debriefing movies.
+func skip_movies() -> void:
+	var wait_msec := MOVIE_START_MSEC
+	for round in MOVIE_ROUNDS:   # a skip starts the next movie of the list
+		var t0 := Time.get_ticks_msec()
+		while get_tree().root.find_children("*", "MoviePlayer", true, false).is_empty() and Time.get_ticks_msec() - t0 < wait_msec:
+			await frames(5)   # a movie may still be loading
+		var movies := get_tree().root.find_children("*", "MoviePlayer", true, false)
+		if movies.is_empty():
+			return
+		for n in movies:
+			n.call("_done")
+		wait_msec = MOVIE_NEXT_MSEC
+		await frames(5)
 
 
 func list_buttons() -> String:
@@ -561,19 +592,11 @@ func flow_library() -> void:
 	await wait(0.5)
 	log_line("arena/versus opened launcher screen '%s'" % screen())
 	await shot("08_arena_versus")
-	await click_text("Back")
-	await wait(0.5)
-	log_line("Back from host -> '%s'" % screen())
-	await shot("09_launcher_menu")
-	var back := (cur() as RoutedScreen) if false else null
-	# launcher Back (to front end) -> library
-	var lm := find_button("Original shell")
-	if lm == null:
-		lm = find_button("Back to main menu")
-	if lm:
-		await click(lm, "front end")
-		await wait(1.0)
-		log_line("launcher back -> scene %s" % scene_name())
+	expect(screen() == "lobby", "Arena / versus opens the standard lobby (%s)" % screen())
+	await click_text("Leave")   # the lobby was the first page: Leave goes to the front end, the library
+	await wait_scene_class("Library", 10)
+	await wait(1.0)
+	log_line("Leave from the lobby -> scene %s" % scene_name())
 	if cur() is Library:
 		await click_text("Quit")
 		await frames(3)
@@ -635,7 +658,9 @@ func flow_es1_shell() -> void:
 	var lib := open_scene("res://library.tscn")
 	await wait_screen("home")
 	await wait(1.0)
-	await click_text("Metaltech: Earthsiege (original game)")
+	# the library no longer offers the original shell; open it directly (developer / test path)
+	Session.front_end = "res://es1_shell.tscn"
+	get_tree().change_scene_to_file("res://es1_shell.tscn")
 	await wait_scene_class("EsShell", 20)
 	await wait(1.0)
 	await shot("01_boot")
@@ -797,7 +822,7 @@ func _find_hangar_screen() -> HangarScreen:
 
 # ------------------------------------------------------------------ flow: launcher campaigns
 
-## Launcher briefing -> hangar (build) -> launch -> win -> debrief -> continue, `missions` times.
+## Campaign lobby -> hangar (build) -> Start mission -> win -> debrief -> continue, `missions` times.
 func flow_campaign(game: String, missions: int) -> void:
 	if game == "es1":
 		open_scene("res://launcher.tscn")
@@ -807,8 +832,8 @@ func flow_campaign(game: String, missions: int) -> void:
 		var l := open_scene("res://launcher.tscn") as Launcher
 		await wait_screen("menu")
 		LauncherAutomation._start_campaign_of(game)
-		l.show_campaign()
-	if not await wait_screen("briefing", 30):
+		l.show_started_campaign()
+	if not await wait_screen("lobby", 30):
 		return
 	for k in missions:
 		await campaign_mission(k + 1)
@@ -821,11 +846,11 @@ func campaign_mission(k: int) -> void:
 	var heading := MatchFlow.make_mission_heading()
 	var ctx0 := Session.availability_context()
 	var g := Session.garage()
-	log_line("briefing %d: %s; garage %s; mission herc %s" % [k, heading, g.vehicles.map(func(e): return e.vehicle) if g else "-", Session.mission_herc()])
+	log_line("lobby %d: %s; garage %s; mission herc %s" % [k, heading, g.vehicles.map(func(e): return e.vehicle) if g else "-", Session.mission_herc()])
 	log_line("availability: unlocked_vehicles=%s stock=%s" % [ctx0.get("unlocked_vehicles", []).size() if ctx0.get("unlocked_vehicles") is Array else "?", ctx0.get("salvage_stock", {})])
-	await shot("m%d_01_briefing" % k)
+	await shot("m%d_01_lobby" % k)
 	if k == 1:
-		await click_text("Hangar: build, scrap, arm")
+		await click_text("Hangar")
 		if await wait_screen("hangar", 5):
 			await wait(1.0)
 			await shot("m%d_02_hangar" % k)
@@ -839,19 +864,21 @@ func campaign_mission(k: int) -> void:
 			log_line("build: %d -> %d Hercs, status '%s'" % [n0, hs.garage.vehicles.size(), _status(hs)])
 			expect(hs.garage.vehicles.size() > n0 or _status(hs) != "", "Build adds a Herc or explains why not")
 			await shot("m%d_03_built" % k)
-			await click(hs.primary_button, "Back to briefing")
-			await wait_screen("briefing", 5)
+			await click(hs.primary_button, "Back to lobby")
+			await wait_screen("lobby", 5)
 			await wait(0.8)
-			await shot("m%d_04_briefing_back" % k)
-	var e: Dictionary = (cur().current as Object).get("_garage_picker").entry()
+			await shot("m%d_04_lobby_back" % k)
+	var picker := (cur().current as LobbyScreen).herc_row.picker
+	var e: Dictionary = picker.entry() if picker != null else {}
 	log_line("launching with %s %s" % [e.get("vehicle"), e.get("loadout")])
-	await click_text("Launch mission")
+	await click_text("Start mission")
 	if not await wait_scene_class("Battle", 90):
 		return
 	var b := battle()
 	await wait(3.0)
 	log_line(describe_battle(b))
-	expect(b.player != null and b.player.vehicle_id == str(e.vehicle), "battle player Herc %s == chosen %s" % [b.player.vehicle_id if b.player else "<none>", e.vehicle])
+	if not e.is_empty():
+		expect(b.player != null and b.player.vehicle_id == str(e.vehicle), "battle player Herc %s == chosen %s" % [b.player.vehicle_id if b.player else "<none>", e.vehicle])
 	await shot("m%d_05_battle" % k)
 	await check_player_moves(b)
 	var r := await win_battle(b)
@@ -892,7 +919,7 @@ func flow_saga() -> void:
 	await wait_screen("menu")
 	await wait(0.5)
 	await click_text("Saga:")
-	if not await wait_screen("briefing", 20):
+	if not await wait_screen("lobby", 20):
 		return
 	log_line("saga stage: %s" % Session.saga.stage_name())
 	await campaign_mission(1)
@@ -914,7 +941,7 @@ func flow_saga() -> void:
 			carried = false
 	expect(carried, "ES1 garage carried into ES2 (%s -> %s)" % [es1_garage, es2_garage])
 	(cur() as Launcher).show_campaign()
-	if not await wait_screen("briefing", 10):
+	if not await wait_screen("lobby", 10):
 		return
 	await campaign_mission(2)
 	var es2_g := Session.garage().vehicles.map(func(e): return "%s(%s)" % [e.name, e.vehicle])
@@ -930,7 +957,7 @@ func flow_saga() -> void:
 	await wait(0.5)
 	await shot("s_choice")
 	await click_text("Human campaign")
-	if not await wait_screen("briefing", 20):
+	if not await wait_screen("lobby", 20):
 		return
 	var ss_g := Session.garage().vehicles.map(func(e): return "%s(%s)" % [e.name, e.vehicle])
 	log_line("Starsiege garage: %s (ES2 had %s)" % [ss_g, es2_g])
@@ -941,14 +968,14 @@ func flow_saga() -> void:
 	expect(c2, "ES2 garage carried into Starsiege")
 	await campaign_mission(3)
 	# save / continue
-	await click_text("Save and quit to menu")
+	await click_text("Leave")   # the campaign lobby saves and leaves
 	await wait_scene_class("Library", 10)   # the main menu (docs/MENU_MAP.md)
 	await wait(0.5)
 	await shot("s_menu_continue")
 	await click_text("Continue campaign")
 	await wait(1.0)
 	log_line("continue -> screen '%s' stage %s" % [screen(), Session.saga.stage_name() if Session.saga else "<no saga>"])
-	expect(screen() == "briefing" and Session.saga != null and Session.saga.stage == 2, "Continue campaign resumes the saga at Starsiege")
+	expect(screen() == "lobby" and Session.saga != null and Session.saga.stage == 2, "Continue campaign resumes the saga at Starsiege")
 	await shot("s_continued")
 
 
@@ -972,37 +999,40 @@ func gamepad_check_soldier(b: Battle) -> void:
 	expect(turned > 0.05, "on foot: right stick turns the soldier (%.2f rad)" % turned)
 
 
-# ------------------------------------------------------------------ flow: skirmish through the armory
+# ------------------------------------------------------------------ flow: skirmish through the offline lobby
+
+## Menu -> Skirmish: the offline lobby. --mapname= picks the map the way Game Options does; --veh= puts that vehicle on the
+## active operator slot (Operator Setup's Herc), parked beside the soldier.
+func skirmish_from_menu() -> void:
+	await click_text("Skirmish")
+	await wait_screen("lobby", 5)
+	await wait(0.8)
+	var lobby := (cur() as Launcher).current as LobbyScreen
+	if _arg("veh") != "":
+		var profile := lobby.profile
+		profile.make_active_slot().vehicle = Assets.qualify(_arg("veh"))
+		profile.save()
+		lobby.on_setup_closed()
+		await wait(0.4)
+	if _arg("mapname") != "":
+		var entries := MapPicker.make_entries()
+		for i in entries.size():
+			if str(entries[i].name).to_lower().contains(_arg("mapname").to_lower()):
+				lobby.apply_settings(GameOptionsModel.make_with_map(Net.settings, i))
+				break
+		await wait(0.4)
+	log_line("skirmish lobby: map %s, roster %s" % [Net.settings.get("map", "?"), Net.roster])
+
+
+# ------------------------------------------------------------------ flow: skirmish
 
 func flow_skirmish() -> void:
-	var map_name := _arg("mapname")
-	var veh := _arg("veh")
 	open_scene("res://launcher.tscn")
 	await wait_screen("menu")
 	await wait(0.8)
-	await click_text("Skirmish / armory")
-	await wait_screen("armory", 5)
-	await wait(1.0)
-	var scr := cur().current as RoutedScreen
-	if veh != "":
-		scr.herc_selector.select_vehicle(Assets.qualify(veh))
-		await wait(0.5)
-	var mp: MapPicker = null
-	for c in all_controls(scr, []):
-		if c is MapPicker:
-			mp = c
-	if map_name != "":
-		var es := MapPicker.make_entries()
-		var idx := -1
-		for i in es.size():
-			if str(es[i].name).to_lower().contains(map_name.to_lower()):
-				idx = i
-				break
-		if expect(idx >= 0, "map '%s' in the picker" % map_name):
-			mp.select_index(idx)
-	log_line("armory: vehicle %s loadout %s map %s" % [scr.herc_selector.vehicle_id(), scr.herc_selector.loadout(), mp.selected_name()])
-	await shot("01_armory")
-	await click_text("Start skirmish")
+	await skirmish_from_menu()
+	await shot("01_lobby")
+	await lan_press_start("Start match")
 	if not await wait_scene_class("Battle", 90):
 		return
 	var b := battle()
@@ -1082,14 +1112,13 @@ func flow_gamepad() -> void:
 	log_line("focus %s after %d" % [focus_text(), n])
 	await pad_button(JOY_BUTTON_A)
 	await wait(1.0)
-	expect(screen() == "armory", "pad A on Skirmish opens armory (%s)" % screen())
-	await shot("03_armory")
-	n = 0
-	while not focus_text().contains("Start skirmish") and n < 60:
-		await pad_button(JOY_BUTTON_DPAD_DOWN)
-		n += 1
-	log_line("focus %s after %d" % [focus_text(), n])
-	await pad_button(JOY_BUTTON_A)
+	expect(screen() == "lobby", "pad A on Skirmish opens the skirmish lobby (%s)" % screen())
+	await shot("03_lobby")
+	await wait(1.0)
+	await pad_button(JOY_BUTTON_START)   # menu_primary: the footer's Start match
+	await wait(0.4)
+	if find_button("Start anyway") != null:
+		await click_text("Start anyway")
 	if not await wait_scene_class("Battle", 60):
 		return
 	var b := battle()
@@ -1269,11 +1298,14 @@ func flow_battle() -> void:
 
 # ------------------------------------------------------------------ flow: LAN through the UI (two processes)
 
-## lan_host: menu -> Host LAN game -> mode (--mode=coop|vs|campaign) -> Create lobby -> wait for the
-## client -> Start match. lan_join: menu -> Join LAN game -> discovered server -> Ready.
+## lan_host: menu -> Host LAN game (or Host co-op campaign) -> mode (--mode=coop|vs|team_vs|campaign) in the lobby's Game
+## Options -> wait for the client -> Start match. lan_join: menu -> Join LAN game -> discovered server -> Ready.
+## lobby_host / lobby_join open the lobby without the menu and check its chat and the client's read-only options too.
 func flow_lan() -> void:
-	var role := "host" if flow == "lan_host" else "client"
+	var role := "host" if flow in ["lan_host", "lobby_host"] else "client"
+	var via_lobby := flow.begins_with("lobby")
 	var mode := _arg("mode") if _arg("mode") != "" else "coop"
+	var dedicated := _has("dedicated")
 	open_scene("res://launcher.tscn")
 	await wait_screen("menu")
 	await wait(0.8)
@@ -1284,36 +1316,10 @@ func flow_lan() -> void:
 			break
 	log_line("pilot name set to %s" % Net.player_name)
 	if role == "host":
-		await click_text("Host LAN game")
-		await wait_screen("host", 5)
-		await wait(0.5)
-		var ob: OptionButton = null
-		for c in all_controls(cur(), []):
-			if c is OptionButton and c.is_visible_in_tree():
-				ob = c
-				break
-		ob.select(MatchFlow.make_offered_modes().find("vs" if mode == "team_vs" else mode))
-		ob.item_selected.emit(ob.selected)
-		var mapname := _arg("mapname")
-		if mapname != "":
-			for c in all_controls(cur(), []):
-				if c is MapPicker:
-					var es := MapPicker.make_entries()
-					for i in es.size():
-						if str(es[i].name).to_lower().contains(mapname.to_lower()):
-							(c as MapPicker).select_index(i)
-							break
-		var sliders := all_controls(cur(), []).filter(func(c): return c is HSlider and c.is_visible_in_tree())
-		if _arg("ai") != "" and sliders.size() >= 2:
-			(sliders[-1] as HSlider).value = float(_arg("ai"))
-		if _arg("bots") != "" and sliders.size() >= 3:
-			(sliders[-2] as HSlider).value = float(_arg("bots"))   # the "Infantry bots" row, above "AI units"
-		if mode == "team_vs":
-			_select_team_game_mode()
-		await shot("01_host_settings_" + mode)
-		await click_text("Create lobby")
-		if not await wait_screen("lobby", 5):
-			return
+		if via_lobby:
+			await lan_open_lobby_directly(mode)
+		else:
+			await lan_open_lobby_from_menu(mode)
 		lan_check_lobby_mode(mode)
 		await wait_for(func() -> bool: return Net.roster.size() >= 2, 60.0, "the client to join")
 		var start := find_button("Start mission" if mode == "campaign" else "Start match")
@@ -1322,6 +1328,8 @@ func flow_lan() -> void:
 		if mode == "team_vs":
 			await lan_host_sees_team_change()
 			await lan_host_assign_all()
+		if via_lobby:
+			await lan_check_lobby_chat(role)
 		await wait_for(func() -> bool: return Net.roster.keys().all(func(id): return int(id) == 1 or bool(Net.roster[id].ready)),
 			30.0, "the client to be ready")
 		await wait(0.5)
@@ -1329,20 +1337,23 @@ func flow_lan() -> void:
 		await wait(1.0)
 		await shot("02_lobby_host")
 		log_line("host lobby roster: %s" % [Net.roster])
-		await click_text("Start mission" if find_button("Start mission") != null else "Start match")
+		await lan_press_start("Start mission" if find_button("Start mission") != null else "Start match")
 	else:
 		await click_text("Join LAN game")
 		await wait_screen("browser", 5)
-		var ok := await wait_for(func() -> bool: return find_button("Host's game") != null, 20.0, "LAN discovery of the host")
+		var by_ws := _arg("transport") == "ws"
+		var ok := not by_ws and await wait_for(func() -> bool: return find_button("Host's game") != null, 20.0, "LAN discovery of the host")
 		await shot("01_browser")
 		if ok:
 			await click_text("Host's game")
 		else:
 			var le: LineEdit = null
 			for c in all_controls(cur(), []):
-				if c is LineEdit and c.is_visible_in_tree():
-					le = c
+				if c is LineEdit and c.is_visible_in_tree() and le == null:
+					le = c   # the address row comes first (the password row follows)
 			le.text = "127.0.0.1"
+			if by_ws:
+				le.text = "ws://127.0.0.1:%s" % (_arg("port") if _arg("port") != "" else str(Net.GAME_PORT))
 			await click_text("Join address")
 		if not await wait_screen("lobby", 15):
 			return
@@ -1354,7 +1365,10 @@ func flow_lan() -> void:
 		lan_check_lobby_mode(mode)
 		if mode == "team_vs":
 			await lan_client_switch_team()
-		await click_text("Ready")
+		if via_lobby:
+			lan_check_client_options()
+			await lan_check_lobby_chat(role)
+		await lan_press_ready()
 	if not await wait_scene_class("Battle", 60):
 		return
 	var b := battle()
@@ -1367,7 +1381,7 @@ func flow_lan() -> void:
 		if is_instance_valid(v) and b.player and v != b.player and str(v.display_name) in ["Host", "Client"]:
 			remote = v
 	expect(b.player != null, "%s has a player vehicle" % role)
-	expect(remote != null, "%s sees the other pilot" % role)
+	expect(remote != null or dedicated, "%s sees the other pilot" % role)
 	if mode == "campaign":
 		await lan_check_objectives(role, b)
 	if b.player is Infantry:
@@ -1399,9 +1413,10 @@ func flow_lan() -> void:
 		expect(remote.global_position.distance_to(rp0) > 1.0, "%s: other pilot moved %.1f m" % [role, remote.global_position.distance_to(rp0)])
 	if b.player:
 		expect(b.player.global_position.distance_to(my0) > 1.0, "%s: own Herc moved %.1f m (client = host-simulated)" % [role, b.player.global_position.distance_to(my0)])
-	expect(remote_fired, "%s sees the other pilot's fire triggers (pad RB)" % role)
+	expect(remote_fired or dedicated, "%s sees the other pilot's fire triggers (pad RB)" % role)
 	await shot("04_moving_" + role)
-	await lan_check_chat(role, b)
+	if not dedicated:
+		await lan_check_chat(role, b)
 	if _arg("leave") != "":
 		await lan_leave_mid_match(role, b, remote)
 		return
@@ -1455,6 +1470,9 @@ func flow_lan() -> void:
 	await wait(1.0)
 	await shot("06_end_" + role)
 	await pass_results("lan_" + role)
+	if dedicated:   # the server starts the next match by itself (DedicatedServer, results_seconds later)
+		expect(await wait_scene_class("Battle", 90), "client: the dedicated server started the next match")
+		return
 	if await wait_scene_class("Launcher", 40):
 		await wait(1.5)
 		if mode == "campaign" and role == "host":
@@ -1494,43 +1512,121 @@ func lan_check_chat(role: String, b: Battle) -> void:
 	await wait(2.0)   # the other side may still be waiting for these lines
 
 
-## Host screen: the Game mode row's first team mode (versus with teams).
-func _select_team_game_mode() -> void:
-	var boxes := all_controls(cur(), []).filter(func(c): return c is OptionButton and c.is_visible_in_tree())
-	var game_mode: OptionButton = boxes[2] if boxes.size() > 2 else null   # Mode, World, Game mode
-	if game_mode == null:
-		fail("host: no Game mode row")
+## The menu way in: Host LAN game (a versus lobby with its default settings at once; "Host co-op campaign (LAN)" for the
+## campaign) -> the host sets the mode, map, bots and team mode in Game Options (here through the model the panel uses).
+func lan_open_lobby_from_menu(mode: String) -> void:
+	await click_text("Host co-op campaign (LAN)" if mode == "campaign" else "Host LAN game")
+	if not await wait_screen("lobby", 5):
 		return
-	for i in game_mode.item_count:
-		if game_mode.get_item_text(i).to_lower().contains("team"):
-			game_mode.select(i)
-			game_mode.item_selected.emit(i)
-			return
-	fail("host: the map offers no team game mode")
+	await wait(0.5)
+	await lan_apply_host_options(mode)
 
 
-## The lobby's mode: versus is a deathmatch without a team list; a team mode lists the teams.
+## The direct way in: the lobby opens with the default settings of the mode (no menu).
+func lan_open_lobby_directly(mode: String) -> void:
+	(cur() as Launcher).go("lobby", {"kind": "vs" if mode == "team_vs" else mode})
+	if not await wait_screen("lobby", 5):
+		return
+	await wait(0.5)
+	await lan_apply_host_options(mode)
+
+
+## Applies the mode and the --mapname / --ai / --bots / --infantry arguments to the host's lobby, as Game Options does.
+func lan_apply_host_options(mode: String) -> void:
+	var lobby := (cur() as Launcher).current as LobbyScreen
+	var s := Net.settings
+	var kind := "vs" if mode == "team_vs" else mode
+	if str(s.get("mode", "")) != kind:
+		s = GameOptionsModel.make_with_mode(s, kind)
+	if _arg("mapname") != "":
+		var es := MapPicker.make_entries()
+		for i in es.size():
+			if str(es[i].name).to_lower().contains(_arg("mapname").to_lower()):
+				s = GameOptionsModel.make_with_map(s, i)
+				break
+	if _arg("ai") != "":
+		s = GameOptionsModel.make_with_value(s, "ai", int(_arg("ai")))
+	if _arg("bots") != "":
+		s = GameOptionsModel.make_with_value(s, InfantryBots.CONFIG_KEY, int(_arg("bots")))
+	if _arg("infantry") != "":
+		s = GameOptionsModel.make_with_value(s, LobbySettings.INFANTRY_PACK_KEY, _arg("infantry"))
+	if mode == "team_vs":
+		var team_modes := GameOptionsModel.make_game_modes(s).filter(func(m: Dictionary) -> bool: return bool(m.team_based))
+		if team_modes.is_empty():
+			fail("host: the map offers no team game mode")
+		else:
+			s = GameOptionsModel.make_with_game_mode(s, str(team_modes[0].id))
+	lobby.apply_settings(s)
+	await wait(0.5)
+	await shot("01_lobby_options_" + mode)
+
+
+## The host's Start; the warning about parts this mode leaves off ("Start anyway") is answered yes.
+func lan_press_start(text: String) -> void:
+	await click_text(text)
+	await wait(0.4)
+	if find_button("Start anyway") != null:
+		log_line("the start warning asked about parts left off; answering Start anyway")
+		await click_text("Start anyway")
+
+
+## Ready on the lobby footer; the warning about parts this mode leaves off ("Ready anyway") is answered yes.
+func lan_press_ready() -> void:
+	await click_text("Ready")
+	await wait(0.4)
+	if find_button("Ready anyway") != null:
+		log_line("the ready warning asked about parts left off; answering Ready anyway")
+		await click_text("Ready anyway")
+
+
+## The lobby chat (LobbyChatHub) both ways: the client says a line, the host sees it and answers to everybody.
+func lan_check_lobby_chat(role: String) -> void:
+	var hub := LobbyChatHub.ensure(get_tree())
+	await wait(0.5)
+	var said := func(text: String) -> bool: return hub.history.any(func(l: Dictionary) -> bool: return l.text == text)
+	if role == "client":
+		hub.say("all", "ready when you are")
+		expect(await wait_for(func() -> bool: return said.call("gl hf"), 20.0, "the host's lobby chat line"), "client: the host's lobby chat line arrives")
+	else:
+		expect(await wait_for(func() -> bool: return said.call("ready when you are"), 20.0, "the client's lobby chat line"), "host: the client's lobby chat line arrives")
+		hub.say("all", "gl hf")
+	await wait(0.5)
+
+
+## A client reads the host's options as text: no option control in Game Options, the host's map and mode named.
+func lan_check_client_options() -> void:
+	var lobby := (cur() as Launcher).current as LobbyScreen
+	expect(lobby.options.find_children("*", "OptionButton", true, false).is_empty(), "client: the options are text, not controls")
+	var text := ""
+	for c in lobby.options.find_children("*", "Label", true, false):
+		text += str(c.text) + "
+"
+	expect(text.contains(str(Net.settings.get("map", "?"))), "client: the host's map is shown (%s)" % Net.settings.get("map", "?"))
+
+
+## The lobby's mode: versus is a deathmatch without teams; a team mode offers teams (the host's Adjust teams button, the
+## local pilot's team picker on his card).
 func lan_check_lobby_mode(mode: String) -> void:
-	var lists := cur().find_children("*", "TeamList", true, false)
-	var shown := not lists.is_empty() and (lists[0] as Control).is_visible_in_tree()
+	var lobby := (cur() as Launcher).current as LobbyScreen
+	var shown := lobby != null and (find_button("Adjust teams...") != null or lobby.carousel.card_for("peer:%d" % Net.my_id()) != null
+		and lobby.carousel.card_for("peer:%d" % Net.my_id()).team_picker.is_visible_in_tree())
 	if mode == "vs":
 		expect(Net.settings.get("game_mode") == "deathmatch" and not Net.settings.get("teams", false), "versus defaults to deathmatch (%s)" % Net.settings.get("game_mode"))
-		expect(not shown, "deathmatch lobby: no team list")
+		expect(not shown, "deathmatch lobby: no team controls")
 	elif mode == "team_vs":
-		expect(bool(Net.settings.get("teams", false)) and shown, "team mode lobby: the team list shows (%d teams)" % int(Net.settings.get("team_count", 0)))
+		expect(bool(Net.settings.get("teams", false)) and shown, "team mode lobby: the team controls show (%d teams)" % int(Net.settings.get("team_count", 0)))
 
 
-## Client: moves itself to the second team in the lobby's team list.
+## Client: moves itself to the second team with the picker on his own card.
 func lan_client_switch_team() -> void:
-	var list: TeamList = cur().find_children("*", "TeamList", true, false)[0]
-	var pickers := list.find_children("*", "OptionButton", true, false)
-	expect(pickers.size() == 1, "client: one team picker (his own)")
-	if pickers.is_empty():
+	var lobby := (cur() as Launcher).current as LobbyScreen
+	var card := lobby.carousel.card_for("peer:%d" % Net.my_id())
+	if not expect(card != null and card.team_picker.is_visible_in_tree(), "client: a team picker on his own card"):
 		return
 	var mine := int(Net.roster[Net.my_id()].team)
 	expect(mine == TeamAssignment.UNASSIGNED, "client: a joiner starts unassigned (team %d)" % mine)
 	var other := 1
-	var picker := pickers[0] as OptionButton
+	var picker := card.team_picker
 	picker.select(picker.get_item_index(other + TeamList.PICKER_ID_OFFSET))
 	picker.item_selected.emit(picker.get_item_index(other + TeamList.PICKER_ID_OFFSET))
 	var ok := await wait_for(func() -> bool: return int(Net.roster[Net.my_id()].team) == other, 10.0, "the client's team change to come back from the host")
@@ -1555,7 +1651,7 @@ func lan_host_sees_team_change() -> void:
 		if int(id) != 1:
 			client_id = int(id)
 	var before := int(Net.roster[client_id].team) if client_id != -1 else -1
-	var ok := await wait_for(func() -> bool: return client_id != -1 and int(Net.roster[client_id].team) != before, 30.0, "the client to switch team")
+	var ok := await wait_for(func() -> bool: return client_id != -1 and int(Net.roster[client_id].team) != TeamAssignment.UNASSIGNED, 30.0, "the client to switch team")
 	expect(ok, "host: sees the client's team change (%d -> %d)" % [before, int(Net.roster[client_id].team) if client_id != -1 else -1])
 	await wait(0.5)
 	await shot("02a_team_list_host")
@@ -1583,7 +1679,9 @@ func _other_peer(b: Battle) -> int:
 ## and gets out again; both peers see the occupancy, the hidden soldier and the moving Herc.
 func lan_check_boarding(role: String, b: Battle, remote: Infantry) -> void:
 	var me := b.multiplayer.get_unique_id()
-	var client_peer := me if role == "client" else (remote.owner_peer if remote else -1)
+	# the host reads the client's peer from the roster: once the client has boarded, his soldier's owner_peer is EMPTY
+	# (OccupancyDirector), and he may already be inside when the host gets here
+	var client_peer := me if role == "client" else _other_peer(b)
 	expect(b.player is Infantry and (b.player as Infantry).armor_id.ends_with("LIGHT"), "%s starts on foot in light armour" % role)
 	if role == "client":
 		await wait(1.0)
@@ -1779,11 +1877,8 @@ func flow_pause() -> void:
 	open_scene("res://launcher.tscn")
 	await wait_screen("menu")
 	await wait(0.8)
-	await click_text("Skirmish / armory")
-	await wait_screen("armory", 5)
-	await wait(0.8)
-	await _select_map_and_vehicle(cur().current as RoutedScreen)
-	await click_text("Start skirmish")
+	await skirmish_from_menu()
+	await lan_press_start("Start match")
 	if not await wait_scene_class("Battle", 90):
 		return
 	var b := battle()
@@ -1830,21 +1925,6 @@ func flow_pause() -> void:
 	expect(await wait_scene_class("Launcher", 20), "Continue returns to the launcher")
 
 
-func _select_map_and_vehicle(scr: RoutedScreen) -> void:
-	if _arg("veh") != "":
-		scr.herc_selector.select_vehicle(Assets.qualify(_arg("veh")))
-		await wait(0.3)
-	if _arg("mapname") == "":
-		return
-	for c in all_controls(scr, []):
-		if c is MapPicker:
-			var es := MapPicker.make_entries()
-			for i in es.size():
-				if str(es[i].name).to_lower().contains(_arg("mapname").to_lower()):
-					(c as MapPicker).select_index(i)
-					return
-
-
 # ------------------------------------------------------------------ flow: abort a campaign mission
 
 ## Campaign (--game=es1|es2|starsiege|starsiege-cybrid) -> launch -> pad Start -> Abort mission ->
@@ -1854,12 +1934,12 @@ func flow_abort() -> void:
 	var l := open_scene("res://launcher.tscn") as Launcher
 	await wait_screen("menu")
 	LauncherAutomation._start_campaign_of(game)
-	l.show_campaign()
-	if not await wait_screen("briefing", 30):
+	l.show_started_campaign()
+	if not await wait_screen("lobby", 30):
 		return
 	await wait(1.0)
 	var before := str(Session.campaign.current_mission())
-	await click_text("Launch mission")
+	await click_text("Start mission")
 	if not await wait_scene_class("Battle", 90):
 		return
 	await wait(3.0)
@@ -1960,6 +2040,9 @@ func flow_extraction() -> void:
 	guard.back_up()
 	var pilot := "XHost" if role == "host" else "XClient"
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(SaveGames.make_profile_path(ExtractionProfile.make_id(pilot))))
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(SaveGames.make_profile_path(OperatorProfile.make_id(pilot))))
+	if role == "client":
+		_prepare_callin_profile(pilot)
 	open_scene("res://launcher.tscn")
 	await wait_screen("menu")
 	await wait(0.8)
@@ -1977,30 +2060,31 @@ func flow_extraction() -> void:
 	guard.restore()
 
 
+## The client's operator brings raid points and a bought vehicle in his active slot: what the call-ins spend and deliver.
+func _prepare_callin_profile(pilot: String) -> void:
+	var o := OperatorProfile.load_for(pilot)
+	o.apply_raid_points(CALLIN_START_POINTS)
+	o.unlocks.apply_add(UnlockId.make("vehicle", CALLIN_VEHICLE))
+	o.make_active_slot().vehicle = CALLIN_VEHICLE
+	o.save()
+
+
 func _extraction_host_lobby() -> void:
 	await click_text("Host LAN game")
-	await wait_screen("host", 5)
-	await wait(0.5)
-	for c in all_controls(cur(), []):
-		if c is OptionButton and c.is_visible_in_tree():
-			(c as OptionButton).select(MatchFlow.make_offered_modes().find(ExtractionRules.MODE))
-			(c as OptionButton).item_selected.emit((c as OptionButton).selected)
-			break
-	for c in all_controls(cur(), []):
-		if c is MapPicker:
-			var es := MapPicker.make_entries()
-			for i in es.size():
-				if str(es[i].name).contains("Katabatic"):
-					(c as MapPicker).select_index(i)
-	var sliders := all_controls(cur(), []).filter(func(c): return c is HSlider and c.is_visible_in_tree())
-	(sliders[-1] as HSlider).value = 0.0   # faction vehicles ("AI units")
-	(sliders[-2] as HSlider).value = 2.0   # faction soldiers ("Infantry bots")
-	for c in all_controls(cur(), []):
-		if c is CheckBox and c.is_visible_in_tree() and (c as CheckBox).text.contains("Squads"):
-			(c as CheckBox).button_pressed = true   # squads: the client joins the host's team (revive)
-	await shot("x01_host_settings")
-	await click_text("Create lobby")
 	await wait_screen("lobby", 5)
+	await wait(0.5)
+	var lobby := (cur() as Launcher).current as LobbyScreen
+	var s := GameOptionsModel.make_with_mode(Net.settings, ExtractionRules.MODE)
+	var entries := MapPicker.make_entries()
+	for i in entries.size():
+		if str(entries[i].name).contains("Katabatic"):
+			s = GameOptionsModel.make_with_map(s, i)
+	s = GameOptionsModel.make_with_value(s, "ai", 0)   # faction vehicles
+	s = GameOptionsModel.make_with_value(s, InfantryBots.CONFIG_KEY, 2)   # faction soldiers
+	s = GameOptionsModel.make_with_squads(s, true)   # squads: the client joins the host's team (revive)
+	lobby.apply_settings(s)
+	await wait(0.5)
+	await shot("x01_host_settings")
 	await wait_for(func() -> bool: return Net.roster.size() >= 2, 60.0, "the client to join")
 	await wait_for(func() -> bool: return Net.roster.keys().all(func(id): return int(id) == 1 or bool(Net.roster[id].ready)), 30.0, "the client to be ready")
 	await wait(1.0)
@@ -2010,7 +2094,7 @@ func _extraction_host_lobby() -> void:
 	Net.assign_team(_client_peer(), 0)
 	await wait(1.0)
 	await shot("x02_lobby_host")
-	await click_text("Start match")
+	await lan_press_start("Start match")
 
 
 func _extraction_client_lobby() -> void:
@@ -2025,9 +2109,9 @@ func _extraction_client_lobby() -> void:
 		await click_text("Join address")
 	await wait_screen("lobby", 15)
 	await wait(2.0)
-	expect(find_button("Stash, shop and loadout") != null, "client lobby: the raid kit section")
+	expect(find_button("Operator Setup...") != null, "client lobby: the Operator Setup button (the raid kit)")
 	await shot("x02_lobby_client")
-	await click_text("Ready")
+	await lan_press_ready()
 
 
 func _extraction_raid(role: String, b: Battle) -> void:
@@ -2041,9 +2125,11 @@ func _extraction_raid(role: String, b: Battle) -> void:
 	await shot("x03_landed_" + role)
 	if role == "host":
 		await _extraction_host_revive(b, x)
+		await _extraction_host_callins(b, x)
 		await _extraction_host_part(b, x)
 	else:
 		await _extraction_client_revived(b, x)
+		await _extraction_client_callins(b, x)
 		await _extraction_client_part(b, x)
 	await pass_results("extraction_" + role)
 
@@ -2090,6 +2176,66 @@ func _extraction_client_revived(b: Battle, x: ExtractionDirector) -> void:
 	await shot("x03b_client_downed")
 	await wait_for(func() -> bool: return not DownedState.is_downed(me), 30.0, "the host's revive")
 	expect(me.alive and not DownedState.is_downed(me) and x.revive.get_node_or_null("DownedPilot") == null, "client: revived, own controls back")
+
+
+## True when a vehicle of `vehicle_id` stands in the battle (a delivered call-in).
+func _has_vehicle(b: Battle, vehicle_id: String) -> bool:
+	return b.vehicles.values().any(func(v: Variant) -> bool: return is_instance_valid(v) and v.vehicle_id == vehicle_id and v.alive)
+
+
+## Host: sees the client's orbital pod (a crate on both sides) and then his vehicle delivery arrive.
+func _extraction_host_callins(b: Battle, x: ExtractionDirector) -> void:
+	var c := x.callins
+	var client := _client_peer()
+	expect(await wait_for(func() -> bool: return c.points.get_balance(client) > 0, 30.0, "the client's raid points"),
+		"host: the client's raid points reached the host (%d RP)" % c.points.get_balance(client))
+	expect(await wait_for(func() -> bool: return c.orders.values().any(func(o: CallinOrder) -> bool: return o.kind == CallinRules.KIND_AMMO and o.peer == client),
+		CALLIN_POD_SECONDS, "the client's pod order"), "host: the client's ammo pod order arrived over the LAN")
+	expect(await wait_for(func() -> bool: return not c.crates.is_empty(), CALLIN_POD_SECONDS, "the pod's crate"), "host: the pod landed and its crate stands (%d)" % c.crates.size())
+	await shot("x03c_host_pod")
+	expect(await wait_for(func() -> bool: return c.orders.values().any(func(o: CallinOrder) -> bool: return o.kind == CallinRules.KIND_VEHICLE and o.peer == client),
+		CALLIN_VEHICLE_SECONDS, "the client's vehicle order"), "host: the client's vehicle delivery order arrived over the LAN")
+	expect(await wait_for(func() -> bool: return _has_vehicle(b, CALLIN_VEHICLE), CALLIN_VEHICLE_SECONDS, "the delivered vehicle"),
+		"host: the delivered %s stands in the battle" % CALLIN_VEHICLE)
+	await shot("x03d_host_vehicle")
+
+
+## The player designates ground near his soldier (what the laser does), over the LAN to the host, spot after spot on rings
+## around him until the host makes an order (its checks are the host's word: terrain, sky, the approach). True when it did.
+func _request_callin_ahead(b: Battle, c: CallinDirector, kind: String) -> bool:
+	var me := b.player
+	var points_before := c.points.mine
+	for ring in CALLIN_RINGS_M:
+		for i in CALLIN_DIRECTIONS:
+			var spot: Vector3 = me.global_position + Vector3.FORWARD.rotated(Vector3.UP, TAU * float(i) / CALLIN_DIRECTIONS) * ring
+			var request := CallinRequest.make(kind, "", Net.my_id(), spot)
+			if not bool(c.checks.make_plan(request, true).ok):
+				continue
+			c.request_designated(request)
+			if await wait_for(func() -> bool: return c.points.mine < points_before, CALLIN_ANSWER_SECONDS):
+				return true
+	log_line("client: the host made no %s order on any spot around %s" % [kind, me.global_position])
+	return false
+
+
+## Client: calls in an orbital pod, then his vehicle; both arrive for him and for the host.
+func _extraction_client_callins(b: Battle, x: ExtractionDirector) -> void:
+	var c := x.callins
+	expect(await wait_for(func() -> bool: return c.points.mine > 0, 30.0, "own raid points"), "client: brings %d raid points" % c.points.mine)
+	var before := c.points.mine
+	expect(c.make_local_refusal(CallinRules.KIND_AMMO, "") == "", "client: the pod is not refused ('%s')" % c.make_local_refusal(CallinRules.KIND_AMMO, ""))
+	await _request_callin_ahead(b, c, CallinRules.KIND_AMMO)
+	expect(await wait_for(func() -> bool: return c.views.values().any(func(v: Dictionary) -> bool: return v.get("kind") == CallinRules.KIND_AMMO),
+		30.0, "the host's order view"), "client: the host's word on the pod order came back")
+	expect(await wait_for(func() -> bool: return c.points.mine < before, 10.0, "the pod's price"), "client: the pod was paid in raid points (%d -> %d)" % [before, c.points.mine])
+	expect(await wait_for(func() -> bool: return not c.crates.is_empty(), CALLIN_POD_SECONDS, "the pod's crate"), "client: the pod landed and its crate stands (%d)" % c.crates.size())
+	await shot("x03c_client_pod")
+	await wait_for(func() -> bool: return c.make_local_refusal(CallinRules.KIND_VEHICLE, "") == "", CALLIN_POD_SECONDS, "the shared cooldown")
+	expect(c.make_local_refusal(CallinRules.KIND_VEHICLE, "") == "", "client: the vehicle delivery is not refused ('%s')" % c.make_local_refusal(CallinRules.KIND_VEHICLE, ""))
+	await _request_callin_ahead(b, c, CallinRules.KIND_VEHICLE)
+	expect(await wait_for(func() -> bool: return _has_vehicle(b, CALLIN_VEHICLE), CALLIN_VEHICLE_SECONDS, "the delivered vehicle"),
+		"client: the delivered %s stands in his battle" % CALLIN_VEHICLE)
+	await shot("x03d_client_vehicle")
 
 
 func _client_peer() -> int:

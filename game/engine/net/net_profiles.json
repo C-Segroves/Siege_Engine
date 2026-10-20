@@ -1,0 +1,33 @@
+{
+	"default": {
+		"tick_hz": 30,
+		"snapshot_hz": 15,
+		"tier_intervals": [1, 3, 5],
+		"interest": {"near_m": 100, "mid_m": 400, "soldier_view_m": 300, "vehicle_view_m": 800},
+		"prediction": {"enabled": true, "blend_s": 0.1, "epsilon_m": 0.05, "snap_infantry_m": 1.5, "snap_herc_m": 3.0},
+		"lag_comp": {"enabled": true, "max_rewind_ms": 250, "beams": true, "projectile_min_mps": 250, "include": [], "exclude": []},
+		"evidence": "Remake defaults: the section 6 table of docs/DEDICATED_SERVER_SCALING.md (30 Hz tick, 15 Hz near snapshots)."
+	},
+	"tribes": {
+		"tick_hz": 32,
+		"snapshot_hz": 32,
+		"tier_intervals": [1, 4, 8],
+		"prediction": {"blend_s": 0.1, "snap_infantry_m": 1.5, "snap_herc_m": 3.0},
+		"evidence": "Tribes 1 and Tribes 2 (Torque/Darkstar) simulate in 32 ms ticks and send a state update per tick; the client predicts its own movement and the server corrects it (Torque TickMs = 32). 32 Hz stands in for 31.25 Hz. Units inside 100 m keep the per-tick update (the fight); the 100-400 m tier is 8 Hz and the far tier 4 Hz (it was 10.7 and 6.4): Torque's ghost priority already sends distant, unthreatening objects less often, and the clients interpolate over the gap. Saves a sixth of the records of a 64-player server."
+	},
+	"tribes2": {"inherits": "tribes"},
+	"tribes_aa": {"inherits": "tribes"},
+	"tribes_v": {"inherits": "tribes"},
+	"es1": {
+		"tick_hz": 30,
+		"snapshot_hz": 15,
+		"prediction": {"snap_infantry_m": 1.5, "snap_herc_m": 3.0, "blend_s": 0.12},
+		"evidence": "Earthsiege was a lockstep-style LAN game with no client prediction; the remake keeps the heavy, deliberate Herc feel by predicting only the pilot's own slow Herc and reconciling loosely (3 m)."
+	},
+	"es2": {"inherits": "es1"},
+	"bd": {"inherits": "es1"},
+	"starsiege": {
+		"inherits": "es1",
+		"evidence": "Starsiege (Dynamix, Darkstar, 1999) shares the Tribes engine family but its Hercs are as slow and heavy as Earthsiege's: kept at the es1 feel, hitscan lasers rewound."
+	}
+}

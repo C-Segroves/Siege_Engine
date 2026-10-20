@@ -9,10 +9,11 @@ extends MissionRuntimeBase
 ##   the game's function table (Tribes1Functions / Tribes2Functions) answers the engine functions;
 ##   TribesActors keeps the clients and their soldiers (the player's Infantry, the AI's bots);
 ##   TribesContacts raises touches (items, switches, flags), triggers and the mission area;
-##   TribesSchedules runs the script timers.
-##   TribesMissionOutput says and shows it: the radio (training lines with their voice), the objective lines,
+##   TribesSchedules runs the script timers (over MissionTimers); the kit timers run the engine's own (respawns, message boxes);
+##   TribesMissionOutput says and shows it (MissionAnnouncer + TribesMissionSink): the radio (training lines with their
+##   voice), the objective lines (ScriptObjectives),
 ##   the waypoint (nav point), messages.
-## The mission ends through the game's end call (debrief). Host only: the training missions are single player.
+## The mission ends through the MissionEnder (debrief). Host only: the training missions are single player.
 ## Subclasses: Tribes1MissionRuntime, Tribes2MissionRuntime.
 
 const PACKS := ["tribes", "tribes2"]
@@ -24,15 +25,15 @@ const CHECK_INTERVAL := 0.1
 
 ## Schedules due in one frame run at most this many rounds (events scheduling events at 0 ms).
 const MAX_SCHEDULE_ROUNDS := 64
-const CODE_SUCCESS := 1
 ## The remake's damage per unit of Tribes damage (weapons_infantry.json: Tribes damage x3000).
 const TRIBES_DAMAGE_SCALE := 3000.0
-const CODE_FAILED := 6
 
 var pack := ""
 var vm: DarkstarScript
 var sim := TribesSimObjects.new()
 var schedules := TribesSchedules.new()
+## The engine's own timers (a soldier's respawn, a message box's answer): Callables run in the frame's game update.
+## The one door out of the mission (debrief).
 var functions: DarkstarFunctionTable
 var items: TribesItems
 var actors: TribesActors
@@ -50,6 +51,8 @@ var warnings: Array[String] = []
 var error_log: Array[String] = []
 var debug := false
 var _scripts_dir_files := {}    # lower file name -> file name
+var _game_due: Array = []       # Callables of the game timers that ran out, for this frame's game update
+var _next_game_timer := 0
 
 
 # ------------------------------------------------------------------ missions
@@ -133,6 +136,7 @@ func setup(p_battle: Node3D, mission: Dictionary, vars := PackedInt32Array()) ->
 	if interaction:
 		interaction.add_provider(contacts.make_interact_offer)
 	output = TribesMissionOutput.new(self)
+	kit.ender = MissionEnder.new(end_mission, output.sink.is_voice_playing)
 	vm = DarkstarScript.new()
 	vm.dialect = _make_dialect()
 	vm.host = self
@@ -330,10 +334,12 @@ func _physics_process(delta: float) -> void:
 	if _over or vm == null or not multiplayer.is_server():
 		return
 	sim_time += delta
+	_game_due.append_array(kit.timers.apply_tick(delta))   # a timer made this frame counts from the next one
 	run_due_schedules()
 	if _over:
 		return
 	actors.update(delta)
+	_run_game_due()
 	_update_game(delta)
 	if _over:
 		return
@@ -354,6 +360,19 @@ func run_due_schedules() -> void:
 			_run_event(e)
 			if _over:
 				return
+
+
+## Runs `action` (a Callable) once, `seconds` from the next frame on, in the game update.
+func schedule_game(seconds: float, action: Callable) -> void:
+	kit.timers.apply_add(_next_game_timer, MissionTimer.make_timer(seconds, MissionTimer.Mode.ONE_SHOT, action))
+	_next_game_timer += 1
+
+
+func _run_game_due() -> void:
+	var due := _game_due
+	_game_due = []
+	for action in due:
+		(action as Callable).call()
 
 
 func _run_event(e: Dictionary) -> void:
@@ -388,16 +407,11 @@ func set_objective(index: int, text: String) -> void:
 	if output.store_objective(index, text) and output.objectives[index] != "":
 		output.show_message("Objective: " + output.objectives[index])
 
+
 ## The objectives panel's lines: the objective page / HUD lines the scripts set (never marked done: the
 ## originals rewrite the lines instead).
 func make_objective_lines() -> Array:
-	var out := []
-	if output == null:
-		return out
-	for line in output.objectives:
-		if str(line).strip_edges() != "":
-			out.append({"text": str(line), "done": false})
-	return out
+	return output.make_objective_lines() if output != null else []
 
 
 # ------------------------------------------------------------------ mission end
@@ -408,7 +422,10 @@ func debrief(success: bool, text := "") -> void:
 	output.flush()
 	log_debug("DEBRIEF success=%s %s" % [success, text])
 	var summary := text if text != "" else ("Training complete." if success else "Training failed.")
-	end_mission(success, CODE_SUCCESS if success else CODE_FAILED, TribesText.make_plain(summary))
+	var code := CODE_SUCCESS if success else CODE_FAILED
+	var plain := TribesText.make_plain(summary)
+	kit.ender.apply_verdict(MissionVerdict.make_win(code, plain) if success else MissionVerdict.make_loss(code, plain))
+	kit.ender.apply_tick(0.0)   # no grace in the originals: the end is this call
 
 
 ## Tribes: no wingmen to call the end; the training summary is the whole debriefing.

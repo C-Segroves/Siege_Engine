@@ -4,11 +4,6 @@ extends RefCounted
 ## target (group 0's target), its status, the "safe" test, the win test per mission type, the loss of a
 ## guarded target, and the alert regions (an enemy close by, or a hit).
 
-## Alert region: an enemy within 50000 original units (195 m) or a hit (SIM@e722, SIM@1f496).
-const DETECT_RANGE_UNITS := 50000.0
-## "Safe" (DBSIM 0xf744): no aware enemy within 80000 units (312 m), 100000 (390 m) if it targets the unit.
-const SAFE_RANGE_UNITS := 80000.0
-const SAFE_RANGE_TARGETING_UNITS := 100000.0
 ## Target status (DBSIM 0xee84 / 0xecc0): 0..3 damage levels, 4 destroyed. The sim's damage is 0..255.
 const STATUS_LOST := 3
 const STATUS_DESTROYED := 4
@@ -25,7 +20,8 @@ const GROUP_DAMAGE_STEPS := [50, 128, 192]
 const ORDER_GUARDING := 6
 ## Objective flags the sim sets for the player (DBSIM 0x15f80): type 0 (recon) when the player targets an object
 ## of the squad's order target (+0xd); type 3 (datalink) after standing within 10000 units (39 m) of the order target,
-## facing it within 45 degrees, through the link timer (two 5000 ms stages, table 0x91ce8) (+0xe).
+## facing it within 45 degrees, through the link stages below (+0xe). The mission is won on that flag (and the
+## players being safe) alone: DBSIM 0xf618 has no "area cleared" alternative.
 const TYPE_RECON := 0
 const TYPE_DATALINK := 3
 ## Mission types (header word 3) by what wins them (DBSIM jump table 0x9173c): reach the last nav point,
@@ -36,19 +32,101 @@ const TYPE_ESCORT := 7
 const PROTECT_TYPES := [4, 5]
 const DESTROY_TYPES := [6, 8, 9]
 const DATALINK_RANGE_UNITS := 10000.0
-const DATALINK_CONE := PI / 4.0
-const DATALINK_TIME := 10.0
+## Link stages (DBSIM 0x15f80, counter 0xaf700, timer 0xaf705, table 0x91ce8): each stage fires when the timer is out,
+## shows SYSTEM.STR message 29 + stage, then loads TABLE[stage] ms. Stage 0 fires at once (5 s), stage 1 after 5 s (5 s),
+## stage 2 after 5 s (a negative value: the timer is out on the next frame), stage 3 completes the link. Leaving the
+## position after stage 0 shows message 33 and restarts from stage 0 (no pause).
+const DATALINK_STAGE_MS := [5000, 5000, -25536, 0]
+## SYSTEM.STR texts 29..33 (the sim's own message line; no voice clips exist for them).
+const DATALINK_TEXTS := ["ENGAGING COMPUTER LINK", "BEGINNING DATA TRANSFER", "TRANSFERRING DATA...",
+	"DATA TRANSFER COMPLETE"]
+const DATALINK_ABORT_TEXT := "TRANSFER ABORTED"
+const DATALINK_MESSAGE_SECONDS := 4.0
+## Seconds the "Target identified." line stays up.
+const RECON_MESSAGE_SECONDS := 4.0
+const TEXT_RECON_DONE := "Target identified."
+const NAV_TEXT := "Reach the nav points (%d of %d)"
 
 var rt: MissionRuntime
+## What the shared mission blocks ask of the battle.
+var world: ES1MissionWorld
 ## Recon objective flag (+0xd): a player targeted the squad's order target.
-var recon_flag := false
+var recon_flag: bool:
+	get: return _recon != null and _recon.is_done()
 ## Datalink objective flag (+0xe): the link with the order target completed.
-var datalink_flag := false
-var _datalink_t := 0.0
+var datalink_flag: bool:
+	get: return _link != null and _link.is_done()
+## Link stages shown since the link (re)started.
+var _datalink_stage: int:
+	get: return _link.get_fired_count() if _link != null else 0
+var _objectives := ObjectiveSet.new()
+var _goal: Objective = null          # the mission type's goal (null for the nav types: the nav line is their goal)
+var _nav: ConditionObjective
+var _recon: ScriptObjective = null
+var _link: RelayScanObjective = null
 
 
 func _init(runtime: MissionRuntime) -> void:
 	rt = runtime
+	world = ES1MissionWorld.new(runtime)
+	_build_objectives()
+
+
+## The objective of the mission type (the factory of DBSIM jump table 0x9173c) and the nav progress line.
+func _build_objectives() -> void:
+	var kind := mission_type()
+	_nav = ConditionObjective.new("nav", "", _is_nav_complete)
+	if kind in NAV_TYPES:
+		_objectives.apply_add(_nav)
+		return
+	_goal = _make_goal_objective(kind)
+	_objectives.apply_add(_goal)
+	_nav.required = false
+	_nav.primary = false
+	_objectives.apply_add(_nav)
+
+
+func _make_goal_objective(kind: int) -> Objective:
+	if kind == TYPE_ESCORT:
+		return ConditionObjective.new("goal", "", _is_escort_done)
+	if kind in PROTECT_TYPES:
+		return ConditionObjective.new("goal", "", _is_target_protected)
+	if kind in DESTROY_TYPES:
+		return DestroyObjective.new("goal", "", [ES1MissionWorld.ORDER_TARGET] as Array[String])
+	if kind == TYPE_RECON:
+		_recon = ScriptObjective.new("goal")
+		return _recon
+	if kind == TYPE_DATALINK:
+		_link = _make_datalink_objective()
+		return ConditionObjective.new("goal", "", _is_link_or_cleared)
+	return ConditionObjective.new("goal", "", _area_cleared)
+
+
+## The datalink as a scan: the original stages with their texts, within the link range (10000 units) and 45 degrees.
+func _make_datalink_objective() -> RelayScanObjective:
+	var stages := []
+	for i in DATALINK_STAGE_MS.size():
+		stages.append({"seconds": DATALINK_STAGE_MS[i] / 1000.0, "text": DATALINK_TEXTS[i]})
+	var link := RelayScanObjective.new("link", "", ES1MissionWorld.DATALINK_TARGET, DATALINK_RANGE_UNITS * Assets.UNIT, stages)
+	link.abort_text = DATALINK_ABORT_TEXT
+	link.message_seconds = DATALINK_MESSAGE_SECONDS
+	return link
+
+
+func _is_nav_complete() -> bool:
+	return rt.nav_index >= rt.nav_points.size()
+
+
+func _is_escort_done() -> bool:
+	return escort_arrived(squad_target())
+
+
+func _is_target_protected() -> bool:
+	return target_safe(squad_target())
+
+
+func _is_link_or_cleared() -> bool:
+	return datalink_flag or _area_cleared()
 
 
 ## The player squad's order target {kind, index} (MSN group 0 target), or null.
@@ -57,37 +135,21 @@ func squad_target() -> Variant:
 	return groups[0].get("target") if not groups.is_empty() else null
 
 
-## True when the player squad guards its target and that target is heavily damaged or destroyed.
-func guarded_target_lost() -> bool:
+## True when the player squad's order is to guard its target (DBSIM 0xf536): the squad fails when that target is lost.
+func is_squad_guarding() -> bool:
 	var groups := MissionRuntime._arr(rt.m.get("groups"))
-	if groups.is_empty() or int(groups[0].get("orders", -1)) != ORDER_GUARDING:
-		return false
-	var t = squad_target()
-	return t is Dictionary and target_status(t) >= STATUS_LOST
+	return not groups.is_empty() and int(groups[0].get("orders", -1)) == ORDER_GUARDING and squad_target() is Dictionary
 
 
 func mission_type() -> int:
 	return int(rt.m.get("header", {}).get("mission_type", 1))
 
 
-## Win test by mission type (header word 3, DBSIM jump table 0x9173c). Types 0 / 3 also count as won once every
-## active hostile unit and structure is destroyed (remake rule: the player cleared the area instead).
+## Win test by mission type (header word 3, DBSIM jump table 0x9173c). Types 0 and 3 are won on their flag alone (the
+## caller also requires the players to be safe).
 func objective_met() -> bool:
-	var t = squad_target()
-	var kind := mission_type()
-	if kind in NAV_TYPES:
-		return rt.nav_index >= rt.nav_points.size()
-	if kind == TYPE_ESCORT:
-		return escort_arrived(t)
-	if kind in PROTECT_TYPES:
-		return target_safe(t)
-	if kind in DESTROY_TYPES:
-		return t is Dictionary and target_status(t) == STATUS_DESTROYED
-	if kind == TYPE_RECON:
-		return recon_flag or _area_cleared()
-	if kind == TYPE_DATALINK:
-		return datalink_flag or _area_cleared()
-	return _area_cleared()
+	_refresh_objectives()
+	return _objectives.is_complete()
 
 
 ## Escort test: target `t` is not destroyed and a living unit of it finished its path (a group's leader travels
@@ -103,15 +165,20 @@ func escort_arrived(t) -> bool:
 
 ## The objectives panel's lines ([{text, done}]): the mission type's goal, then the nav progress.
 func make_objective_lines() -> Array:
-	var out := []
-	var goal := _make_goal_text(mission_type(), _make_target_name())
-	if goal != "":
-		out.append({"text": goal, "done": objective_met()})
-	if not rt.nav_points.is_empty():
-		var reached := mini(rt.nav_index, rt.nav_points.size())
-		out.append({"text": "Reach the nav points (%d of %d)" % [reached, rt.nav_points.size()],
-			"done": reached >= rt.nav_points.size()})
-	return out
+	_refresh_objectives()
+	var lines := []
+	for line in _objectives.make_lines():
+		if line.text != "":
+			lines.append(line)
+	return lines
+
+
+## Brings the objectives' state and texts up to the world as it is now (the tests of the types are live, not latched).
+func _refresh_objectives() -> void:
+	if _goal != null:
+		_goal.text = _make_goal_text(mission_type(), _make_target_name())
+	_nav.text = NAV_TEXT % [mini(rt.nav_index, rt.nav_points.size()), rt.nav_points.size()] if not rt.nav_points.is_empty() else ""
+	_objectives.apply_tick(world, 0.0)
 
 
 ## What mission type `kind` asks of the player ("" for the nav-point types: their line is the nav progress).
@@ -121,9 +188,9 @@ static func _make_goal_text(kind: int, target: String) -> String:
 	if kind in DESTROY_TYPES:
 		return "Destroy %s" % target
 	if kind == TYPE_RECON:
-		return "Identify %s (target it) or clear the area" % target
+		return "Identify %s (target it)" % target
 	if kind == TYPE_DATALINK:
-		return "Establish the data link at %s or clear the area" % target
+		return "Establish the data link at %s" % target
 	if kind == TYPE_ESCORT:
 		return "Escort %s to the end of its route" % target
 	if kind in NAV_TYPES:
@@ -140,41 +207,23 @@ func _make_target_name() -> String:
 	return "the target"
 
 
-## Host, every rules tick (`dt` seconds): the recon and datalink objective flags.
+## Host, every rules tick (`dt` seconds): the recon flag and the datalink.
 func update_objective_flags(dt: float) -> void:
 	match mission_type():
 		TYPE_RECON:
 			if not recon_flag and _a_player_targets_order_target():
-				recon_flag = true
-				rt.battle.fx("message", ["Target identified.", 4.0], true)
+				_recon.apply_state(Objective.State.DONE)
+				rt.get_announcer().apply_say(MissionMessage.make_message(TEXT_RECON_DONE, RECON_MESSAGE_SECONDS, MissionMessage.CHANNEL_INFO))
 		TYPE_DATALINK:
-			_update_datalink(dt)
+			_link.apply_tick(world, dt)
 
 
 func _a_player_targets_order_target() -> bool:
 	var wanted := rt.target_nodes(squad_target())
-	for v in _living_players():
+	for v in get_living_players():
 		if v.target != null and wanted.has(v.target):
 			return true
 	return false
-
-
-func _update_datalink(dt: float) -> void:
-	if datalink_flag:
-		return
-	var link := _datalink_node()
-	var linking := false
-	for v in _living_players():
-		linking = linking or (link != null and _in_datalink_position(v, link))
-	if not linking:
-		_datalink_t = 0.0
-		return
-	if _datalink_t == 0.0:
-		rt.battle.fx("message", ["Datalink in progress - hold position.", 4.0], true)
-	_datalink_t += dt
-	if _datalink_t >= DATALINK_TIME:
-		datalink_flag = true
-		rt.battle.fx("message", ["Datalink complete.", 4.0], true)
 
 
 ## The object the datalink connects to (DBSIM 0x1cda0: a group target's first member).
@@ -185,20 +234,7 @@ func _datalink_node() -> Node3D:
 	return null
 
 
-static func _in_datalink_position(v: Node3D, link: Node3D) -> bool:
-	var to := link.global_position - v.global_position
-	to.y = 0.0
-	if to.length() >= DATALINK_RANGE_UNITS * Assets.UNIT:
-		return false
-	if to.is_zero_approx():
-		return true
-	var torso := float(v.get("torso_yaw")) if v.get("torso_yaw") != null else 0.0
-	var forward := (v.global_basis * Basis(Vector3.UP, torso)) * Vector3.FORWARD
-	forward.y = 0.0
-	return forward.angle_to(to) < DATALINK_CONE
-
-
-func _living_players() -> Array:
+func get_living_players() -> Array:
 	var out := []
 	for v in rt.get_tree().get_nodes_in_group("vehicles"):
 		if MissionRuntime._is_human_player(v) and v.alive:
@@ -299,8 +335,7 @@ func is_safe(u: Node3D) -> bool:
 			continue
 		if not squad and _group_hunts(v, u):
 			return false
-		var r := SAFE_RANGE_TARGETING_UNITS if v.target == u else SAFE_RANGE_UNITS
-		if v.global_position.distance_to(u.global_position) < r * Assets.UNIT:
+		if EsRanges.is_in_safe_range(v, u):
 			return false
 	return true
 
@@ -338,5 +373,5 @@ func update_alerts() -> void:
 			units.append(s)
 	for u in units:
 		var ar := rt.alert_region_of(u)
-		if ar >= 0 and ar < rt.regions.size() and not rt.regions[ar].fired and MissionTargets.is_noticed(u, vs, DETECT_RANGE_UNITS):
+		if ar >= 0 and ar < rt.regions.size() and not rt.regions[ar].fired and MissionTargets.is_noticed(u, vs, EsRanges.DETECT_RANGE_UNITS):
 			rt.fire_region(ar)

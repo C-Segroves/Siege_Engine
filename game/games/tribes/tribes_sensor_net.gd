@@ -9,7 +9,10 @@ extends RefCounted
 ##                 view); Tribes 1 soldiers carry no sensor, so their radar is the team's sensor network alone;
 ##   jammers       a unit with its sensor jammer pack on, or inside the range of its side's deployed jammer (Tribes 1
 ##                 supression), is seen only by sensors that detect jammed units (Tribes 2 detectsPassiveJammed: the
-##                 soldiers' own eyes; Tribes 1 none).
+##                 soldiers' own eyes; Tribes 1 none). The Tribes 2 cloaking pack jams its wearer the same way, worn or
+##                 not;
+##   cloaks        a cloaked unit is seen by no sensor beyond its reveal range, except by motion sensors
+##                 (detectsCloaked) while it moves at least their detectMinVelocity (CloakRules).
 ## Teammates and allies are always shown. Detection is refreshed every REFRESH_SECONDS on every peer.
 
 const REFRESH_SECONDS := 0.25
@@ -60,7 +63,7 @@ static func _make_teams(units: Array) -> Array:
 
 
 func _is_detected(team: int, unit: Node3D, sensors: Array, units: Array) -> bool:
-	var jammed := unit.has_meta(InfantryPack.META_JAM_RADIUS) or _is_under_jammer(team, unit, sensors)
+	var jammed := unit.has_meta(InfantryPack.META_JAM_RADIUS) or CloakRules.is_passive_jammed(unit) 		or _is_under_jammer(team, unit, sensors)
 	for s in sensors:
 		var o := s as TribesBaseObject
 		var rules: Dictionary = o.spec.get("sensor", {})
@@ -89,7 +92,8 @@ static func _is_under_jammer(team: int, unit: Node3D, sensors: Array) -> bool:
 
 func _senses(o: Node3D, rules: Dictionary, unit: Node3D) -> bool:
 	var to := unit.global_position + Vector3.UP * SIGHT_HEIGHT
-	if o.global_position.distance_to(to) > float(rules.get("range", 0.0)):
+	var distance := o.global_position.distance_to(to)
+	if distance > float(rules.get("range", 0.0)) or CloakRules.is_hidden_from_sensor(unit, rules, distance):
 		return false
 	return not bool(rules.get("los", false)) or _has_sight(o, o.global_position + Vector3.UP * SIGHT_HEIGHT, unit)
 
@@ -97,7 +101,7 @@ func _senses(o: Node3D, rules: Dictionary, unit: Node3D) -> bool:
 func _soldier_sees(viewer: Herc, unit: Node3D) -> bool:
 	var eye := viewer.global_position + Vector3.UP * SIGHT_HEIGHT
 	var to := unit.global_position + Vector3.UP * SIGHT_HEIGHT - eye
-	if to.length() > float(player_sensor.get("range", 0.0)):
+	if to.length() > float(player_sensor.get("range", 0.0)) or CloakRules.is_hidden_from_sensor(unit, player_sensor, to.length()):
 		return false
 	if bool(player_sensor.get("fov_only", false)):
 		var half := deg_to_rad(float(player_sensor.get("fov_deg", 90.0)) * float(player_sensor.get("fov_percent", 1.0))) * 0.5

@@ -7,7 +7,9 @@ extends RefCounted
 ##   shield  while on: the energy absorbs hits, energy_per_damage per point (T1 Player::onDamage
 ##           shieldStrength, T2 Armor checkShields / energyPerDamagePoint); spends energy_per_s;
 ##   jammer  while on: bots don't see the wearer beyond jam_radius and homing missiles are deflected;
-##   ammo    more rounds (InfantryKit.make_max_count, Infantry.make_rounds).
+##   ammo    more rounds (InfantryKit.make_max_count, Infantry.make_rounds);
+##   cloak   while on: the soldier is cloaked (CloakState; T2 cloaking pack, energy drain and breaks from its profile),
+##           and wearing it at all hides him from sensors that do not detect jammed units.
 ## A toggled pack switches off when the energy falls below its min_energy (the image's minEnergy).
 
 const META_JAM_DEG := "ecm_jam_deg"
@@ -25,6 +27,7 @@ static func make_recharge_bonus(kit: InfantryKit) -> float:
 static func apply_frame(soldier: Infantry, delta: float) -> void:
 	var kit := soldier.kit
 	var p := InfantryGear.pack(kit.pack_id)
+	apply_cloak_profile(soldier)
 	if kit.pack_active and soldier.capacitor < float(p.get("min_energy", 0.0)):
 		kit.pack_active = false
 	if kit.pack_active:
@@ -32,6 +35,18 @@ static func apply_frame(soldier: Infantry, delta: float) -> void:
 		if p.effect == "repair":
 			apply_repair(soldier, float(p.get("repair_per_s", 0.0)) * delta)
 	_apply_jamming(soldier, kit.pack_active and p.get("effect", "") == "jammer", p)
+	soldier.cloak.apply_follow(kit.pack_active and p.get("effect", "") == "cloak", soldier)
+	if soldier.cloak.take_forced_off():
+		kit.pack_active = false
+
+
+## Installs the cloak of the worn pack on `soldier` (none when the pack is not a cloak). Every peer runs it: a puppet
+## needs the profile for the fade and the reveal range.
+static func apply_cloak_profile(soldier: Infantry) -> void:
+	var p := InfantryGear.pack(soldier.kit.pack_id)
+	var wanted := str(p.get("cloak_profile", "")) if p.get("effect", "") == "cloak" else CloakProfile.make_timed_id(soldier)
+	if soldier.cloak.profile.id != wanted:
+		soldier.cloak.apply_profile(CloakProfile.of(wanted))
 
 
 ## Adds `amount` health (never above the armour's).

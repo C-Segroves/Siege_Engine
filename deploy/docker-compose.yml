@@ -1,0 +1,61 @@
+# Siege Engine game server. Run from this folder.
+#   LAN:    docker compose --profile lan    up -d --build    web build + game data + game server on one port
+#   Public: docker compose --profile public up -d --build    DEDICATED SERVER ONLY behind TLS (Caddy)
+# Settings: copy server.json.example to server.json and edit it; copy env.example to .env (ports, host name).
+# Guide: docs/SERVER_DEPLOY.md.
+name: siege
+
+x-game-server: &game-server
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile
+  restart: unless-stopped
+  volumes:
+    - ./server.json:/config/server.json:ro
+    # Your imported packs. The server reads them to run matches; it never serves them to anybody.
+    - ${SIEGE_GAMEDATA:-../gamedata}:/app/gamedata:ro
+
+services:
+  # ---------------------------------------------------------------- LAN profile
+  game-lan:
+    <<: *game-server
+    profiles: [lan]
+    command: ["--server", "--config=/config/server.json", "--transport=ws"]   # behind nginx: WebSocket
+    expose: ["47700", "47702"]
+
+  web-lan:
+    image: nginx:1.27-alpine
+    profiles: [lan]
+    restart: unless-stopped
+    depends_on: [game-lan]
+    ports:
+      - "${SIEGE_HTTP_PORT:-8080}:80"
+    volumes:
+      - ./nginx-server-lan.conf:/etc/nginx/conf.d/default.conf:ro
+      # The web build and the packed game data written by deploy/siege-update.sh (WEB_DEPLOY.md): LAN players only.
+      - ${SIEGE_SITE_DIR:-/srv/siege/site}:/srv/siege/site:ro
+
+  # ---------------------------------------------------------------- public profile
+  game-public:
+    <<: *game-server
+    profiles: [public]
+    command: ["--server", "--config=/config/server.json", "--transport=ws"]   # behind Caddy (wss): WebSocket
+    expose: ["47700", "47702"]
+
+  # TLS front: serves ONLY /ws (game) and /matches (list). No web build, no game data.
+  proxy-public:
+    image: caddy:2-alpine
+    profiles: [public]
+    restart: unless-stopped
+    depends_on: [game-public]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      SIEGE_DOMAIN: ${SIEGE_DOMAIN:?set SIEGE_DOMAIN in .env (a DNS name pointing at this machine)}
+    volumes:
+      - ./Caddyfile.public:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+
+volumes:
+  caddy-data:

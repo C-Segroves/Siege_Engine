@@ -52,6 +52,10 @@ func _ready() -> void:
 	OS.add_logger(_errors)
 	_pack = ScreenRouter.arg_value("expect-pack")
 	_shots = ScreenRouter.arg_value("shots")
+	if _pack == "":
+		print("single_pack_check: needs --expect-pack=<pack> and --test-store=<dir> (tools/sandbox_iso_test.py), skipped")
+		get_tree().quit(0)
+		return
 	await _run()
 	_record("no script errors", _errors.messages.is_empty(), "; ".join(_errors.messages.slice(0, 10)))
 	_write_report()
@@ -276,6 +280,9 @@ func _check_training() -> void:
 
 func _check_hangar() -> void:
 	var vid := _first_vehicle()
+	if vid == "":
+		_record("hangar shows its vehicle", true, "%s has no pilotable vehicle, skipped" % _pack)
+		return
 	var bay: HangarBay = load(HANGAR).instantiate()
 	add_child(bay)
 	await _frames(2)
@@ -313,13 +320,14 @@ func _check_extraction_menu() -> void:
 	var launcher: Launcher = load(LAUNCHER).instantiate()
 	get_tree().root.add_child(launcher)
 	await _frames(SHOT_DELAY_FRAMES)
-	var offered := _find_button(launcher, "Extraction raid (stash, shop, solo raid)") != null
+	var offered := _find_button(launcher, "Extraction raid (solo)") != null
 	_record("extraction offered only with a Tribes pack", offered == _has_infantry(), "offered %s" % offered)
 	await _save_shot("launcher_menu")
-	var host: RoutedScreen = launcher.go("host")
+	var lobby: RoutedScreen = launcher.open_lobby("vs")
 	await _frames(4)
-	var in_host := _option_items(host).any(func(t: String) -> bool: return t.begins_with("Extraction"))
-	_record("host screen offers extraction only with a Tribes pack", in_host == _has_infantry(), "offered %s" % in_host)
+	var in_host := _option_items(lobby).any(func(t: String) -> bool: return t.begins_with("Extraction"))
+	_record("the host lobby offers extraction only with a Tribes pack", in_host == _has_infantry(), "offered %s" % in_host)
+	Net.leave()
 	var modes := GameModes.make_mode_ids_for_map(_first_map_entry())
 	_record("map modes offer extraction only with a Tribes pack", not modes.has(ExtractionRules.MODE) or _has_infantry(),
 		"%s" % [modes])

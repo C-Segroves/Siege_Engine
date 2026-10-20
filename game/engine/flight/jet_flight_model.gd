@@ -27,13 +27,10 @@ const FLARE_HEIGHT := 25.0
 const FLARE_LEVEL := 0.25
 const GLIDE_PITCH := deg_to_rad(-6.0)
 const GROUND_TURN_RATE := 0.8
-## Autopilot gains: bank per rad of heading error, climb angle per metre of altitude error,
-## stick per rad of attitude error.
-const AUTO_BANK_PER_RAD := 1.2
-const AUTO_YAW_PER_RAD := 2.0
-const AUTO_CLIMB_PER_M := 0.02
-const AUTO_MAX_CLIMB := deg_to_rad(25.0)
+## Autopilot (FlightPilot): the stick per rad of attitude error, and the share of the turn demand that goes to the
+## rudder (the rest of the turn is the bank's).
 const AUTO_STICK_PER_RAD := 4.0
+const AUTO_RUDDER_SHARE := 0.5
 
 var pitch_rate := 0.0   # rad per frame
 var roll_rate := 0.0
@@ -117,10 +114,25 @@ func _step_landed(c: FlightControls, delta: float) -> void:
 
 # ------------------------------------------------------------------ autopilot
 
-func make_steering(heading_error: float, climb_error: float, throttle: float) -> FlightControls:
-	var want_bank := clampf(-heading_error * AUTO_BANK_PER_RAD, -MAX_BANK, MAX_BANK)
-	var roll := clampf((want_bank - bank) * AUTO_STICK_PER_RAD, -1.0, 1.0)
-	var yaw := clampf(-heading_error * AUTO_YAW_PER_RAD, -1.0, 1.0)
-	var want_pitch := clampf(climb_error * AUTO_CLIMB_PER_M, -AUTO_MAX_CLIMB, AUTO_MAX_CLIMB)
-	var nose := clampf((want_pitch - pitch) * AUTO_STICK_PER_RAD, -1.0, 1.0)
-	return FlightControls.make(throttle, roll, Vector2(yaw, nose), 0.0)
+func make_idle_speed() -> float:
+	return float(params.min_speed)
+
+
+func make_flying_speed() -> float:
+	return float(params.min_speed)
+
+
+func make_climb_scale() -> float:
+	return maxf(speed, float(params.min_speed))
+
+
+## The flight path turns with the nose: pitch rate (rad/s) times speed.
+func make_climb_accel() -> float:
+	return float(params.pitch_rate) * float(params.frames_per_second) * maxf(speed, float(params.min_speed))
+
+
+## Rolls to the wanted bank (the turn follows the bank), pitches to the wanted nose, rudder coordinated with the turn.
+func make_controls(c: FlightCommand) -> FlightControls:
+	var roll := clampf((c.bank - bank) * AUTO_STICK_PER_RAD, -1.0, 1.0)
+	var nose := clampf((c.pitch - pitch) * AUTO_STICK_PER_RAD, -1.0, 1.0)
+	return FlightControls.make(c.throttle, roll, Vector2(c.turn * AUTO_RUDDER_SHARE, nose), 0.0)

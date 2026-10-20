@@ -169,9 +169,10 @@ func spend_shot() -> void:
 		ammo -= 1
 
 
-## Starts a trigger pull: one shot, or a burst/salvo. Firing ends the shooter's spawn protection.
+## Starts a trigger pull: one shot, or a burst/salvo. Firing ends the shooter's spawn protection and breaks its cloak.
 func fire() -> void:
 	herc.end_spawn_protection()
+	herc.cloak.apply_fired(herc)
 	spend_shot()
 	_burst_left = burst - 1
 	_burst_t = burst_interval
@@ -191,6 +192,9 @@ func make_aim_point() -> Vector3:
 
 ## Shot direction from muzzle point `from` to the aim point (no spread).
 func make_aim_direction(from: Vector3) -> Vector3:
+	var led := herc.make_lead_direction(self, from)
+	if led != Vector3.ZERO:
+		return led
 	return (make_aim_point() - from).normalized()
 
 
@@ -254,13 +258,15 @@ func _fire_beams(from: Vector3, dir: Vector3, scale: float) -> void:
 		var side2 := herc.aim_basis().x * 0.5
 		origins = [from + side2, from - side2]
 	var aim_point := from + dir * from.distance_to(make_aim_point())
+	var rewind := LagCompensation.make_beam_rewind_for(herc, def)
 	for o in origins:
 		var beam_dir: Vector3 = (aim_point - o).normalized()   # side-by-side beams converge on the crosshair
-		WeaponShot.fire_beam({"shooter": herc, "def": def, "from": o, "dir": beam_dir, "scale": scale})
+		WeaponShot.fire_beam({"shooter": herc, "def": def, "from": o, "dir": beam_dir, "scale": scale, "rewind": rewind})
 
 
 func _spawn_projectile(from: Vector3, dir: Vector3) -> void:
-	var p := WeaponShot.launch_projectile({"shooter": herc, "def": def, "from": from, "dir": dir, "target": herc.target})
+	var p := WeaponShot.launch_projectile({"shooter": herc, "def": def, "from": from, "dir": dir, "target": herc.target,
+		"rewind": LagCompensation.make_rewind_for(herc)})
 	herc.missile_steering.adopt(p, group)
 
 

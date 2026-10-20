@@ -148,7 +148,7 @@ func _get_time(_n: String, _a: Array):
 # ------------------------------------------------------------------ objects
 
 func _schedule(_n: String, a: Array):
-	rt.timers.append([SSScript.num(_arg(a, 1, 0)), SSScript.to_str(_arg(a, 0))])
+	rt.schedule(SSScript.to_str(_arg(a, 0)), SSScript.num(_arg(a, 1, 0)))
 	return ""
 
 
@@ -248,7 +248,9 @@ func _say(name: String, a: Array):
 		text = String(rt.vm.tag(text))
 	if text != "" and not text.to_lower().ends_with(".wav"):
 		var line := SSRadio.make_line(text, _speaker_name(_arg(a, SAY_WHO_ARG)), SSScript.to_str(_arg(a, SAY_WAV_ARG)))
-		rt.battle.radio(str(line.speaker), str(line.text), str(line.voice))
+		var wav := str(line.voice)
+		rt.kit.announcer.apply_say(MissionMessage.make_message(str(line.text), 0.0, MissionMessage.CHANNEL_RADIO,
+			str(line.speaker), MissionVoice.make_voice(wav) if wav != "" else null))
 		rt.log_debug("say: %s" % text)
 	return ""
 

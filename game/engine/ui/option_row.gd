@@ -35,3 +35,13 @@ func with_value_readout(format := "%d") -> OptionRow:
 	add_child(readout)
 	range_control.value_changed.connect(func(v: float) -> void: readout.text = format % v)
 	return self
+
+
+## A row for a setting only the host may change: the same label column, the value as plain text (a Label, so it
+## never takes focus or looks editable). `row.control` is the value Label; set `.text` to update it.
+static func make_readonly(label_text: String, value_text: String) -> OptionRow:
+	var value := Widgets.label(value_text)
+	value.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	value.focus_mode = Control.FOCUS_NONE
+	value.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	return OptionRow.new(label_text, value)

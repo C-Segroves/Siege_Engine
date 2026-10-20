@@ -93,6 +93,7 @@ func apply_spec(p_spec: Dictionary) -> void:
 	_shield_cost = float((p_spec.get("shield", {}) as Dictionary).get("energy_per_point", 0.0))
 	_damage_scale = p_spec.get("damage_scale", {})
 	invincible = bool(p_spec.get("invincible", false))
+	SensorTowers.apply_register(self)
 
 
 ## A trimesh collision of `shape`'s visible meshes on `body` (in the body's frame; Structure.make_shape_collision).

@@ -24,10 +24,15 @@ from PIL import Image
 import aa_bitmap
 import aa_files
 import aa_interior
+import aa_logic
 import aa_mission
 import aa_shape
+import aa_soldier
 import aa_strings
 import aa_terrain
+import aa_turret
+import aa_vehicles
+import fx_default
 
 PACK = 'tribes_aa'
 MISSIONS = 'DATA/MISSIONS/'
@@ -47,6 +52,13 @@ SPEC = {'inventory': 'stationinventory', 'generator': 'generatorlarge', 'sensor'
 BARREL_SPEC = {'Plasma': 'turretbaselarge+plasmabarrellarge', 'AA': 'turretbaselarge+aabarrellarge',
                'Missile': 'turretbaselarge+missilebarrellarge', 'Mortar': 'turretbaselarge+mortarbarrellarge',
                'Sentry': 'sentryturret+sentryturretbarrel'}
+# The disc's own turrets (aa_turret): the base is turret_base_large, the barrel mounted on its Mount0 node by barrel type;
+# the sentry is one shape with its own barrel
+TURRET_BASE = 'turret_base_large'
+TURRET_BARREL = {'Plasma': 'turret_fusion_large', 'AA': 'turret_aa_large', 'Missile': 'turret_missile_large',
+                 'Mortar': 'turret_mortar_large', 'ELF': 'turret_elf_large'}
+TURRET_SENTRY = 'turret_sentry'
+RIGGED = {TURRET_BASE, TURRET_SENTRY} | set(TURRET_BARREL.values())
 ITEM_SHAPE = {'PLASMA': 'tribes2:weapon_plasma', 'CHAINGUN': 'tribes2:weapon_chaingun', 'DISC': 'tribes2:weapon_disc',
               'GRENADELAUNCHER': 'tribes2:weapon_grenade_launcher', 'SNIPERRIFLE': 'tribes2:weapon_sniper',
               'BLASTER': 'tribes2:weapon_energy', 'REPAIRPACK': 'tribes2:pack_upgrade_repair'}
@@ -60,6 +72,8 @@ OWN_ITEM = {'PLASMA': 'weapon_plasma', 'CHAINGUN': 'weapon_chaingun', 'DISC': 'w
             'ENERGYPACK': 'pack_energy', 'AMMOPACK': 'pack_ammo', 'SATCHELCHARGE': 'pack_satchel_charge', 'MINE': 'mine',
             'GRENADELAUNCHERAMMO': 'ammo_grenade', 'PLASMAAMMO': 'ammo_plasma', 'CHAINGUNAMMO': 'ammo_chaingun', 'DISCAMMO': 'ammo_disc'}
 _HAVE = set()                # shape names exported by export_shapes in this run
+_RIG = set()                 # shapes exported rigged in this run
+_BOUNDS = {}                 # vehicle shape -> (min, max) of the exported shape (aa_vehicles.records)
 
 
 def look_alike(kind, own=OWN_SHAPE):
@@ -73,18 +87,19 @@ AMMO_SHAPE = {'GRENADELAUNCHERAMMO': 'tribes2:ammo_grenade', 'PLASMAAMMO': 'trib
 
 
 def folder_of(path):
-    m = re.match(re.escape(MISSIONS) + r'([^/]+)/MISSION\.TXT$', path.replace(chr(92), '/'))
+    m = re.match(re.escape(MISSIONS) + r'([^/]+)/(?:SOLO-)?MISSION\.TXT$', path.replace(chr(92), '/'))
     return m.group(1) if m else None
 
 
 def mission_folders(files):
-    """{folder: parsed mission} for every MISSION.TXT (SOLO-MISSION.TXT is identical)."""
-    out = {}
+    """{folder: parsed mission}. The campaign's SOLO-MISSION.TXT is the MISSION.TXT script plus `#TAG "NAME"` lines that
+    name the objects the mission logic uses (GEN1, WAYPT1, DERM_2L_1M_1W ...), so it is read when there is one."""
+    names = {}
     for name, _s, _z in files.entries:
         f = folder_of(name)
-        if f and f not in out:
-            out[f] = aa_mission.parse(files.read(name).decode('latin-1'))
-    return out
+        if f and (f not in names or name.upper().endswith('SOLO-MISSION.TXT')):
+            names[f] = name
+    return {f: aa_mission.parse(files.read(n).decode('latin-1')) for f, n in names.items()}
 
 
 def is_campaign(folder):
@@ -147,7 +162,7 @@ def _modes(m):
     if m['flipflops'] and len(m['flags']) < 2:
         modes.append('capture_hold')
     if not modes and len(teams) <= 1:
-        modes.append('campaign')
+        modes.append('deathmatch')
     return modes
 
 
@@ -169,8 +184,12 @@ def to_map(folder, m, source):
             shape = LOOKALIKE['sentry'] if kind == 'turret' and o.get('barrel') == 'Sentry' else look_alike(kind)
             st = {'kind': kind, 'shape': shape, 'pos': _p(o['pos']), 'yaw': _yaw(o['rot']), 'team': _team(o['power']),
                   'switch': o['switch'], 'power': o['power']}
+            if o.get('tag'):
+                st['tag'] = o['tag']
             if o.get('barrel'):
                 st['barrel'] = o['barrel']
+            if kind == 'turret':
+                st.update(_own_turret(o.get('barrel')))
             st['spec'] = BARREL_SPEC.get(o.get('barrel'), 'turretbaselarge') if kind == 'turret' else SPEC.get(kind, '')
             st['power_group'] = o['power']
             if not st['spec']:
@@ -185,9 +204,13 @@ def to_map(folder, m, source):
         stations.append({'kind': 'ammo' if o['kind'].endswith('AMMO') else 'pickup', 'shape': shape, 'pos': _p(o['pos']),
                          'yaw': 0.0, 'team': -1, 'item': o['kind']})
     spawns = [{'kind': 'infantry', 'pos': _p(s['pos']), 'yaw': _yaw([0, s['yaw'], 0]), 'team': s['team'],
-               'radius': s['radius']} for s in m['spawns']]
+               'radius': s['radius'], 'indoor': False} for s in m['spawns']]
+    # A mission drop point is a terrain placement (the y in the file is often far off the ground: Escalade's lies
+    # 136 m below it); "indoor": False puts the soldier on the terrain at its x/z (MapBuilder._spawn_transform).
     for o in m['vehicle_pads']:
         spawns.append({'kind': 'vehicle_pad', 'pos': _p(o['pos']), 'yaw': _yaw(o['rot']), 'team': _team(o['power'])})
+        if o.get('tag'):
+            spawns[-1]['tag'] = o['tag']
     mode_objects, mid_n = [], 0
     for f in m['flags']:
         mid_n += 1
@@ -197,6 +220,8 @@ def to_map(folder, m, source):
         mid_n += 1
         mode_objects.append({'id': mid_n, 'kind': 'switch', 'team': -1, 'pos': _p(f['pos']), 'yaw': _yaw(f['rot']),
                              'shape': look_alike('switch'), 'modes': [], 'switch': f['switch']})
+        if f.get('tag'):
+            mode_objects[-1]['tag'] = f['tag']
     for n in m['nexus']:
         mid_n += 1
         mode_objects.append({'id': mid_n, 'kind': 'nexus', 'team': -1, 'pos': _p(n['pos']), 'yaw': 0.0,
@@ -209,12 +234,24 @@ def to_map(folder, m, source):
         'terrain': None, 'terrain_source': m.get('terrain', ''), 'ground_y': ground,
         'environment': _env(m), 'interiors': interiors, 'statics': statics, 'spawns': spawns, 'stations': stations,
         'power': m['power'], 'switch': m['switch'], 'power_groups': _power_groups(m),
-        'waypoints': [{'switch': w['switch'], 'name': w['name'], 'pos': _p(w['pos'])} for w in m['waypoints']],
+        'waypoints': [dict({'switch': w['switch'], 'name': w['name'], 'pos': _p(w['pos'])}, **({'tag': w['tag']} if w.get('tag') else {}))
+                      for w in m['waypoints']],
         'cameras': [_p(c) for c in m['cameras']],
         'notes': 'Aerial Assault: terrain (.TER) and shapes (.SHP) are not converted yet; flat ground at ground_y, '
                  'placements reference tribes_aa shape names, stations use Tribes 2 look-alikes. Team of a station is '
                  'a heuristic (power group 1/2 = team 0/1).',
     }
+
+
+def _own_turret(barrel):
+    """The disc's own turret shapes for a turret placement (when they exported rigged): {} keeps the Tribes 2 look-alike.
+    TribesBase.make_spec reads barrel_shape / barrel_mount over the Tribes 2 block's."""
+    if barrel == 'Sentry':
+        return {'shape': '%s:%s' % (PACK, TURRET_SENTRY), 'barrel_shape': '', 'barrel_mount': ''} if TURRET_SENTRY in _RIG else {}
+    own = TURRET_BARREL.get(barrel)
+    if TURRET_BASE in _RIG and own in _RIG:
+        return {'shape': '%s:%s' % (PACK, TURRET_BASE), 'barrel_shape': '%s:%s' % (PACK, own), 'barrel_mount': aa_turret.MOUNT}
+    return {}
 
 
 def index_row(mp):
@@ -469,6 +506,8 @@ def export_interiors(files, out, names, progress=None):
 def export_shapes(files, out, progress=None):
     """Every decodable .SHP of the shapes folder -> shapes/<name>.json (+ textures/aa/*.png). Returns {name: error | None}."""
     _HAVE.clear()
+    _BOUNDS.clear()
+    _RIG.clear()
     status, done = {}, {}
     names = [n for n, _s, _z in files.entries if n.replace(chr(92), '/').upper().startswith(SHAPE_DIR.upper().replace('C:/', 'C:/'))
              and n.upper().endswith('.SHP')]
@@ -478,9 +517,36 @@ def export_shapes(files, out, progress=None):
         if stem.endswith(SKIP_SUFFIX):
             continue
         try:
-            js = aa_shape.to_json(aa_shape.decode(files.read(n)), lambda t: export_texture(files, t, out, done))
+            raw = files.read(n)
+            tex = lambda t: export_texture(files, t, out, done)
+            js = None
+            if stem in RIGGED:                                  # animated turret part (aa_turret)
+                try:
+                    js = aa_turret.rigged_json(raw, tex)
+                except (ValueError, KeyError, IndexError, struct.error):
+                    js = None
+            if stem in aa_vehicles.RIGGED:                      # the transport: nodes + pose block like a turret
+                try:
+                    js = aa_turret.rigged_json(raw, tex, aa_vehicles.RIGGED[stem])
+                    _BOUNDS[stem] = js['bounds']['header']
+                except (ValueError, KeyError, IndexError, struct.error):
+                    js = None
+            if js is None and re.search(r'(?:light|medium|heavy)_(?:male|female|bioderm)$', stem):    # animated soldier (aa_soldier); else the rest-pose shape
+                try:
+                    js = aa_soldier.rigged_json(raw, tex)
+                except (ValueError, KeyError, IndexError, struct.error):
+                    js = None
+            if js is None:
+                sh = aa_shape.decode(raw)
+                if stem in aa_vehicles.NOSE:
+                    aa_shape.face_nose(sh, aa_vehicles.NOSE[stem])
+                js = aa_shape.to_json(sh, tex)
+                if stem in aa_vehicles.NOSE:
+                    _BOUNDS[stem] = js['bounds']['header']
             write_json(os.path.join(out, 'shapes', stem + '.json'), js)
             _HAVE.add(stem)
+            if js.get('source') == 'aa_shp_rigged' and stem in RIGGED:
+                _RIG.add(stem)
             status[stem] = None
         except (ValueError, KeyError, struct.error) as e:
             status[stem] = str(e)
@@ -499,6 +565,10 @@ def import_all(files, out, progress=None):
     """Write the whole pack content under `out`. Returns {'maps': n, 'campaign_missions': n}."""
     parsed = mission_folders(files)
     export_shapes(files, out, (lambda name, f: progress('shape ' + name, f * 0.5)) if progress else None)
+    vehicles = aa_vehicles.records(PACK, _BOUNDS)
+    if vehicles:
+        write_json(os.path.join(out, 'gameplay', 'hercs.json'), vehicles)
+    fx_default.export(PACK, out)                       # death effects: engine defaults (the pack names no explosions)
     buildings = {o['shape'] for m in parsed.values() for o in m['buildings']}
     export_interiors(files, out, buildings, (lambda name, f: progress('building ' + name, 0.5 + f * 0.25)) if progress else None)
     index = []
@@ -518,4 +588,13 @@ def import_all(files, out, progress=None):
     write_json(os.path.join(out, 'maps', '_index.json'), index)
     camp = make_campaign(files, parsed)
     write_json(os.path.join(out, 'campaign', 'campaign.json'), camp)
+    iso_path = getattr(files, 'iso_path', '')
+    if iso_path:
+        try:
+            logic = aa_logic.extract(aa_logic.read_elf(iso_path), aa_strings.read_table(files, 'OBJECTIVES'),
+                                     aa_strings.read_table(files, 'CAMPAIGN'))
+        except ImportError:      # capstone is not installed: the missions keep the reach-and-destroy fallback
+            logic = None
+        if logic:
+            write_json(os.path.join(out, 'campaign', 'logic.json'), logic)
     return {'maps': len(parsed), 'arena_maps': len(index), 'campaign_missions': len(camp['missions'])}

@@ -1,7 +1,7 @@
 class_name InventoryPanel
 extends PanelContainer
 ## The raid inventory (inventory_toggle; ExtractionDirector): what the local player carries, his load and money,
-## with Drop (one / all: into a bag at his feet), Use (a vehicle call-in) and Equip (a weapon not in hand, a pack not
+## with Drop (one / all: into a bag at his feet) and Equip (a weapon not in hand, a pack not
 ## worn: playtest X4) per item. A modal like ConfirmDialog: the theme's ModalShade dims the whole HUD (radar,
 ## objectives, instruments) and the ModalPanel sits centred above it, on a layer over every HUD layer. Each row is
 ## two columns: the name and detail wrap on the left, the buttons keep their place on the right. Keyboard and
@@ -175,8 +175,6 @@ static func _make_detail(id: String, units: int) -> String:
 
 func _make_buttons(id: String, units: int) -> Array:
 	var out := []
-	if ExtractionItems.kind_of(id) == "callin":
-		out.append(Widgets.small_button("Use", func() -> void: director.request_use(id), Widgets.PRIMARY))
 	var s := director.battle.player as Infantry
 	if s and ExtractionLoadout.can_equip(s, id):
 		out.append(Widgets.small_button("Equip", func() -> void: director.request_equip(id), Widgets.PRIMARY))

@@ -73,6 +73,10 @@ func _run_screen_command(m: ShellMenu, cid: int) -> bool:
 		EsShell.CAREER_MENU:
 			return _run_career_menu(cid)
 		EsShell.REGISTER_MENU:
+			if cid == EsShell.CLASSIC_CMD:
+				shell.pending_classic = not shell.pending_classic
+				m.find(EsShell.CLASSIC_CMD).label = ShellMenuContent.classic_label(shell.pending_classic)
+				return true
 			return _run_if(cid == EsShell.OK_ID, _create_career.bind(m))
 		EsShell.BACKUPS_MENU:
 			return shell.backups.run(m, cid)
@@ -256,6 +260,7 @@ func _create_career(m: ShellMenu) -> void:
 		shell.toast(DUPLICATE_CAREER % n)
 		return
 	EsShell.career = shell.careers.make_new(n)
+	EsShell.career["classic"] = shell.pending_classic
 	SaveGames.reset_clock(0.0)
 	MissionLaunch.ensure_campaign_state(EsShell.career)
 	shell.careers.save(EsShell.career)

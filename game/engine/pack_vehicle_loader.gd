@@ -420,6 +420,8 @@ static func _bd_muzzle_on_node(pod: Dictionary) -> Dictionary:
 
 ## Picks a sensible weapon for each hardpoint from the hardpoint size mask.
 func default_loadout(v: Dictionary) -> Array:
+	if v.is_empty():
+		return []
 	var pack: String = v.pack
 	var out := []
 	var heavy_toggle := false

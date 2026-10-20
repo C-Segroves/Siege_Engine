@@ -11,8 +11,6 @@ const BRIEFING_REGION := 3000
 const DEBRIEFING_REGION := 5000
 ## Ambient TTMs of each room (ShellSequences: the commander's room door and lights, the officer's blink).
 const AMBIENT_BY_REGION := {BRIEFING_REGION: ["C%d_BRD", "C%d_BRJ"], DEBRIEFING_REGION: ["C%d_BLNK"]}
-## Display size on the launcher page (twice the original resolution).
-const DISPLAY_SIZE := Vector2(640, 400)
 
 var screen: ShellScreen
 var voice: AudioStreamPlayer
@@ -22,12 +20,10 @@ var _skip := false
 
 
 func _ready() -> void:
-	var holder := Control.new()
-	holder.custom_minimum_size = DISPLAY_SIZE
-	holder.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	var holder := MediaBox.new(float(ShellScreen.W) / ShellScreen.H)
 	add_child(holder)
 	screen = ShellScreen.new()
-	holder.add_child(screen)
+	holder.fit(screen, float(ShellScreen.W) / ShellScreen.H)
 	screen.cursor_visible = false
 	voice = AudioStreamPlayer.new()
 	add_child(voice)

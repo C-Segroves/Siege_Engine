@@ -1,18 +1,20 @@
 class_name LobbyText
 ## The LAN lobby's texts: what to do next (per mode and role) and one line per pilot.
 
-const HOST_CAMPAIGN := "Co-op campaign - you host it. 1. Pick your Herc from the campaign garage (Hangar to refit). " \
-	+ "2. Wait until every pilot shows READY. 3. Press Start mission. Pilots who join later wait for the next mission."
-const CLIENT_CAMPAIGN := "Co-op campaign - the host runs the campaign. 1. Pick your Herc from the host's garage below. " \
-	+ "2. Press Ready (bottom right). The host starts the mission when every pilot is ready."
-const HOST_MATCH := "Set up your Herc and soldier, then press Start match once every pilot shows READY."
-const CLIENT_MATCH := "Set up your Herc and soldier, then press Ready (bottom right). The host starts the match."
-const HOST_TEAMS := " Pick a team for any pilot in the team list."
-const CLIENT_TEAMS := " Pick your team in the team list."
+const HOST_CAMPAIGN := "Co-op campaign - you host it. 1. Pick your Herc from the campaign garage (Hangar to refit). " 	+ "2. Wait until every pilot shows READY. 3. Press Start mission. Pilots who join later wait for the next mission."
+const CLIENT_CAMPAIGN := "Co-op campaign - the host runs the campaign. 1. Pick your Herc from the host's garage. " 	+ "2. Press Ready (bottom right). The host starts the mission when every pilot is ready."
+const SOLO_CAMPAIGN := "Pick your Herc and your wingmen, read the briefing, then press Start mission."
+const HOST_MATCH := "Set up your operator, then press Start match once every pilot shows READY."
+const CLIENT_MATCH := "Set up your operator, then press Ready (bottom right). The host starts the match."
+const SOLO_MATCH := "Set up your operator, then press Start match."
+const HOST_TEAMS := " Pick a team for any pilot in Adjust teams."
+const CLIENT_TEAMS := " Pick your team on your card."
 
 
 ## What the local pilot does next in a lobby with `settings`.
 static func make_instructions(settings: Dictionary, is_host: bool) -> String:
+	if bool(settings.get("solo", false)):
+		return SOLO_CAMPAIGN if settings.get("mode") == "campaign" else SOLO_MATCH
 	if settings.get("mode") == "campaign":
 		return HOST_CAMPAIGN if is_host else CLIENT_CAMPAIGN
 	var text := HOST_MATCH if is_host else CLIENT_MATCH

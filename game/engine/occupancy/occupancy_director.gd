@@ -22,6 +22,8 @@ extends Node
 signal seats_changed(vehicle: Herc)
 ## Host: `peer` asked to get out and exit_guard refused it for `reason` (a mode shows it to him).
 signal exit_refused(peer: int, reason: String)
+## Host: `peer` pressed enter at a vehicle that a rule keeps him out of (its reason, e.g. a reservation).
+signal boarding_refused(peer: int, reason: String)
 
 ## Time before a soldier who left a vehicle boards that same vehicle by touch again (Tribes 1 newMountTime
 ## 3 s, only for the vehicle he left - `lastMount != %this` lets him take another at once; Tribes 2
@@ -30,6 +32,9 @@ const REMOUNT_DELAY_MS := 4000
 const MOUNT_SOUND_DB := -4.0
 ## One press boards or leaves once: a second request from the same peer this soon after is ignored.
 const TOGGLE_DEBOUNCE_MS := 100
+
+## No hull is anywhere near this long: a soldier further than this from a vehicle cannot be touching it (skips the full check).
+const TOUCH_PREFILTER_M := 60.0
 
 var battle: Battle
 ## Host: func(peer: int, vehicle: Herc) -> String: "" = he may get out, else why not (the extraction raid's safe
@@ -188,6 +193,8 @@ func apply_enter_exit(peer: int) -> void:
 	if not choice.is_empty() and bool(choice.check.ok):
 		_last_toggle_ms[peer] = now
 		apply_board(peer, choice.vehicle, int(choice.check.seat))
+	elif not choice.is_empty() and BoardingRules.make_claim_reason(soldier, choice.vehicle) != "":
+		boarding_refused.emit(peer, BoardingRules.make_claim_reason(soldier, choice.vehicle))
 
 
 ## Host: `peer` pressed the jump key inside a vehicle: out of a Tribes vehicle (the others keep the key for
@@ -280,12 +287,15 @@ func _carry_riders() -> void:
 
 ## Tribes vehicles: a soldier on foot who touches one boards it (Vehicle::onCollision / Armor::onCollision).
 func _board_by_touch() -> void:
+	var touchable = null   # the vehicles one touches to board, listed once per tick and only when a soldier is on foot
 	for peer in _soldier_of_peer:
 		var s := soldier_of(int(peer))
 		if s == null or s.stowed or not s.alive:
 			continue
-		for h in battle.vehicles.values():
-			if not is_instance_valid(h) or h is Infantry or not BoardingRules.is_boarded_by_touch(h.def):
+		if touchable == null:
+			touchable = _make_touchable_vehicles()
+		for h in touchable:
+			if not is_instance_valid(h) or s.global_position.distance_squared_to(h.global_position) > TOUCH_PREFILTER_M * TOUCH_PREFILTER_M:
 				continue
 			if is_remount_blocked(s, h):
 				continue
@@ -293,6 +303,15 @@ func _board_by_touch() -> void:
 			if bool(check.ok):
 				apply_board(int(peer), h, int(check.seat))
 				break
+
+
+## The vehicles (not soldiers) one boards by touching them, in the table's order.
+func _make_touchable_vehicles() -> Array:
+	var out := []
+	for h in battle.vehicles.values():   # soldiers are most of the table: the cheap type test first
+		if is_instance_valid(h) and not (h is Infantry) and BoardingRules.is_boarded_by_touch(h.def):
+			out.append(h)
+	return out
 
 
 ## True while `soldier` may not board `vehicle` by touch again (he just left it).

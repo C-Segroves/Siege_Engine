@@ -139,7 +139,7 @@ func _check_items() -> void:
 	var salvage := ExtractionItems.items_of_kind("salvage")
 	_expect(not salvage.is_empty() and salvage.all(func(r: Dictionary) -> bool: return Packs.weapon(str(r.ref)).get("category") == "herc"),
 		"Herc weapon salvage from the Herc games (%d)" % salvage.size())
-	_expect(not ExtractionItems.items_of_kind("callin").is_empty(), "vehicle call-ins from the pilotable vehicles")
+	_expect(not (load("res://engine/extraction/extraction_director.gd") as GDScript).get_script_method_list().any(func(m: Dictionary) -> bool: return str(m.name) == "request_use"), "vehicle call-in tokens have no Use path any more (call-ins are paid with raid points)")
 
 
 func _check_loot_per_pack_set() -> void:
@@ -297,11 +297,11 @@ func _check_free_weapon_and_board() -> void:
 	var p := ExtractionProfile.new()
 	p.apply_new("QA Tasks")
 	var first := str(p.make_task_board()[0].id)
-	_expect(p.apply_take_task(first) and p.apply_take_task(str(p.task_board[1].id)) and not p.apply_take_task(str(p.task_board[2].id)),
-		"at most %d tasks taken" % RaidTaskBoard.make_max_picked())
+	_expect(RaidTaskBoard.make_max_picked() == 3 and p.apply_take_task(first) and p.apply_take_task(str(p.task_board[1].id)) and p.apply_take_task(str(p.task_board[2].id))
+		and not p.apply_take_task(str(p.task_board[3].id)), "at most %d tasks taken" % RaidTaskBoard.make_max_picked())
 	var q := ExtractionProfile.new()
 	q.apply_dict(JSON.parse_string(JSON.stringify(p.to_dict())))
-	_expect(q.tasks.size() == 2 and q.make_kit_dict().tasks.size() == 2 and q.task_board.size() == p.task_board.size(), "tasks saved and in the raid kit")
+	_expect(q.tasks.size() == 3 and q.make_kit_dict().tasks.size() == 3 and q.task_board.size() == p.task_board.size(), "tasks saved and in the raid kit")
 	var cyb := {"kind": RaidTaskBoard.KIND_KILL_VEHICLES, "faction": "cybrid", "count": 2}
 	var uen := {"kind": RaidTaskBoard.KIND_KILL_VEHICLES, "faction": "uen", "count": 2}
 	_expect(RaidTaskBoard.make_reward(cyb) > RaidTaskBoard.make_reward(uen), "harder factions pay more (%d > %d)" % [RaidTaskBoard.make_reward(cyb), RaidTaskBoard.make_reward(uen)])
@@ -425,6 +425,7 @@ func _check_raid_extract() -> void:
 	await _check_panel(battle)
 	await _check_equip(battle, soldier)
 	await _check_station(battle, soldier)
+	_check_ammo_conservation(soldier)
 	await _check_deploy(battle, soldier)
 	_check_exit_safety(battle, soldier)
 	await _check_task_kill(battle, soldier)
@@ -471,6 +472,51 @@ func _check_equip(battle: Battle, soldier: Infantry) -> void:
 	await _shot("x4_inventory_equip", "extraction2")
 	InventoryPanel.close_open(x)
 	await _frames(2)
+
+
+## Playtest: "the chaingun has infinite ammo". Reload and the magazine draw only from the carried ammo stack: rounds in the
+## magazine plus rounds in the stack fall by exactly the shots fired (the ammo pack's extra rounds enlarge the magazine,
+## they are not created), and an empty stack leaves an empty, unfireable weapon.
+func _check_ammo_conservation(soldier: Infantry) -> void:
+	print("ammo conservation (reload draws from the stack):")
+	var w: InfantryWeapon = null
+	for cand in soldier.weapons:
+		if cand is InfantryWeapon and cand.ammo_max > 0 and ExtractionItems.has(ExtractionItems.make_id("ammo", cand.weapon_id)):
+			w = cand
+			break
+	_expect(w != null, "the raid soldier carries a weapon that uses ammunition")
+	if w == null:
+		return
+	var aid := ExtractionItems.make_id("ammo", w.weapon_id)
+	var saved_ammo := w.ammo
+	var saved_pack := soldier.kit.pack_id
+	var pack_ids := InfantryGear.packs_of(soldier.armor).filter(func(pk) -> bool: return InfantryGear.pack(str(pk)).has("extra_rounds"))
+	for with_pack in ([false, true] if not pack_ids.is_empty() else [false]):
+		var inv := ExtractionInventory.new()
+		inv.apply_add_unchecked(aid, 1000)
+		if with_pack:
+			inv.apply_add_unchecked(ExtractionItems.make_id("pack", str(pack_ids[0])), 1)
+		var tag := "with the ammo pack" if with_pack else "without a pack"
+		w.ammo = 0
+		ExtractionLoadout.apply_reload(soldier, inv)
+		_expect(w.ammo <= w.ammo_max and w.ammo + inv.count(aid) == 1000, "%s: the first reload moves rounds, creates none (%d loaded, %d left, max %d)" % [
+			tag, w.ammo, inv.count(aid), w.ammo_max])
+		for i in 7:
+			w.cooldown = 0.0
+			w.spend_shot()
+		ExtractionLoadout.apply_reload(soldier, inv)
+		_expect(w.ammo + inv.count(aid) == 993, "%s: 7 shots cost 7 rounds in all (%d)" % [tag, w.ammo + inv.count(aid)])
+		inv.apply_take(aid, inv.count(aid))
+		var shots := 0
+		while w.ammo > 0 and shots < 2000:
+			w.cooldown = 0.0
+			w.spend_shot()
+			shots += 1
+		ExtractionLoadout.apply_reload(soldier, inv)
+		w.cooldown = 0.0
+		_expect(w.ammo == 0 and not w.ready_to_fire() and shots <= w.ammo_max, "%s: with the stack gone the weapon runs dry after %d shots" % [tag, shots])
+	w.ammo = saved_ammo
+	soldier.apply_worn_pack(saved_pack)
 
 
 ## X2: an inventory station opens the supply panel; reload and buying with carried / account credits.
@@ -1145,19 +1191,22 @@ func _check_interrupt_and_bleed_out(battle: Battle, x: ExtractionDirector, me: I
 	await _shot_close(battle, spot, "bled_out_bag", 4.0, "extraction2")
 
 
-# ------------------------------------------------------------------ the stash screen
+# ------------------------------------------------------------------ the solo raid lobby and its stash
 
 func _check_screen() -> void:
-	print("stash screen:")
+	print("solo raid lobby:")
 	var launcher: Launcher = load("res://launcher.tscn").instantiate()
 	get_tree().root.add_child(launcher)
 	get_tree().current_scene = launcher
 	await _frames(4)
-	launcher.go("extraction")
+	var lobby := launcher.open_lobby("extraction", true) as LobbyScreen
 	await _frames(4)
-	var rows := launcher.current.find_children("*", "ItemRow", true, false)
-	_expect(rows.size() > 3, "kit, stash and shop rows (%d)" % rows.size())
+	_expect(ExtractionRules.is_extraction(Net.settings) and Net.roster.size() == 1, "an offline raid lobby with the pilot alone")
+	lobby.sheets.open_setup(lobby.profile)
+	await _frames(6)
+	_expect(lobby.has_modal(), "Operator Setup (the stash, the shop and the kit) opens over the lobby")
 	await _shot("8_stash")
+	Net.leave()
 	launcher.queue_free()
 	get_tree().current_scene = null
 	await _frames(2)

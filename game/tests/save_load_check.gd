@@ -84,6 +84,7 @@ func _open_launcher() -> Launcher:
 
 func _close(launcher: Launcher) -> void:
 	Net.stop_discovery()
+	Net.leave()
 	launcher.queue_free()
 	await _frames()
 
@@ -120,7 +121,7 @@ func _check_new_campaign_screen() -> void:
 		screen.primary_button.pressed.emit()
 		await _frames()
 		_expect(Session.pilot_name == PILOT and Session.campaign_key() == str(choice.key), "%s starts for %s" % [choice.text, PILOT])
-		_expect(launcher.current_name in ["briefing", "saga_choice"], "%s opens its first page (%s)" % [choice.text, launcher.current_name])
+		_expect(launcher.current_name in ["lobby", "saga_choice"], "%s opens its first page (%s)" % [choice.text, launcher.current_name])
 		_expect(not _autosave_of(str(choice.key)).is_empty(), "%s is autosaved at once" % choice.text)
 		await _close(launcher)
 	await _check_restart_asks(choices[choices.size() - 1])
@@ -199,9 +200,9 @@ func _check_round_trip() -> void:
 func _check_save_screen_confirms() -> void:
 	Session.start_new_campaign({"pack": "es1", "variant": ""}, PILOT)
 	var launcher := await _open_launcher()
-	launcher.go("briefing")   # Back returns to the page Save game was opened from (the navigation stack)
+	launcher.show_started_campaign()   # Back returns to the page Save game was opened from (the navigation stack)
 	await _frames()
-	var screen := launcher.go("saves", {"mode": "save", "return_to": "briefing"})
+	var screen := launcher.go("saves", {"mode": "save", "return_to": "lobby"})
 	await _frames()
 	(screen.get("_name_edit") as LineEdit).text = "QA slot"
 	screen.primary_button.pressed.emit()
@@ -220,7 +221,7 @@ func _check_save_screen_confirms() -> void:
 	await _check_delete_asks(launcher, "QA slot")
 	launcher.current.back_button.pressed.emit()
 	await _frames()
-	_expect(launcher.current_name == "briefing", "Back returns to the briefing")
+	_expect(launcher.current_name == "lobby", "Back returns to the lobby")
 	await _close(launcher)
 
 
@@ -291,6 +292,8 @@ func _check_pilot_killed() -> void:
 		if choice.get("saga", false):
 			continue
 		Session.start_new_campaign(choice, PILOT)
+		if Session.garage() == null:
+			continue   # Tribes campaigns keep no garage: nothing is restored on a replay, and there is no Herc to compare
 		var mission := str(Session.campaign.current_mission())
 		var garage_before := JSON.stringify(Session.garage().to_dict())
 		var e := Session.garage().make_battle_entry()

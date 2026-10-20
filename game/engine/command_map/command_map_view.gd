@@ -8,6 +8,8 @@ extends Control
 ## finds what lies under a point (make_pick).
 
 signal picked(pick: Dictionary)
+## A right click on the map (it cancels a call-in being ordered).
+signal cancelled
 
 const UNIT_RADIUS := 4.0
 const OBJECT_SIZE := 7.0
@@ -18,9 +20,16 @@ const CURSOR_STEP := 12.0
 const DARK := Color(0.25, 0.25, 0.25)
 const ORDER_COLOR := Color(1.0, 0.85, 0.2)
 ## Friend or foe, as on the Tribes 2 command circuit (the side, not the team colour, which may be red).
-const FRIEND_COLOR := Color(0.35, 0.95, 0.45)
-const ENEMY_COLOR := Color(0.95, 0.25, 0.2)
-const NAV_COLOR := Color(0.55, 0.95, 0.9)
+const FRIEND_COLOR := RadarColors.FRIEND
+const ENEMY_COLOR := RadarColors.ENEMY
+const NAV_COLOR := RadarColors.OTHER
+const OTHER_COLOR := RadarColors.OTHER
+## "Me": a large white-ringed diamond marker with this label, over the unit symbol.
+const ME_COLOR := Color(1.0, 1.0, 1.0)
+const ME_LABEL := "YOU"
+const ME_RING := 11.0
+const ME_FONT_SIZE := 15
+const FRIEND_LABEL_SIZE := 12
 const STRUCTURE_GROUP := "targetables"
 const NAV_GROUP := "nav_points"
 ## A playable area larger than this (metres; an Earthsiege ground plane) is narrowed to where things are.
@@ -34,6 +43,8 @@ var cursor := Vector2.ZERO        # pixels
 var selected: Array = []          # net ids of the units being commanded
 var background: Texture2D
 var icons := CommandMapIcons.new()
+## Extraction raid: the call-in order being made draws over the map (CommandMapCallins).
+var callin_order: CommandMapCallins
 
 
 func setup(p_battle: Node3D, p_viewer: Node3D) -> void:
@@ -104,18 +115,20 @@ func _draw() -> void:
 		_draw_unit(v)
 	_draw_raid_markers()
 	for m in PersonalWaypoints.make_marks(viewer.global_position):
-		UnitSymbols.draw_labeled_marker(self, to_map(m.pos), str(m.label), PersonalWaypoints.COLOR, ThemeDB.fallback_font, 14)
+		UnitSymbols.draw_labeled_marker(self, to_map(m.pos), str(m.label), OTHER_COLOR, ThemeDB.fallback_font, 14)
 	var orders := CommandOrders.of(battle)
 	if orders:
 		for id in orders.orders:
 			draw_circle(to_map(orders.make_point(orders.orders[id], orders.make_target(orders.orders[id]))), 3.0, ORDER_COLOR)
+	if callin_order != null:
+		callin_order.draw(self)
 	draw_line(cursor - Vector2(CURSOR_SIZE, 0), cursor + Vector2(CURSOR_SIZE, 0), Color.WHITE, 1.0)
 	draw_line(cursor - Vector2(0, CURSOR_SIZE), cursor + Vector2(0, CURSOR_SIZE), Color.WHITE, 1.0)
 
 
 func _draw_structure(s: Node3D) -> void:
 	var team := int(s.get("team")) if s.get("team") != null else -1
-	var c := MapTeams.OTHER_TEAM_COLOR if team < 0 else (FRIEND_COLOR if _is_friend(s) else ENEMY_COLOR)
+	var c := OTHER_COLOR if team < 0 else (FRIEND_COLOR if _is_friend(s) else ENEMY_COLOR)
 	var working := TribesBase.is_working(s)
 	var p := to_map(s.global_position)
 	if not icons.draw(self, CommandMapIcons.make_structure_kind(s), p, team < 0 or _is_friend(s), c if working else c * DARK):
@@ -124,7 +137,7 @@ func _draw_structure(s: Node3D) -> void:
 
 func _draw_unit(v: Node3D) -> void:
 	var friendly := _is_friend(v)
-	var c := FRIEND_COLOR if friendly else ENEMY_COLOR
+	var c := RadarColors.make_unit_color(viewer, v)
 	var p := to_map(v.global_position)
 	if is_unit_symbology():
 		if friendly:
@@ -133,8 +146,35 @@ func _draw_unit(v: Node3D) -> void:
 			UnitSymbols.draw_square(self, p, c)
 	elif not icons.draw(self, icons.make_unit_kind(v, v == viewer), p, friendly, c):
 		UnitSymbols.draw_arrow(self, p, UnitSymbols.make_facing(v), c) if friendly else UnitSymbols.draw_square(self, p, c)
-	if selected.has(int(v.net_id)) or v == viewer:
+	if selected.has(int(v.net_id)):
 		draw_arc(p, UNIT_RADIUS + 3.0, 0.0, TAU, 16, Color.WHITE, 1.5)
+	if v == viewer:
+		_draw_me(p)
+	elif friendly and c == FRIEND_COLOR:
+		_draw_friend_label(v, p)
+
+
+## "Me" is unmistakable: a double white ring round a big green arrow and the label "YOU".
+func _draw_me(p: Vector2) -> void:
+	var font := ThemeDB.fallback_font
+	draw_circle(p, ME_RING, Color(0, 0, 0, 0.5))
+	draw_arc(p, ME_RING, 0.0, TAU, 32, ME_COLOR, 2.5)
+	draw_arc(p, ME_RING + 4.0, 0.0, TAU, 32, FRIEND_COLOR, 1.5)
+	UnitSymbols.draw_arrow(self, p, UnitSymbols.make_facing(viewer), FRIEND_COLOR, 1.6)
+	var at := p + Vector2(ME_RING + 7.0, ME_FONT_SIZE * 0.35)
+	draw_string_outline(font, at, ME_LABEL, HORIZONTAL_ALIGNMENT_LEFT, -1, ME_FONT_SIZE, 4, Color(0, 0, 0, 0.9))
+	draw_string(font, at, ME_LABEL, HORIZONTAL_ALIGNMENT_LEFT, -1, ME_FONT_SIZE, ME_COLOR)
+
+
+## A teammate's name in green beside its symbol.
+func _draw_friend_label(v: Node3D, p: Vector2) -> void:
+	var text := str(v.get("display_name")) if v.get("display_name") != null else ""
+	if text == "":
+		return
+	var font := ThemeDB.fallback_font
+	var at := p + Vector2(UNIT_RADIUS + 5.0, FRIEND_LABEL_SIZE * 0.35)
+	draw_string_outline(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, 120, FRIEND_LABEL_SIZE, 3, Color(0, 0, 0, 0.9))
+	draw_string(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, 120, FRIEND_LABEL_SIZE, FRIEND_COLOR)
 
 
 ## True in an extraction raid: every unit wears the arrow (team) / square (contact) symbols, not the game's icons.
@@ -150,10 +190,10 @@ func _draw_raid_markers() -> void:
 	var font := ThemeDB.fallback_font
 	for i in ex.zones.size():
 		UnitSymbols.draw_labeled_marker(self, to_map(ex.zones[i]), "EXFIL %s" % ExtractionTransports.make_zone_name(i),
-			Color(0.4, 1.0, 0.6), font, 14)
+			OTHER_COLOR, font, 14)
 	if ex.tasks != null:
 		for m in ex.tasks.make_markers():
-			UnitSymbols.draw_labeled_marker(self, to_map(m.pos), str(m.label), Color(1.0, 0.95, 0.3), font, 14)
+			UnitSymbols.draw_labeled_marker(self, to_map(m.pos), str(m.label), OTHER_COLOR, font, 14)
 
 
 func _is_friend(v: Node) -> bool:
@@ -162,7 +202,7 @@ func _is_friend(v: Node) -> bool:
 
 ## The live combatants the viewer's side knows of: friends, enemies on his radar now (CommandMapKnowledge).
 func make_units() -> Array:
-	return get_tree().get_nodes_in_group("vehicles").filter(func(v: Node) -> bool:
+	return RadarContacts.make_units(get_tree()).filter(func(v: Node) -> bool:
 		return v.alive and not (v is Infantry and (v as Infantry).stowed) and CommandMapKnowledge.is_unit_known(viewer, v))
 
 
@@ -200,6 +240,9 @@ func _gui_input(event: InputEvent) -> void:
 	elif event is InputEventMouseButton and event.pressed and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_LEFT:
 		cursor = (event as InputEventMouseButton).position
 		picked.emit(make_pick(cursor))
+		accept_event()
+	elif event is InputEventMouseButton and event.pressed and (event as InputEventMouseButton).button_index == MOUSE_BUTTON_RIGHT:
+		cancelled.emit()
 		accept_event()
 	elif event.is_action_pressed("ui_accept"):
 		picked.emit(make_pick(cursor))

@@ -38,6 +38,9 @@ static func make_action_bindings(action: String) -> String:
 	var hold := make_hold_text(action)
 	if hold != "":
 		parts.append(hold)
+	var chord := make_chord_text(action)
+	if chord != "":
+		parts.append(chord)
 	return SEPARATOR.join(parts) if not parts.is_empty() else "(unbound)"
 
 
@@ -69,7 +72,7 @@ static func make_event_text(ev: InputEvent) -> String:
 	if ev is InputEventKey:
 		var k := ev as InputEventKey
 		var code := k.physical_keycode if k.physical_keycode != KEY_NONE else k.keycode
-		return OS.get_keycode_string(code)
+		return OS.get_keycode_string(code | BindingContexts.make_key_modifiers(k))
 	if ev is InputEventMouseButton:
 		return MOUSE_BUTTONS.get((ev as InputEventMouseButton).button_index, ev.as_text())
 	if ev is InputEventJoypadButton:
@@ -84,3 +87,18 @@ static func make_event_text(ev: InputEvent) -> String:
 ## "fire_group_1" -> "Fire group 1".
 static func make_action_name(action: String) -> String:
 	return action.replace("_", " ").capitalize()
+
+
+## "Pad LB + Pad RB" for a chord action (SiegeInput CHORD_ACTIONS), "" for any other.
+static func make_chord_text(action: String) -> String:
+	var tree := Engine.get_main_loop() as SceneTree
+	var input: Node = tree.root.get_node_or_null("/root/SiegeInput") if tree != null else null
+	if input == null or input.get_script() == null:
+		return ""
+	var chords: Dictionary = input.get_script().get_script_constant_map().get("CHORD_ACTIONS", {})
+	if not chords.has(action):
+		return ""
+	var names := PackedStringArray()
+	for button in chords[action]:
+		names.append(JOY_BUTTONS.get(button, str(button)))
+	return " + ".join(names)

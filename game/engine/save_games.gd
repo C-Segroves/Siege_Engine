@@ -218,7 +218,8 @@ static func make_slug(text: String) -> String:
 ## `info`: {pilot, playtime, coop, kind, name}.
 static func make_save(c: Object, saga: Saga, info: Dictionary) -> Dictionary:
 	var d := {"pilot": str(info.get("pilot", DEFAULT_PILOT)), "playtime": float(info.get("playtime", 0.0)),
-		"coop": bool(info.get("coop", false)), "meta": make_meta(c, saga, info)}
+		"coop": bool(info.get("coop", false)), "classic": bool(info.get("classic", false)),
+		"meta": make_meta(c, saga, info)}
 	if saga != null:
 		d["saga"] = saga.to_dict()
 	else:
@@ -236,7 +237,7 @@ static func make_meta(c: Object, saga: Saga, info: Dictionary) -> Dictionary:
 		"pilot": str(info.get("pilot", DEFAULT_PILOT)), "campaign_key": make_campaign_key(pack, variant, saga != null),
 		"title": _make_title(pack, variant, saga), "mission": _make_progress_text(c, saga),
 		"packs": [pack] if pack != "" else [], "saved_at": Time.get_unix_time_from_system(),
-		"playtime": float(info.get("playtime", 0.0)), "finished": finished,
+		"classic": bool(info.get("classic", false)), "playtime": float(info.get("playtime", 0.0)), "finished": finished,
 		"victory": finished and c != null and c.is_victory()}
 
 

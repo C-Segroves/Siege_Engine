@@ -50,6 +50,7 @@ func spawn_vehicle(id: int) -> void:
 	h.set_meta("ss_id", id)
 	h.set_meta(StarsiegeCommandProvider.PILOT_META, str(int(d.get("pilot", 0))))   # his voice set (squad orders)
 	rt.watch_unit(h, id)
+	_apply_cloak_install(h, d)
 	_register_unit(id, h, pos)
 	apply_team_stance(id)
 	if h is Flyer and SSFlyerOrders.is_parked_placement(rt, d):
@@ -62,6 +63,15 @@ func _spawn_position(o: Dictionary) -> Vector3:
 		pos.y = rt.ground_height_at(pos) + 0.5
 		return pos
 	return rt.make_start_position(pos, UNIT_START_LIFT)
+
+
+## The cloak among the mountables the .mis lists for the vehicle (datIntMounts.cs newCloak), when its catalog entry has none.
+func _apply_cloak_install(h: Herc, d: Dictionary) -> void:
+	if h.cloak.is_equipped():
+		return
+	var p := CloakProfile.of_mountables(StarsiegeMissionRuntime.PACK, MissionRuntime._arr(d.get("mountables")))
+	if p.is_real():
+		h.cloak.apply_profile(p)
 
 
 ## Weapon ids per hardpoint; a vehicle listing no weapon at all keeps its catalog loadout.
@@ -253,6 +263,9 @@ func order_unit(id: int, what: String, args: Array) -> void:
 	var h := tree.node_of(id) as Herc
 	if u.is_empty() or h == null:
 		return
+	if what == "cloak":
+		_order_cloak(h, args)
+		return
 	if h is Flyer:
 		SSFlyerOrders.order(tree, h as Flyer, what, args)
 		return
@@ -274,7 +287,12 @@ func order_unit(id: int, what: String, args: Array) -> void:
 			if what != "holdposition" or SSScript.truthy(a0) or args.is_empty():
 				_order_hold_position(u, h)
 		_:
-			pass   # height, cloak, flythrough, zigzag, useactiveradar, retreat: not modelled
+			pass   # height, flythrough, zigzag, useactiveradar, retreat: not modelled
+
+
+## cloak <on>: the vehicle switches its cloak component on or off; without one the order does nothing.
+static func _order_cloak(h: Herc, args: Array) -> void:
+	h.cloak_input = SSScript.truthy(args[0]) if not args.is_empty() else true
 
 
 func _order_attack(u: Dictionary, h: Herc, target) -> void:

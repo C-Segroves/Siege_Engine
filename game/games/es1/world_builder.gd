@@ -170,24 +170,20 @@ static func place_zone(parent: Node3D, zone: int, pal: String, pack := "es1") ->
 		place_static(parent, sid, xf, pal)
 
 
+## Server profile: the collision faces of every static shape placed so far (shape id -> faces in the body's frame).
+## A shape is built once, its faces kept and its (large) shape data released.
+static var _hull_faces := {}
+
+
 ## Places a static shape (terrain feature or building) with mesh collision.
 static func place_static(parent: Node3D, shape_id: String, xf: Transform3D, pal: String) -> StaticBody3D:
 	var body := StaticBody3D.new()
 	body.name = shape_id.replace(":", "_")
 	body.transform = xf
 	parent.add_child(body)
-	var inst := ShapeInstance.new()
-	body.add_child(inst)
-	inst.build(Assets.shape(shape_id), 0, pal)
-	var faces := PackedVector3Array()
-	for mi in inst.find_children("*", "MeshInstance3D", true, false):
-		if not mi.visible:
-			continue
-		var mxf: Transform3D = body.global_transform.affine_inverse() * mi.global_transform
-		for v in mi.mesh.get_faces():
-			faces.append(mxf * v)
-	faces.append_array(inst.make_collision_faces(body))   # undrawn faces that close the hulls (Torque null surfaces)
+	var faces := make_hull_faces(body, shape_id, pal)
 	if faces.size() >= 3:
+		LoadKeepAlive.pump()
 		var cs := ConcavePolygonShape3D.new()
 		cs.backface_collision = true
 		cs.set_faces(faces)
@@ -195,6 +191,36 @@ static func place_static(parent: Node3D, shape_id: String, xf: Transform3D, pal:
 		col.shape = cs
 		body.add_child(col)
 	return body
+
+
+## The collision faces of `shape_id` in `body`'s frame. The full world keeps the built shape under `body`; the server
+## profile keeps only the faces (cached per shape id) and releases the shape data.
+static func make_hull_faces(body: StaticBody3D, shape_id: String, pal: String) -> PackedVector3Array:
+	var collision_only := ServerProfile.is_collision_only()
+	if collision_only and _hull_faces.has(shape_id):
+		return _hull_faces[shape_id]
+	var inst := ShapeInstance.new()
+	body.add_child(inst)
+	var data := Assets.shape(shape_id)
+	LoadKeepAlive.pump()
+	inst.build(data, 0, pal)
+	LoadKeepAlive.pump()
+	var faces := PackedVector3Array()
+	for mi in inst.find_children("*", "MeshInstance3D", true, false):
+		LoadKeepAlive.pump()
+		if not mi.visible:
+			continue
+		var mxf: Transform3D = body.global_transform.affine_inverse() * mi.global_transform
+		for v in mi.mesh.get_faces():
+			faces.append(mxf * v)
+	LoadKeepAlive.pump()
+	faces.append_array(inst.make_collision_faces(body))   # undrawn faces that close the hulls (Torque null surfaces)
+	if collision_only:
+		body.remove_child(inst)
+		inst.free()
+		Assets.release_shape(shape_id)
+		_hull_faces[shape_id] = faces
+	return faces
 
 
 # ------------------------------------------------------------------ Earthsiege 2 (see ES2WorldBuilder)

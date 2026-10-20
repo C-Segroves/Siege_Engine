@@ -20,7 +20,7 @@ func open(_args: Dictionary) -> void:
 	MoviePlayer.play_all(self, CampaignPresentation.make_movies(Session.campaign, CampaignPresentation.MOMENT_KILLED))
 
 
-## Back to the restore point, then the same mission again (the briefing when the launch was not recorded).
+## Back to the restore point, then the same mission again (the campaign lobby when the launch was not recorded).
 func _replay() -> void:
 	MatchFlow.replay_mission(launcher())
 

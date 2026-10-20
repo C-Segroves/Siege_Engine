@@ -83,6 +83,10 @@ func _check_synthetic_kinds() -> void:
 	_expect(MissionKinds.runtime_script({"pack": "tribes", "runtime": "tribes"}) == Tribes1MissionRuntime, "Tribes")
 	_expect(MissionKinds.runtime_script({"pack": "tribes2", "runtime": "tribes"}) == Tribes2MissionRuntime, "Tribes 2")
 	_expect(MissionKinds.make_mission_herc({"pack": "es1"}).is_empty(), "Earthsiege leaves the Herc to the player")
+	_expect(MissionKinds.runtime_script({"runtime": "tribes_aa"}) == AAMissionRuntime, "Aerial Assault is claimed by its registration")
+	_expect(MissionKinds.runtime_script({"runtime": "tribes_v"}) == TVMissionRuntime, "Vengeance is claimed by its registration")
+	var kinds_source := FileAccess.get_file_as_string("res://engine/mission_kinds.gd")
+	_expect(not kinds_source.contains("MissionRuntime."), "engine/mission_kinds.gd names no game runtime class")
 	var ss: Object = StarsiegeMissionRuntime.new()
 	var tr: Object = Tribes1MissionRuntime.new()
 	var es2: Object = MissionRuntimeES2.new()
@@ -254,9 +258,9 @@ func _reference_es1(rt: MissionRuntime) -> Array:
 	elif kind in [6, 8, 9]:
 		out.append({"text": "Destroy %s" % target, "done": met})
 	elif kind == 0:
-		out.append({"text": "Identify %s (target it) or clear the area" % target, "done": met})
+		out.append({"text": "Identify %s (target it)" % target, "done": met})
 	elif kind == 3:
-		out.append({"text": "Establish the data link at %s or clear the area" % target, "done": met})
+		out.append({"text": "Establish the data link at %s" % target, "done": met})
 	elif kind == 7:   # escort: its own line since the type-7 fix (mission.md 5)
 		out.append({"text": "Escort %s to the end of its route" % target, "done": met})
 	elif not kind in [1, 2]:

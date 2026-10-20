@@ -1,0 +1,316 @@
+{
+	"version": 1,
+	"notes": "Economy design numbers (docs/design/lobby_loadout_economy.md section 2.5): remake values, not original game data. Every item, price base, shape and skin comes from the installed packs at run time.",
+	"currency": "cr",
+	"slot_count": 3,
+	"start_credits": 1000,
+	"rebuy_price": 100,
+	"rebuy_kinds": [
+		"armor",
+		"body",
+		"skin",
+		"vehicle",
+		"herc_skin"
+	],
+	"min_price": 25,
+	"unlock_multiplier": {
+		"weapon": 2.0,
+		"herc_weapon": 2.0,
+		"ammo": 1.0,
+		"gear": 2.0,
+		"pack": 2.0,
+		"armor": 2.0,
+		"vehicle": 1.5,
+		"body": 1.0,
+		"skin": 1.0,
+		"herc_skin": 1.0
+	},
+	"flat_base_price": {
+		"skin": 250,
+		"herc_skin": 250,
+		"body": 900
+	},
+	"armor_base_by_size": {
+		"light": 600,
+		"medium": 1800,
+		"heavy": 3600
+	},
+	"vehicle_base_range": [
+		2500,
+		14000
+	],
+	"price_source": "ExtractionItems prices (ratings from CombatRating / Packs.combat_rating) for weapon, herc_weapon (salvage), ammo (one full load), gear, pack; armor_base_by_size and vehicle_base_range here",
+	"free_unlocks": {
+		"armor": [
+			"tribes:LIGHT",
+			"tribes:MEDIUM",
+			"tribes:HEAVY"
+		],
+		"skin_packs": [
+			"tribes"
+		],
+		"default_skin_and_body": true,
+		"default_loadout_weapons": true,
+		"weapons": [
+			"tribes:BLASTER"
+		],
+		"gear": [
+			"tribes:GRENADE"
+		],
+		"free_outside_extraction": [
+			"weapon",
+			"herc_weapon",
+			"ammo",
+			"gear",
+			"pack"
+		],
+		"starter_vehicle_per_pack": true,
+		"vehicle_default_loadout": true,
+		"armor_spawn_kit": true
+	},
+	"options": {
+		"notes": "Answers to docs/design/lobby_loadout_economy.md section 13. O2, O5, O6 and O8 were answered by the user on 2026-10-19.",
+		"o1_profile_authority": "local",
+		"o2_ammo_mode": "free_outside_extraction",
+		"o3_starter_vehicle_packs": [],
+		"o4_vehicle_risk": "on_call_in",
+		"o5_extraction_free_armors": [
+			"tribes:LIGHT"
+		],
+		"o6_team_goals": "individual_only",
+		"o7_callin_pad_binding": "lb_rb_chord",
+		"o9_wingman_loadout": "per_game",
+		"o8_raid_points": {
+			"max": 1000,
+			"carry_over": true,
+			"lost_on_death": true,
+			"to_credits": 0.0
+		}
+	},
+	"goals": {
+		"max_individual": 3,
+		"max_team": 3,
+		"board_size": 6,
+		"pool": [
+			{
+				"id": "kills10",
+				"scope": "individual",
+				"kind": "kills",
+				"count": 10,
+				"reward": 80,
+				"text": "Get {count} kills",
+				"modes": [
+					"vs",
+					"coop",
+					"campaign"
+				]
+			},
+			{
+				"id": "kills20",
+				"scope": "individual",
+				"kind": "kills",
+				"count": 20,
+				"reward": 180,
+				"text": "Get {count} kills",
+				"modes": [
+					"vs",
+					"coop",
+					"campaign"
+				]
+			},
+			{
+				"id": "vehicles3",
+				"scope": "individual",
+				"kind": "vehicle_kills",
+				"count": 3,
+				"reward": 120,
+				"text": "Destroy {count} vehicles",
+				"modes": [
+					"vs",
+					"coop",
+					"campaign"
+				]
+			},
+			{
+				"id": "survive",
+				"scope": "individual",
+				"kind": "survived",
+				"count": 1,
+				"reward": 60,
+				"text": "Finish the match alive",
+				"modes": [
+					"vs",
+					"coop",
+					"campaign"
+				]
+			},
+			{
+				"id": "objectives2",
+				"scope": "individual",
+				"kind": "objectives",
+				"count": 2,
+				"reward": 140,
+				"text": "Complete {count} objectives",
+				"modes": [
+					"vs.ctf",
+					"coop",
+					"campaign"
+				]
+			},
+			{
+				"id": "flag2",
+				"scope": "individual",
+				"kind": "flag_captures",
+				"count": 2,
+				"reward": 120,
+				"text": "Capture {count} flags",
+				"modes": [
+					"vs.ctf"
+				]
+			},
+			{
+				"id": "team_kills30",
+				"scope": "team",
+				"kind": "kills",
+				"count": 30,
+				"reward": 150,
+				"text": "Squad: {count} kills together",
+				"modes": [
+					"vs.team_deathmatch",
+					"vs.ctf",
+					"coop"
+				]
+			},
+			{
+				"id": "team_objectives3",
+				"scope": "team",
+				"kind": "objectives",
+				"count": 3,
+				"reward": 200,
+				"text": "Squad: {count} objectives",
+				"modes": [
+					"vs.ctf",
+					"coop",
+					"campaign"
+				]
+			},
+			{
+				"id": "team_vehicles5",
+				"scope": "team",
+				"kind": "vehicle_kills",
+				"count": 5,
+				"reward": 160,
+				"text": "Squad: destroy {count} vehicles",
+				"modes": [
+					"vs.team_deathmatch",
+					"vs.ctf",
+					"coop"
+				]
+			},
+			{
+				"id": "team_survive",
+				"scope": "team",
+				"kind": "survived",
+				"count": 1,
+				"reward": 100,
+				"text": "Squad: everyone survives",
+				"modes": [
+					"coop",
+					"campaign"
+				]
+			}
+		]
+	},
+	"earn": {
+		"min_match_s": 60,
+		"left_early_factor": 0.5,
+		"bot_kill_factor": 0.5,
+		"modes": {
+			"solo": {
+				"per_minute": 0,
+				"per_kill": 0,
+				"per_vehicle_kill": 0,
+				"per_assist": 0,
+				"per_objective": 0,
+				"win_bonus": 0,
+				"loss_bonus": 0,
+				"cap": 0
+			},
+			"vs.deathmatch": {
+				"per_minute": 4,
+				"per_kill": 20,
+				"per_vehicle_kill": 40,
+				"per_assist": 8,
+				"per_objective": 0,
+				"win_bonus": 150,
+				"loss_bonus": 40,
+				"cap": 1500
+			},
+			"vs.team_deathmatch": {
+				"per_minute": 4,
+				"per_kill": 16,
+				"per_vehicle_kill": 40,
+				"per_assist": 8,
+				"per_objective": 0,
+				"win_bonus": 200,
+				"loss_bonus": 60,
+				"cap": 1500
+			},
+			"vs.ctf": {
+				"per_minute": 5,
+				"per_kill": 12,
+				"per_vehicle_kill": 40,
+				"per_assist": 8,
+				"per_objective": 120,
+				"win_bonus": 250,
+				"loss_bonus": 80,
+				"cap": 2000
+			},
+			"vs": {
+				"per_minute": 4,
+				"per_kill": 15,
+				"per_vehicle_kill": 40,
+				"per_assist": 8,
+				"per_objective": 80,
+				"win_bonus": 200,
+				"loss_bonus": 60,
+				"cap": 1500
+			},
+			"coop": {
+				"per_minute": 5,
+				"per_kill": 18,
+				"per_vehicle_kill": 45,
+				"per_assist": 8,
+				"per_objective": 100,
+				"win_bonus": 300,
+				"loss_bonus": 60,
+				"cap": 2000
+			},
+			"campaign.coop": {
+				"per_minute": 5,
+				"per_kill": 15,
+				"per_vehicle_kill": 40,
+				"per_assist": 8,
+				"per_objective": 150,
+				"win_bonus": 400,
+				"loss_bonus": 80,
+				"cap": 2500
+			},
+			"extraction": {
+				"per_minute": 0,
+				"per_kill": 0,
+				"per_vehicle_kill": 0,
+				"per_assist": 0,
+				"per_objective": 0,
+				"win_bonus": 0,
+				"loss_bonus": 0,
+				"on_extract": 150,
+				"cap": 0
+			}
+		}
+	},
+	"tooltips": {
+		"not_allowed": "Not allowed in this mode: %s",
+		"lost": "Lost in a raid - buy back for %d cr"
+	}
+}

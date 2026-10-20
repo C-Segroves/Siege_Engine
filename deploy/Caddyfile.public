@@ -1,0 +1,14 @@
+# Public profile: TLS in front of the game server. Only the WebSocket game port and the match list are reachable.
+# No web build and no game data are served: players bring their own data.
+{$SIEGE_DOMAIN} {
+	encode zstd gzip
+
+	@ws path /ws
+	reverse_proxy @ws game-public:47700
+
+	@matches path /matches /health
+	reverse_proxy @matches game-public:47702
+
+	# Everything else: nothing here.
+	respond 404
+}

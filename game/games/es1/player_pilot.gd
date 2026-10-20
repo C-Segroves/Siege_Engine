@@ -46,7 +46,9 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _apply_command(event: InputEvent) -> void:
-	if event.is_action_pressed("throttle_stop"):
+	if event.is_action_pressed("cloak_toggle"):
+		herc.cloak_input = not herc.cloak_input and herc.cloak.is_equipped()
+	elif event.is_action_pressed("throttle_stop"):
 		herc.throttle = 0.0
 	elif event.is_action_pressed("torso_center"):
 		_center_aim()
