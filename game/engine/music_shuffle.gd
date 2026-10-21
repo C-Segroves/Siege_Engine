@@ -24,6 +24,11 @@ func start(prefer_pack := "") -> bool:
 	return true
 
 
+## Whether this shuffle's track is the music playing now.
+func is_playing() -> bool:
+	return _last != "" and Sfx.music_key() == _last
+
+
 func stop() -> void:
 	if Sfx.music_finished.is_connected(_on_finished):
 		Sfx.music_finished.disconnect(_on_finished)
@@ -62,5 +67,8 @@ func _play_next() -> void:
 	Sfx.play_music_file(_last, _pool.size() == 1, FADE)   # a lone track loops instead of ending in silence
 
 
-func _on_finished(_key: String) -> void:
-	_play_next()
+## Only our own track ending moves on: when other music took over (a CD playlist, a menu song), its ending
+## is not ours to answer.
+func _on_finished(key: String) -> void:
+	if key == _last:
+		_play_next()

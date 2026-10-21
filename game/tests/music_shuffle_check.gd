@@ -28,6 +28,7 @@ func _run() -> void:
 	_check_pool()
 	_check_next()
 	_check_battle_fallback()
+	_check_menu_fallback()
 	print("music_shuffle_check: %d failures" % _fails)
 	get_tree().quit(1 if _fails > 0 else 0)
 
@@ -69,3 +70,20 @@ func _check_battle_fallback() -> void:
 			"Varuna's Fall plays shuffled music from the installed games")
 		music.stop()
 		Sfx.stop_music(0.0)
+
+
+## The lobby on a map whose game has no menu music (an extraction raid, Tribes 2's silent shell) keeps music
+## playing instead of cutting to silence; picking another such map carries on the same track.
+func _check_menu_fallback() -> void:
+	if MusicShuffle.make_pool(Soundtracks.all(), "").is_empty():
+		print("     no music installed: the menu fallback is not exercised")
+		return
+	Sfx.stop_music(0.0)
+	MenuMusic.play_app_hub()
+	var hub_track := Sfx.music_key()
+	_expect(hub_track != "", "the library hub plays music instead of silence")
+	MenuMusic.play_for_pack("extraction")
+	_expect(Sfx.music_key() == hub_track, "picking an extraction raid in the lobby keeps the music going")
+	MenuMusic.play_for_pack("tribes2")
+	_expect(Sfx.music_key() != "", "a game with a silent shell gets music in the lobby")
+	Sfx.stop_music(0.0)
