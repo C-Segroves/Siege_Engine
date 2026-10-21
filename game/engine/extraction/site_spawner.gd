@@ -9,7 +9,7 @@ extends Node
 ##               stolen flag of the faction), longer for humans and shorter for the horde at night
 ##   patrols     now and then a few soldiers of a faction walk from one of its sites to another and join its garrison
 ##   raids       the horde's caves send a raiding party at night-weighted intervals against the weakest site in range
-##   day         a clock (day.length_s) with a night phase; there is no visual day cycle, it only weighs the timers
+##   day         a clock (day.length_s) with a night phase (DayCycle); the sky, sun and fog follow it (DayCycleLight) and it weighs the timers
 ## It is a child "SiteSpawner" of the ExtractionDirector; the director asks it for the opening populations (they give
 ## the kill and flag tasks their targets) and the sites' faction teams.
 
@@ -29,6 +29,9 @@ var patrols: Array = []
 var raids: Array = []
 var raid_count := 0
 var patrol_count := 0
+## The Cybrid siege (CybridSiege) stretches the reinforcement timers by this factor and stops patrols and raids.
+var refill_factor := 1.0
+var movement_paused := false
 ## Id of the patrol and the raid timer in _timers.
 const TIMER_PATROL := "patrol"
 const TIMER_RAID := "raid"
@@ -62,8 +65,7 @@ func start_host(rng_seed: int) -> void:
 	var m: Dictionary = director.built.map
 	var available := ExtractionFactions.make_available().map(func(f: Dictionary) -> String: return str(f.id))
 	var faction_ids: Array = ExtractionRules.factions().map(func(f: Dictionary) -> String: return str(f.id))
-	var day: Dictionary = rules().get("day", {})
-	clock_s = float(day.get("start_phase", 0.0)) * float(day.get("length_s", 1800.0))
+	clock_s = DayCycle.make_start_clock(day_timing())
 	for s in m.sites:
 		var fid := str(s.faction)
 		if not available.has(fid):
@@ -111,16 +113,16 @@ func spawn_initial() -> void:
 
 ## Position in the day (0..1).
 func make_phase() -> float:
-	var length := maxf(float((rules().get("day", {}) as Dictionary).get("length_s", 1800.0)), 1.0)
-	return fposmod(clock_s / length, 1.0)
+	return DayCycle.make_phase(day_timing(), clock_s)
+
+
+## The raid's day: the record the sky and sun follow too (DayCycleLight), so night here is dark there.
+static func day_timing() -> Dictionary:
+	return rules().get("day", {})
 
 
 func is_night() -> bool:
-	var day: Dictionary = rules().get("day", {})
-	var p := make_phase()
-	var from := float(day.get("night_from", 0.7))
-	var to := float(day.get("night_to", 0.1))
-	return p >= from or p < to
+	return DayCycle.is_night(day_timing(), make_phase())
 
 
 func _night_factor(table_key: String, faction_id: String) -> float:
@@ -153,7 +155,7 @@ func make_timer(site: Dictionary) -> float:
 	var t := rng.randf_range(float(pair[0]), float(pair[1]))
 	if clock_s < float(site.attacked_until):
 		t *= float(rules().get("under_attack_timer_factor", 0.5))
-	return t * _night_factor("night_timer_factor", str(site.faction))
+	return t * _night_factor("night_timer_factor", str(site.faction)) * refill_factor
 
 
 # ------------------------------------------------------------------ monitor
@@ -255,8 +257,8 @@ func apply_tick(dt: float) -> void:
 			_waves.apply_trigger(TRIGGER_REINFORCE + str(s.id))
 			s["timer"] = make_timer_of(s)
 	var due := _timers.apply_tick(dt)
-	_apply_patrols(due.has(TIMER_PATROL))
-	_apply_raids(due.has(TIMER_RAID))
+	_apply_patrols(due.has(TIMER_PATROL) and not movement_paused)
+	_apply_raids(due.has(TIMER_RAID) and not movement_paused)
 
 
 ## A reinforcement batch of the site `group` is due (WaveDirector arrival): a rolled number of soldiers, cut to what
@@ -288,6 +290,31 @@ func _apply_soldier_lod(players: Array) -> void:
 				far = false
 				break
 		h.far_lod = far and not h.stowed and director.faction_teams.has(h.team) 				and Time.get_ticks_msec() >= int(h.get_meta(META_LOD_HOLD, 0))
+
+
+## Removes up to `n` living garrison soldiers, the ones farthest from every player (the Cybrid siege takes their room under
+## the bot cap, BotBudget); returns how many left.
+func apply_retire_farthest(n: int) -> int:
+	var players := _find_player_positions()
+	var ranked := []
+	for s in sites:
+		for b in s.bots:
+			if is_instance_valid(b) and (b as InfantryBot).soldier.alive:
+				ranked.append({"bot": b, "site": s, "far": _make_nearest_distance((b as InfantryBot).soldier.global_position, players)})
+	ranked.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return float(a.far) > float(b.far))
+	var gone := 0
+	for r in ranked.slice(0, n):
+		(r.site.bots as Array).erase(r.bot)
+		director.battle.remove_vehicle((r.bot as InfantryBot).soldier.net_id)
+		gone += 1
+	return gone
+
+
+static func _make_nearest_distance(at: Vector3, points: Array) -> float:
+	var best := INF
+	for p in points:
+		best = minf(best, Vector2(at.x - p.x, at.z - p.z).length())
+	return best
 
 
 ## Wakes the units within `radius` of `center` (BotSleep.wake_area; the rifle scope's TODO names this call).

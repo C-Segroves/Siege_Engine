@@ -14,6 +14,8 @@ var _pilot := "QA Varuna %d" % OS.get_process_id()
 const SEED := 4242
 const SETTLE_FRAMES := 20
 const REGION_SAMPLES := 400
+## Longest the refill check waits (ticks of 30 s). Measured with patrols and raids paused: 20 ticks for 16 soldiers.
+const REFILL_MAX_TICKS := 60
 
 var _failures := 0
 var _guard := SavedCampaignGuard.new()
@@ -295,12 +297,14 @@ func _check_refill(battle: Battle, sp: SiteSpawner) -> void:
 	var first_timer := sp.make_timer_left(site)
 	sp.apply_tick(0.5)
 	_expect(sp.count_alive(site) == 0 and bool(site.awake), "a player in range wakes the site; the timer (%.0f s) has not run out" % first_timer)
+	sp.movement_paused = true   # a raid or patrol met on the way would kill the reinforcements and make the time random
 	var steps := 0
-	while sp.count_alive(site) < target and steps < 60:
+	while sp.count_alive(site) < target and steps < REFILL_MAX_TICKS:
 		sp.apply_tick(30.0)
 		await _frames(1)
 		steps += 1
 	print("    alive %d target %d awake %s player alive %s total %d" % [sp.count_alive(site), target, site.awake, player.alive, sp.count_total_alive()])
+	sp.movement_paused = false
 	cap_rules["max_alive"] = cap
 	_expect(sp.count_alive(site) >= target, "the population is back to %d after the reinforcement timers (%d ticks of 30 s)" % [target, steps])
 	var near := true

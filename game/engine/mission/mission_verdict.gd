@@ -13,6 +13,9 @@ var delay := 0.0
 var wait_for_voice := false
 ## The grace runs after the voice has played, not beside it (Aerial Assault: the closing prompt, then 2 s).
 var grace_after_voice := false
+## A pending verdict with a different code replaces this one and restarts its grace (Earthsiege 2: a change of status
+## starts the 4.9 s over, 7 -> 8); other verdicts leave the first one standing.
+var rearms_on_code_change := false
 
 
 static func make_win(p_code: int, p_text := "", p_delay := 0.0, p_wait_for_voice := false) -> MissionVerdict:
@@ -26,6 +29,12 @@ static func make_loss(p_code: int, p_text := "", p_delay := 0.0, p_wait_for_voic
 ## Makes the grace start once the voice has played; returns this verdict.
 func apply_grace_after_voice() -> MissionVerdict:
 	grace_after_voice = true
+	return self
+
+
+## Makes a pending verdict re-arm when a verdict with another code arrives; returns this verdict.
+func apply_rearm_on_code_change() -> MissionVerdict:
+	rearms_on_code_change = true
 	return self
 
 

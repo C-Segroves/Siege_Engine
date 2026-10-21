@@ -796,6 +796,53 @@ Tests run: `compile_all` (759 scripts, 0 failed), `bot_lod_check` (with the new 
 `infantry_check`, `infantry2_check`, `extraction_check`, `varuna_check`, `game_modes_check`, `far_bots_check`, `scope_check` and the 7 `trace_*_check`
 goldens (not re-recorded) pass.
 
+#### 8.5.4 Jolt for the server, interest cell index (2026-10-21, fifth round)
+
+**(a) Jolt Physics: kept, as a server-only setting.** Godot reads `physics/3d/physics_engine` once at start-up (no script can switch it, there is
+no `--physics-engine` flag in 4.6, and no `headless` feature tag), so the server profile is a file: `deploy/server_override.cfg`
+(`3d/physics_engine="Jolt Physics"`) is copied to the gitignored `game/override.cfg` by `deploy/install.sh`, the Dockerfile
+(`Dockerfile.dockerignore` lets it through) and, for a bare run, by hand (`docs/SERVER_DEPLOY.md` section 3). Dev, client and test runs keep
+GodotPhysics, so the trace goldens are untouched. The bench cannot switch engines either: the "after" runs below are a scratch copy of `game/`
+with the same two lines in its `project.godot`. `--probe --markers` at s24 (24 humans, 80 bots): `infantry.gd` 6.5 ms per tick -> 2.15 ms
+(`move_and_slide` on Varuna roughly 3x cheaper). `infantry_check`, `infantry2_check`, `bot_lod_check`, `flight_check`, `held_weapon_check`
+(1948 checks) all pass under Jolt. Caveat: a client predicts its soldier on GodotPhysics and the server moves it on Jolt, so slide / step
+details at walls and edges differ slightly; reconciliation absorbs it, but a client moving on Jolt too would remove the difference (not done:
+changes every client and the goldens).
+
+**(b) Cheaper static collision: not built.** Varuna's terrain already is a `HeightMapShape3D` (`MapTerrain._add_heightmap_collision`; trimesh chunks
+only for terrains with holes) and there are only 36 plain `StaticBody3D` plus 37 base objects and 34 turrets, so there are few bodies to merge.
+Under Jolt the soldiers' whole script cost is 2 ms, so a heightfield / merge rework of the world would chase well under 1 ms.
+
+**(c) Interest pass: one part done.** Timed per part (`server_tick_probe --stream`, s64, 64 clients, with the sensor-tower cache scope that
+`_refresh_interest` opens): evaluating all clients once 46 ms, of which the nearby-cell scan 24 ms, always-relevant 0.5 ms, radar contacts 0.8 ms
+(the radar picture is cached; its misses are paid inside the refresh scope and are 2 to 3 ms per client per second in the bench's
+64-side free-for-all, a team-shared picture where a sensor net decides). `InterestGrid` now keeps a `CellIndex` per class (soldiers, other
+units) of the populated cells and a client visits only the populated cells inside its own view box for each class (soldiers 300 m, vehicles
+800 m): the scan went 24 -> 17 ms per all-client evaluation (about -1.5 ms per tick at s64, under 0.5 ms at s24; the bench's
+`interest` phase did not move beyond noise). The order of the tier map's keys changed (soldiers before other units; was cell order); the
+interest, codec, share, net (plain and `--interest`) and far-bots net checks pass. Per-cell cached radar coverage was NOT built: the cache
+already holds the answer per client and entity, the answer depends on the viewer's range, mode and the unit's cloak, and an exact per-cell
+version would change what a client is told about; the remaining radar cost is the cache misses, which a shared team picture removes where
+the game has a sensor net.
+
+Measured, `server_load_bench --stage`, 15 s, 30 Hz, headless, two alternating runs each, PC otherwise idle at the start of the runs (no other
+Godot process) but other agents ran Godot checks during them, so read to about 3 ms. Before = GodotPhysics + the previous interest grid
+(the same tree otherwise); after = Jolt + the cell index:
+
+| Stage | before p50 / p99 (ms) | after p50 / p99 (ms) | ticks/s after | target |
+|---|---|---|---|---|
+| s24 Varuna | 22.3 / 34.5 and 20.7 / 34.4 | 18.0 / 30.0 and 19.0 / 50.0 | 29.9 and 29.2 | 12 / 25 not met |
+| s64 Varuna | 77.4 / 151.8 and 78.3 / 122.0 (12.1 to 12.3 ticks/s) | 68.7 / 176.8 and 66.2 / 131.3 (13.9 to 14.2 ticks/s) | 14 | 12 / 25 not met |
+
+So Jolt takes about 3 ms off s24 and 10 ms off s64 at p50; the p99 swings with the other agents' load (one outlier each way). The target is
+still not met: at s24 the stream (about 7 ms: encode 2, interest 2.5, build 2.7, deliver 0.7) plus roughly 8 ms of many small scripted
+nodes (turrets 1.0, net sync 0.8, bounds 0.8, flyers 0.7, weapons 0.7, occupancy 0.7, bot sleep 0.7, projectiles 0.6, pilots 0.6) leave
+about 18 ms; at s64 the stream under the governor and 200 bots are the wall as before. Next levers unchanged: fewer awake bots (`max_bots`),
+a native snapshot builder, or a second process for the sender.
+
+Tests run: `compile_all` is the integration agent's batch; the files here are `interest_grid`, `snapshot_codec`, `snapshot_share`, `net_profile`,
+`snapshot_net` (plain and `--interest`) and `far_bots_net` checks (pass), plus the five Jolt checks above (pass, Jolt scratch copy).
+
 ## 9. Conflicts with parallel work
 
 * Do not touch: `engine/mission/*`, `tests/mission_*_check`, `tests/trace_*_check`, `games/tribes_v/*`.

@@ -119,7 +119,7 @@ func make_soldier_spec(peer: int, team: int, pname: String, xf: Transform3D) -> 
 	var armor_id := make_chosen_armor(entry)
 	var body := str(entry.get("infantry_body", ""))
 	return {"net_id": battle.spawner.allocate_id(), "vehicle": armor_id, "armor": armor_id, "team": team,
-		"owner": peer, "xf": xf, "loadout": InfantryCatalog.armor(armor_id).get("default_loadout", []),
+		"owner": peer, "xf": xf, "loadout": SpawnLoadout.make_for(entry, armor_id),
 		"name": pname, "ai": {}, "protection": 0.0, "spawn_armor": armor_id,
 		"body_shape": body if InfantryCatalog.has_body(armor_id, body) else "",
 		"skin": str(entry.get("infantry_skin", ""))}
@@ -140,7 +140,7 @@ func make_armored_spec(spec: Dictionary) -> Dictionary:
 	soldier.net_id = int(spec.net_id)
 	soldier.vehicle = armor_id
 	soldier.armor = armor_id
-	soldier.loadout = InfantryCatalog.armor(armor_id).get("default_loadout", [])
+	soldier.loadout = SpawnLoadout.make_for(battle.config.get("roster", {}).get(int(spec.owner), {}), armor_id)
 	soldier.protection = spec.get("protection", 0.0)
 	return soldier
 
@@ -181,6 +181,7 @@ func build_soldier(spec: Dictionary) -> Infantry:
 	s.body_shape = str(spec.get("body_shape", ""))
 	s.skin_id = str(spec.get("skin", ""))
 	s.spawn_armor_id = str(spec.get("spawn_armor", ""))
+	s.spawn_loadout = (spec.get("loadout", []) as Array).duplicate()
 	s.palette_id = battle.palette_id
 	if spec.get("bot", false):
 		s.set_meta("bot_id", int(spec.owner))

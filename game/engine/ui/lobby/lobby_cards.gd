@@ -51,9 +51,10 @@ static func make_models(entry: Dictionary, settings := {}) -> Dictionary:
 	var skin := str(snapshot.get("s", entry.get("infantry_skin", "")))
 	var infantry := make_default_infantry(settings)
 	if armor_id != "":
-		infantry = {"shape": body if body != "" else PlayerProfile.make_default_body(armor_id), "skin": skin}
+		infantry = {"shape": body if body != "" else PlayerProfile.make_default_body(armor_id), "skin": skin,
+			"armor": armor_id, "weapon": LobbyArmament.make_held_weapon(entry, armor_id)}
 	var vehicle_id := _make_vehicle_id(entry)
-	var vehicle := {"vehicle": vehicle_id, "skin": str(snapshot.get("hs", entry.get("herc_skin", "")))} if vehicle_id != "" else make_on_foot(infantry)
+	var vehicle := {"vehicle": vehicle_id, "skin": str(snapshot.get("hs", entry.get("herc_skin", ""))), "loadout": _make_loadout(entry)} if vehicle_id != "" else make_on_foot(infantry)
 	return {"infantry": infantry, "vehicle": vehicle}
 
 
@@ -70,7 +71,8 @@ static func make_bot_models(is_vehicle: bool, settings: Dictionary) -> Dictionar
 static func make_default_infantry(settings: Dictionary) -> Dictionary:
 	var pack := str(settings.get(LobbySettings.INFANTRY_PACK_KEY, ""))
 	var armor_id := InfantryCatalog.light_armor_id(pack if pack != "" else InfantryCatalog.make_default_pack())
-	return {"shape": PlayerProfile.make_default_body(armor_id), "skin": ""} if armor_id != "" else {}
+	return {"shape": PlayerProfile.make_default_body(armor_id), "skin": "", "armor": armor_id,
+		"weapon": LobbyArmament.make_held_weapon({}, armor_id)} if armor_id != "" else {}
 
 
 ## The vehicle-mode stand-in for a member on foot: his soldier, labelled.
@@ -125,6 +127,13 @@ static func make_weapon_text(weapon_ids: Array) -> String:
 		var w := Packs.weapon(str(id))
 		names.append(str(w.get("display_name", w.get("name", id))))
 	return ", ".join(names)
+
+
+## The weapon ids on the hardpoints: the slot's loadout, else the roster's.
+static func _make_loadout(entry: Dictionary) -> Array:
+	if entry.get("slot") is Dictionary and not (entry.slot.get("hl", []) as Array).is_empty():
+		return CharacterSlot.make_strings(entry.slot.hl)
+	return CharacterSlot.make_strings(entry.get("loadout", []))
 
 
 static func _make_armor_id(entry: Dictionary) -> String:

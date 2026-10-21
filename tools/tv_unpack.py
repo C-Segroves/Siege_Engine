@@ -93,10 +93,12 @@ def unzip_installer(zip_path, dst, progress=None):
     return os.path.join(dst, 'setup.exe')
 
 
-def run_innoextract(setup_exe, dst):
+def run_innoextract(setup_exe, dst, only=None):
+    """only = a file name: extract just the files of that name (innoextract --include matches names, not paths)."""
     exe = find_innoextract()
     os.makedirs(dst, exist_ok=True)
-    r = subprocess.run([exe, '--silent', '--exclude-temp', '-d', dst, setup_exe])
+    filt = ['--include', only] if only else []
+    r = subprocess.run([exe, '--silent', '--exclude-temp'] + filt + ['-d', dst, setup_exe])
     if r.returncode:
         raise RuntimeError('innoextract failed (exit %d)' % r.returncode)
     return dst
@@ -106,6 +108,16 @@ def unpack(zip_path, scratch):
     setup = unzip_installer(zip_path, os.path.join(scratch, 'installer'))
     game = run_innoextract(setup, os.path.join(scratch, 'game'))
     return game
+
+
+def unpack_file(zip_path, scratch, name):
+    """Only the installed file called `name` (the release identification needs just the main exe): its path."""
+    setup = unzip_installer(zip_path, os.path.join(scratch, 'installer'))
+    root = run_innoextract(setup, os.path.join(scratch, 'one'), only=name)
+    for dirpath, _dirs, files in os.walk(root):
+        if name in files:
+            return os.path.join(dirpath, name)
+    raise FileNotFoundError('%s is not in the installer' % name)
 
 
 if __name__ == '__main__':

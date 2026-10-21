@@ -7,6 +7,8 @@ extends RefCounted
 
 const MAX_PASSES := 4
 const SKIN_KINDS := ["skin", "herc_skin"]
+## A raid spawns the kit, not the slot: a slot weapon the kit lacks is not carried.
+const NOT_IN_KIT := "not in your kit (a raid carries only the kit)"
 
 
 static func make_blocks(slot: CharacterSlot, ctx: LoadoutContext, owned: Unlocks) -> Array:
@@ -123,6 +125,8 @@ static func _make_infantry_blocks(slot: CharacterSlot, ctx: LoadoutContext, owne
 		var why := ""
 		if not InfantryCatalog.allows_weapon(slot.armor, wid):
 			why = "does not fit %s" % str(armor.get("name", slot.armor))
+		elif ctx.raid_kit != null and not ExtractionLoadout.make_raid_weapons(slot.armor, ctx.raid_kit).has(wid):
+			why = NOT_IN_KIT
 		elif not _is_issued(armor, "weapon", wid):
 			why = _make_reason(id, ctx, owned)
 		if why != "":

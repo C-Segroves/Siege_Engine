@@ -96,6 +96,19 @@ static func apply_revalidate_ready(old_settings: Dictionary, new_settings: Dicti
 	return cleared
 
 
+## Host, when the lobby switches into or out of the co-op campaign: the campaign session starts (a new Earthsiege career) or
+## is set aside. Nothing changes while the mode stays.
+static func apply_campaign_for_settings(old_settings: Dictionary, new_settings: Dictionary) -> void:
+	var was := str(old_settings.get("mode", "")) == GameOptionsModel.KIND_CAMPAIGN
+	var now := str(new_settings.get("mode", "")) == GameOptionsModel.KIND_CAMPAIGN
+	if was == now or bool(new_settings.get("solo", false)):
+		return
+	if now:
+		Session.start_campaign(0, true)
+	else:
+		Session.clear_campaign()
+
+
 ## Host, when the lobby switches into a team match (or out of one): every pilot is unassigned again (he picks a team on his
 ## card or the host places him), or all are on the one side. Nothing changes while the kind of match stays.
 static func apply_teams_for_settings(old_settings: Dictionary, new_settings: Dictionary) -> void:

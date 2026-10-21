@@ -214,6 +214,8 @@ func _check_frag_winner(b: Battle) -> void:
 		return
 	var top: Dictionary = results.summary.pilots[0]
 	_expect(int(top.kills) == 3 and int(top.score) == BattleSummary.make_score(3, 0), "pilot table: kills and score (%s)" % [top])
+	_expect(["assists", "vehicle_kills", "bot_kills", "objectives", "damage", "seconds_alive", "survived"].all(func(k: String) -> bool: return top.has(k)) and results.summary.has("awards"),
+		"the host's summary carries the pilot's stats and the awards")
 	Session.front_end = "res://library.tscn"
 	await _press(results, "Continue")
 	await _wait(0.5)

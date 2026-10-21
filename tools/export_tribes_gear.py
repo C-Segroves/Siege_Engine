@@ -313,6 +313,11 @@ def t2_cloak(resolve):
                                    read(os.path.join(S, 'player.cs')))
     ai_cs, game_cs, hud_cs = (read(os.path.join(S, 'ai.cs')), read(os.path.join(S, 'defaultGame.cs')),
                               read(os.path.join(S, 'vehicles', 'serverVehicleHud.cs')))
+    station_cs = read(os.path.join(S, 'station.cs'))
+    # station.cs: StationInventory::stationReady and MobileInvStation::stationReady each setCloaked(true) the buyer
+    # and schedule setCloaked(false) 500 ms / 900 ms later.
+    flash_inv = float(find(r'function StationInventory::stationReady.*?schedule\((\d+), "setCloaked", false\)', station_cs)) / 1000.0
+    flash_mobile = float(find(r'function MobileInvStation::stationReady.*?schedule\((\d+), "setCloaked", false\)', station_cs)) / 1000.0
     img = resolve('CloakingPackImage')
     texture = copy_cloak_texture()
     sound = V.copy_sound('tribes2', os.path.join(V.T2_AUDIO, *str(resolve('CloakingPackActivateSound')['filename']).split('/')))
@@ -323,6 +328,7 @@ def t2_cloak(resolve):
              'damage_break_min': r(float(find(r'else if \( %amount > ([\d.]+) \)', player_cs)) * DAMAGE_SCALE, 1),
              'respawn_cloak_s': float(find(r'\$InvincibleTime = (\d+);', player_cs)),
              'vehicle_pad_cloak_s': float(find(r'schedule\((\d+), "setCloaked", false\)', hud_cs)) / 1000.0,
+             'station_flash_s': flash_inv, 'mobile_station_flash_s': flash_mobile,
              'reveal_range_m': float(find(r'\(!%clIsCloaked \|\| %distance < (\d+)\)', ai_cs)),
              'note': 'The cloak the scripts switch on with setCloaked: a respawn, a station, a new vehicle.'}
     timed['texture'] = texture

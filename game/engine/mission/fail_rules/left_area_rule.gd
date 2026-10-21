@@ -13,4 +13,4 @@ func _init(p_code := 0, p_text := "", p_grace := 0.0) -> void:
 func make_verdict(world: MissionWorld, _dt: float) -> MissionVerdict:
 	if world.get_out_of_area_seconds() < grace:
 		return null
-	return MissionVerdict.make_loss(get_code(), text)
+	return MissionVerdict.make_loss(get_code(), text).apply_rearm_on_code_change()

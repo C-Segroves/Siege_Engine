@@ -164,6 +164,24 @@ func run_radar() -> void:
 		print("PROBE radar %-24s %.1f us/call (%d calls)" % [name, float(Time.get_ticks_usec() - t0) / n, n])
 
 
+## The three parts of one client's interest evaluation, each timed on its own (the radar picture is cached: its cost is the
+## walk over the entities; a cache miss adds the radar evaluations).
+func _lap_interest_parts(acc: Dictionary, g: InterestGrid, peers: Array) -> void:
+	_lap(acc, "  interest: nearby cells only", func() -> void:
+		for peer in peers:
+			var client: InterestGrid.ClientInterest = g._clients[peer]
+			var row: int = g._table.make_row(client.own_id)
+			if row != EntityTable.NO_ROW:
+				g._add_nearby({}, peer, client, row))
+	_lap(acc, "  interest: always-relevant only", func() -> void:
+		for peer in peers:
+			var client: InterestGrid.ClientInterest = g._clients[peer]
+			g._add_always_relevant({}, client, g._table.make_row(client.own_id)))
+	_lap(acc, "  interest: radar contacts only", func() -> void:
+		for peer in peers:
+			g._add_radar_contacts({}, peer))
+
+
 ## Where one packed snapshot goes (milliseconds per snapshot, averaged over a few): the stream's phases timed by hand.
 func run_stream() -> void:
 	var battle: Battle = _root as Battle
@@ -204,9 +222,12 @@ func run_stream() -> void:
 			for i in peers.size():
 				stream.snapshot_sent.emit(peers[i], tick + r))
 		var g: InterestGrid = stream.grid
+		SensorTowers.begin_cache(battle.get_tree())   # as _refresh_interest does
 		_lap(acc, "evaluate ALL clients once", func() -> void:
 			for peer in peers:
 				g.evaluate_client(peer))
+		_lap_interest_parts(acc, g, peers)
+		SensorTowers.end_cache()
 		stream.use_threads = false
 		_lap(acc, "build (single thread)", func() -> void: stream._build_for_all(peers, tick + r, 30))
 		stream.use_threads = true

@@ -19,7 +19,7 @@ import re
 import struct
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageFilter
 
 import aa_bitmap
 import aa_files
@@ -353,16 +353,34 @@ _CUBE = {'right': lambda a, b: (1, -b, -a), 'left': lambda a, b: (-1, -b, a), 't
 
 
 def _sample(tile, u, v):
+    """Bilinear sample of `tile` at (u, v) in 0..1 (pixel centres at half steps, clamped at the edges)."""
     h, w = tile.shape[:2]
-    x = np.clip((u * w).astype(int), 0, w - 1)
-    y = np.clip((v * h).astype(int), 0, h - 1)
-    return tile[y, x]
+    fx = np.clip(u * w - 0.5, 0, w - 1)
+    fy = np.clip(v * h - 0.5, 0, h - 1)
+    x0, y0 = np.floor(fx).astype(int), np.floor(fy).astype(int)
+    x1, y1 = np.minimum(x0 + 1, w - 1), np.minimum(y0 + 1, h - 1)
+    tx, ty = (fx - x0)[..., None], (fy - y0)[..., None]
+    t = tile.astype('f4')
+    top = t[y0, x0] * (1 - tx) + t[y0, x1] * tx
+    bot = t[y1, x0] * (1 - tx) + t[y1, x1] * tx
+    return (top * (1 - ty) + bot * ty + 0.5).astype('u1')
 
 
-def bake_sky(tiles, fog):
+def _haze_weight(elevation_deg, haze_angles):
+    """Fog weight by elevation above the horizon: 1 up to the lower haze angle, easing to 0 at the upper one."""
+    hi, lo = max(haze_angles), min(haze_angles)
+    t = np.clip((hi - elevation_deg) / max(hi - lo, 1e-3), 0.0, 1.0)
+    return t * t * (3 - 2 * t)
+
+
+def bake_sky(tiles, fog, haze_angles=(11.0, 2.0)):
     """The disc's sky is a box viewed from its floor: a 2 x 2 top tile at height 1 and four 2 x 1 side tiles (the tile's
     upper half of a square face). Renders it into the six faces of a cubemap. Engine axes: x east, y up, z south; the F tile
-    is the east wall, L north, B west, R south (assumption, as the file's yaw zero faces +Z = east)."""
+    is the east wall, L north, B west, R south (assumption, as the file's yaw zero faces +Z = east).
+    Orientation of the top tile, measured from the pixels (the wall's top row against each edge of the top tile): the east
+    wall meets the tile's last row, left to right = columns increasing; so the tile's row runs along x and its column along z.
+    The haze angles fade every wall into the fog colour towards the horizon, so the dark base of the wall bitmaps (replaced by
+    the fog) leaves no edge."""
     g = (np.arange(FACE) + 0.5) / FACE * 2 - 1
     a, b = np.meshgrid(g, g)
     faces = {}
@@ -375,7 +393,7 @@ def bake_sky(tiles, fog):
         hx, hz = x * t, z * t
         top = up & (np.abs(hx) <= 1) & (np.abs(hz) <= 1)
         if top.any():
-            out[top] = _sample(tiles['T'], ((hx + 1) / 2)[top], ((hz + 1) / 2)[top])
+            out[top] = _sample(tiles['T'], ((hz + 1) / 2)[top], ((hx + 1) / 2)[top])
         side = up & ~top
         ax, az = np.abs(x), np.abs(z)
         for wall, mask, u_of in (('F', side & (ax >= az) & (x > 0), lambda hz_, hx_: (hz_ + 1) / 2),
@@ -389,9 +407,21 @@ def bake_sky(tiles, fog):
             wy = y * tw
             col = _sample(tiles[wall], u_of(z * tw, x * tw)[mask], (1 - wy)[mask])
             col = np.where((wy[mask] > 1)[:, None], fog, col)
-            out[mask] = col
+            elev = np.degrees(np.arctan2(y, np.hypot(x, z)))[mask]
+            k = _haze_weight(elev, haze_angles)[:, None]
+            out[mask] = (col * (1 - k) + np.asarray(fog, 'f4') * k + 0.5).astype('u1')
         faces[name] = out
     return faces
+
+
+def _fade_black(tile, fog, feather=5.0):
+    """The wall bitmaps darken to pure black below the horizon along a curve. Black becomes the fog colour, and the
+    boundary is feathered (a blur of the black mask) so it is a smooth haze, not a stair-stepped edge."""
+    mask = Image.fromarray(((tile == 0).all(-1) * 255).astype('u1'))
+    soft = np.asarray(mask.filter(ImageFilter.GaussianBlur(feather)), 'f4')[..., None] / 255.0
+    soft = np.clip(soft * 2.0, 0.0, 1.0)                 # the blur halves the edge: lift it so the mask edge is fully fog
+    soft[(tile == 0).all(-1)] = 1.0
+    return (tile * (1 - soft) + np.asarray(fog, 'f4') * soft + 0.5).astype('u1')
 
 
 def export_sky(files, m, out_dir):
@@ -408,10 +438,10 @@ def export_sky(files, m, out_dir):
             tile = np.asarray(Image.open(io.BytesIO(files.read(path.replace(chr(92), '/')))).convert('RGB')).copy()
         except (KeyError, OSError):
             return {}
-        tile[(tile == 0).all(-1)] = fog                  # black = below the horizon
-        tiles[key] = tile
+        tiles[key] = _fade_black(tile, fog)             # black = below the horizon
     faces = {}
-    for name, img in bake_sky(tiles, np.array(fog, 'u1')).items():
+    haze = (m.get('fog') or {}).get('haze_angles') or (11.0, 2.0)
+    for name, img in bake_sky(tiles, np.array(fog, 'u1'), haze).items():
         Image.fromarray(img).save(os.path.join(out_dir, 'sky_%s.png' % name))
         faces[name] = 'sky_%s.png' % name
     return faces

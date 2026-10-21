@@ -4,7 +4,7 @@ extends RefCounted
 ## into an award {total, lines: [{text, amount}]} from the mode's earn row (EconomyRules). Pure: nothing is paid here,
 ## OperatorProfile.apply_award does that on the owner's machine.
 ## stats: {seconds, kills, bot_kills, vehicle_kills, assists, objectives, won, extracted_value}. Bot kills pay
-## bot_kill_factor of a kill. A match shorter than min_match_s pays nothing. The rate part is capped (cap 0 = no cap),
+## bot_kill_factor of a kill and are not in `kills`. A match shorter than min_match_s pays nothing. The rate part is capped (cap 0 = no cap),
 ## a pilot who left early gets left_early_factor of it; goals are paid on top. Extraction pays what the raid carried
 ## out (extracted_value: loot, money, task rewards) plus on_extract when he got out; its tasks are in that value.
 

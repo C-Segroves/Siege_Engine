@@ -46,10 +46,38 @@ var radar_batch_probe := Callable()
 
 var _no_rows := PackedInt32Array()
 var _cells := {}                            # packed cell key -> PackedInt32Array of table rows
+var _soldier_cells := CellIndex.new()       # the same cells, soldiers only / everything else only: a client asks each class
+var _vehicle_cells := CellIndex.new()       #   within its own view range, so far soldiers are never visited
 var _team_rows := {}                        # team -> PackedInt32Array of table rows (ascending), as of the last rebuild
 var _indexed_rows := -1                     # table size at the last rebuild
 var _table: EntityTable
 var _clients := {}                          # client id -> ClientInterest
+
+
+## The populated cells of one class of entity (cell x, cell z, rows), so a client visits the few cells that hold something
+## inside its view box instead of looking up every cell of the box.
+class CellIndex:
+	extends RefCounted
+	var cell_x := PackedInt32Array()
+	var cell_z := PackedInt32Array()
+	var rows: Array[PackedInt32Array] = []
+	var _slot_of := {}                      # packed cell key -> index into cell_x / cell_z / rows
+
+	func clear() -> void:
+		cell_x.clear()
+		cell_z.clear()
+		rows.clear()
+		_slot_of.clear()
+
+	func add(key: int, cx: int, cz: int, row: int) -> void:
+		var slot: int = _slot_of.get(key, -1)
+		if slot < 0:
+			slot = rows.size()
+			_slot_of[key] = slot
+			cell_x.append(cx)
+			cell_z.append(cz)
+			rows.append(PackedInt32Array())
+		rows[slot].append(row)
 
 
 ## One client's state: who it is and what it currently sees.
@@ -93,13 +121,18 @@ func apply_target(client_id: int, entity_id: int) -> void:
 func rebuild(table: EntityTable) -> void:
 	_table = table
 	_cells.clear()
+	_soldier_cells.clear()
+	_vehicle_cells.clear()
 	_team_rows.clear()
 	_indexed_rows = table.size()
 	for row in table.size():
-		var key := _make_key(_cell_of(table.pos_x[row]), _cell_of(table.pos_z[row]))
+		var cx := _cell_of(table.pos_x[row])
+		var cz := _cell_of(table.pos_z[row])
+		var key := _make_key(cx, cz)
 		if not _cells.has(key):
 			_cells[key] = PackedInt32Array()
 		_cells[key].append(row)
+		(_soldier_cells if (table.flags[row] & EntityTable.FLAG_SOLDIER) != 0 else _vehicle_cells).add(key, cx, cz, row)
 		var side := int(table.team[row])
 		if not _team_rows.has(side):
 			_team_rows[side] = PackedInt32Array()
@@ -179,24 +212,31 @@ func _make_relevance(client_id: int, client: ClientInterest) -> Dictionary:
 
 func _add_nearby(tiers: Dictionary, client_id: int, client: ClientInterest, own_row: int) -> void:
 	var at := _table.make_position(own_row)
-	var reach_m := maxf(soldier_view_m, vehicle_view_m)
-	var first := Vector2i(_cell_of(at.x - reach_m), _cell_of(at.z - reach_m))
-	var last := Vector2i(_cell_of(at.x + reach_m), _cell_of(at.z + reach_m))
-	var soldier_sq := soldier_view_m * soldier_view_m
-	var vehicle_sq := vehicle_view_m * vehicle_view_m
+	_add_class_within(tiers, client_id, client, at, _soldier_cells, soldier_view_m)
+	_add_class_within(tiers, client_id, client, at, _vehicle_cells, vehicle_view_m)
+
+
+## Every entity of one class (a CellIndex) within `view_m` of `at` gets its tier.
+func _add_class_within(tiers: Dictionary, client_id: int, client: ClientInterest, at: Vector3, index: CellIndex, view_m: float) -> void:
+	var first_x := _cell_of(at.x - view_m)
+	var last_x := _cell_of(at.x + view_m)
+	var first_z := _cell_of(at.z - view_m)
+	var last_z := _cell_of(at.z + view_m)
+	var view_sq := view_m * view_m
 	var xs := _table.pos_x
 	var zs := _table.pos_z
-	var flags := _table.flags
-	for cx in range(first.x, last.x + 1):
-		for cz in range(first.y, last.y + 1):
-			var rows: PackedInt32Array = _cells.get(_make_key(cx, cz), _no_rows)
-			for row in rows:
-				var dx := at.x - xs[row]
-				var dz := at.z - zs[row]
-				var dist_sq := dx * dx + dz * dz
-				if dist_sq > (soldier_sq if (flags[row] & EntityTable.FLAG_SOLDIER) != 0 else vehicle_sq):
-					continue
-				tiers[_table.ids[row]] = _make_tier(client_id, client, _table.ids[row], sqrt(dist_sq))
+	var ids := _table.ids
+	for slot in index.rows.size():
+		var cx := index.cell_x[slot]
+		var cz := index.cell_z[slot]
+		if cx < first_x or cx > last_x or cz < first_z or cz > last_z:
+			continue
+		for row in index.rows[slot]:
+			var dx := at.x - xs[row]
+			var dz := at.z - zs[row]
+			var dist_sq := dx * dx + dz * dz
+			if dist_sq <= view_sq:
+				tiers[ids[row]] = _make_tier(client_id, client, ids[row], sqrt(dist_sq))
 
 
 func _add_always_relevant(tiers: Dictionary, client: ClientInterest, own_row: int) -> void:

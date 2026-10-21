@@ -2,7 +2,6 @@
   "version": 1,
   "notes": "Extraction mode rules (docs/design/extraction.md). Remake design values, not original game data: every item, price and faction roster is built at run time from the user's installed packs.",
   "currency": "cr",
-  "start_money": 3000,
   "sell_fraction": 0.5,
   "player_team_base": 10,
   "faction_team_base": 300,
@@ -81,9 +80,7 @@
     "pack":     {"label": "Backpacks", "kg": 8.0,   "stack": 1,  "price": [500, 900]},
     "salvage":  {"label": "Herc weapon salvage", "kg": 20.0, "stack": 1, "price": [600, 4000]},
     "valuable": {"label": "Valuables", "kg": 1.0,   "stack": 4,  "price": [0, 0]},
-    "callin":   {"label": "Vehicle call-ins", "kg": 0.0, "stack": 1, "price": [2500, 14000]},
-    "armor":    {"label": "Armour", "stack": 1, "kg_by_size": {"light": 10.0, "medium": 15.0, "heavy": 25.0},
-                 "price_by_size": {"light": 0, "medium": 1800, "heavy": 3600}}
+    "armor":    {"label": "Armour", "stack": 1, "kg_by_size": {"light": 10.0, "medium": 15.0, "heavy": 25.0}}
   },
   "ammo_loaded_fraction": 0.5,
   "free_weapons": ["tribes:BLASTER"],
@@ -96,7 +93,10 @@
     {"key": "nav_computer", "name": "Navigation computer", "kg": 1.0, "stack": 4, "price": 420},
     {"key": "sensor_array", "name": "Sensor array", "kg": 2.0, "stack": 2, "price": 650},
     {"key": "cybrid_core", "name": "Cybrid neural core", "kg": 2.0, "stack": 2, "price": 1600, "cybrid_only": true},
-    {"key": "faction_flag", "name": "Faction flag", "kg": 4.0, "stack": 1, "price": 0, "task_only": true}
+    {"key": "faction_flag", "name": "Faction flag", "kg": 4.0, "stack": 1, "price": 0, "task_only": true},
+    {"key": "radio_fragment_a", "name": "Radio fragment (first)", "kg": 0.2, "stack": 1, "price": 60, "task_only": true},
+    {"key": "radio_fragment_b", "name": "Radio fragment (second)", "kg": 0.2, "stack": 1, "price": 60, "task_only": true},
+    {"key": "radio_fragment_c", "name": "Radio fragment (third)", "kg": 0.2, "stack": 1, "price": 60, "task_only": true}
   ],
   "caches": {
     "supply":  {"name": "Supply cache",   "rolls": [2, 4], "money": [40, 260],  "weights": {"ammo": 5, "gear": 4, "weapon": 2, "pack": 1, "valuable": 1},
@@ -109,6 +109,7 @@
                 "shapes": ["tribes2:ammo_grenade", "tribes2:ammo_plasma", "tribes:ammounit"]},
     "flag":    {"name": "Faction flag",   "rolls": [0, 0], "money": [0, 0],     "weights": {},
                 "shapes": ["tribes2:flag", "tribes:flag"]},
+    "recorder": {"name": "Wreck recorder", "rolls": [0, 0], "money": [0, 0], "weights": {}, "shapes": ["starsiege:rb_fltb_box", "starsiege:xboxes", "tribes:ammounit"]},
     "wreck":   {"name": "Wreck salvage",  "rolls": [0, 0], "money": [0, 0],     "weights": {},
                 "shapes": ["starsiege:rb_fltb_box", "starsiege:xboxes", "tribes:ammounit"]}
   },
@@ -178,6 +179,54 @@
     "patrol": {"interval_s": [90.0, 150.0], "size": [2, 3], "arrive_m": 45.0, "min_site_alive": 3},
     "raid": {"faction": "bioderm", "interval_s": [150.0, 240.0], "night_interval_factor": 0.5, "size": [4, 7],
              "range_m": 2600.0, "arrive_m": 70.0, "target_alive_fraction": 0.75}
+  },
+  "cybrid_siege": {
+    "notes": "Varuna's Fall easter egg (CybridSiege, docs/design/cybrid_siege.md): three buried relays woken in the right order bring a relentless Cybrid siege against everyone. Remake design values; the text is our own.",
+    "cybrid_faction": "cybrid",
+    "infantry_packs": ["tribes2", "tribes"],
+    "herc_packs": ["es1", "es2", "starsiege"],
+    "fallback_weights": ["heavy", "medium"],
+    "tick_s": 0.5,
+    "state_sync_s": 0.25,
+    "trigger": {
+      "reach_m": 3.5, "sense_m": 14.0, "chain_window_s": 600.0,
+      "texts": {
+        "sense": "listen to the ground",
+        "sense_use": "Something hums under the ground, close by.",
+        "reach": "dig out the buried plate",
+        "step": "The plate warms, hums and settles.",
+        "reset": "The plate clicks and goes cold."
+      }
+    },
+    "fragments": {"per_rank": 2, "echo_text": "[a voice in the static] %s", "taken_text": "Radio fragment: %s", "hint_line": "Static: %s", "seconds": 14.0},
+    "warning": {
+      "countdown_s": 90.0, "announce_at_s": [60, 30, 10],
+      "lines": ["ALL STATIONS: the ark's old carrier is lit across the basin. Something ancient has heard it.",
+                "CYBRID CONTACT: heavy formations are closing from the edges of the basin.",
+                "Truce, all tribes and bands: they come for everyone. Find a way out."],
+      "countdown_line": "Cybrid arrival in %d seconds.",
+      "arrival_line": "THE SIEGE HAS BEGUN. The exfils will close one by one. Get out or die here."
+    },
+    "relations": {"player_stance": "neutral", "humans": "allied"},
+    "waves": {
+      "first_s": 12.0, "interval_s": [40.0, 14.0], "interval_decay": 0.94, "max_waves": 80, "max_units": 64,
+      "gate_inset_m": 90.0, "gate_spread_m": 40.0, "gate_tries": 14, "retarget_s": 8.0, "player_bias": 0.7,
+      "retire_garrison_batch": 4, "garrison_refill_factor": 3.0,
+      "infantry": {"base": 5, "per_wave": 1.2, "cap": 28, "medium_every": 2, "heavy_every": 4, "skill": 0.55},
+      "hercs": {"from_wave": 2, "base": 1, "per_wave": 0.45, "cap": 10, "heavy_from_wave": 6, "skill": 0.6},
+      "flyers": {"from_wave": 5, "base": 1, "per_wave": 0.25, "cap": 4, "skill": 0.55, "altitude_m": 90.0}
+    },
+    "safe_area": {
+      "start_radius_m": 4400.0, "stages": [[0, 4400], [300, 3300], [600, 2100], [840, 1300], [1020, 700], [1140, 260], [1260, 100]],
+      "damage_share_per_s": 0.03, "growth_per_s": 0.004, "lethal_grace_s": 40.0, "warn_every_s": 6.0,
+      "warn_text": "You are outside the safe area. Get back inside, now."
+    },
+    "exfil": {
+      "first_close_s": 120.0, "interval_s": 130.0, "last_close_s": 1140.0, "delay_factor": 0.5,
+      "close_line": "Exfil %s is closed for good.", "last_line": "The last exfil, %s, stays open for %d more seconds.",
+      "bonus": {"flat": 1500, "fraction": 0.5, "line": "Siege extraction bonus: %s."}
+    },
+    "final": {"after_s": 1260.0, "line": "NO ONE LEAVES THE BASIN.", "delay_s": 6.0, "code": 7}
   },
   "raid_points": {
     "notes": "Raid points (RP, docs/design/lobby_loadout_economy.md section 9.1): the call-in currency. They live on the operator profile, carry over between raids up to the cap, are lost when the operator dies and are never converted to credits (user answer O8; the cap and the switches are the economy option o8_raid_points). Remake design values.",

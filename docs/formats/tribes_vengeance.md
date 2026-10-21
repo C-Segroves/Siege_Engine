@@ -3,7 +3,7 @@
 Status: campaign imported (pack `tribes_v`): 16 chapters, 33 maps in story order, objective text, player and NPC
 spawns, terrain (19 maps), textured static meshes and brush shells, **sounds and speech, skeletal armour/character bodies with
 animations (offered as infantry bodies, worn by the mission's soldiers), vehicle and base-object shapes, and the mission scripts
-(objectives, speech, triggers, spawns, mission end) run by the game**. No lighting yet.
+(objectives, speech, triggers, spawns, mission end) run by the game**, and the lighting (sun, zone ambient, distance fog, placed point lights; no lightmaps).
 Code: `tools/tv_unpack.py`, `tools/ue2_package.py`, `tools/ue2_texture.py`, `tools/ue2_skeletal.py`, `tools/tv_assets.py`,
 `tools/tv_terrain.py`, `tools/tv_statics.py`, `tools/tv_bsp.py`, `tools/tv_audio.py`, `tools/tv_skeletal.py`, `tools/tv_script.py`,
 `tools/tv_import.py`, `tools/siege_games/tribes_vengeance.py` (generic importer: supported).
@@ -61,7 +61,11 @@ rotators are three int32, 65536 per turn.
 `TerrainInfo` actor: `TerrainMap` = G16 Texture (512 x 512) in the map's `*Textures.pkg`, `TerrainScale` (208, 208, z range per
 256 steps), grid centred on the actor `Location`, `height = Location.z + (v - 32768) / 256 * scale.z`, `DrawScale` ignored
 (checked by comparing static-mesh heights with the grid: median offset 0 to 20 units). Albedo = the finalised macro texture
-(DXT1 2048). Layers, detail textures, decoration layers and the quad visibility bitmap (holes) are not converted; maps
+(DXT1 2048). A map with no macro texture (SP-Captured, SP-FirstBlood-Interior) gets its albedo baked from the `Layers`: each is
+a `Texture` plus an `AlphaMap` (RGBA8 over the grid; the weight is the ALPHA channel), layer 0 the base and each later layer
+blended over by its alpha; a texture tiles every UScale * 128 units and `TextureRotation` (65536 = a turn) turns it
+(`tv_terrain.bake_layers`, 4096 px; `python tools/tv_terrain.py <game root> <pack>` bakes it for the maps that lack one). Detail
+textures, decoration layers and the quad visibility bitmap (holes) are not converted; maps
 with several TerrainInfo actors (cave pieces) use the one with the biggest heightmap. `tools/ue2_texture.py` decodes
 DXT1/3/5, G16, L8, RGBA8, P8 (palette objects not read).
 
@@ -74,7 +78,38 @@ MaterialSwitch.Material, Tex* modifiers (Material), Shader.SelfIllumination and 
 JSON in the shape frame (x right, y forward, z up = Unreal y, x, z; ShapeInstance converts it to the engine's frame itself, so shapes
 must NOT be stored in the engine's frame: an earlier version did and laid every static and brush shell on its side) (`shapes/<package>__<mesh>.json`, textures `textures/tv/*.png`, limited to 512 px); instances use a basis built from the
 rotator and DrawScale/DrawScale3D. Not done: LODs, vertex colours, second UV sets, collision proxies (the engine builds
-trimesh collision), skeletal meshes, `Projector`/decal actors, lights.
+trimesh collision), skeletal meshes, `Projector`/decal actors.
+
+## Lighting (done as actors, `tools/tv_lights.py`)
+Read from the placed actors; the engine map gets `environment` (`ambient`, `fog_color/start/end`, `sun_dir`, `sun_color`,
+`horizon_color` when the zone clears to its fog colour) and `point_lights` (`MapLights`: a pool of 40 omni lights follows the
+nearest of them). Verified facts:
+- Colour of (Hue, Saturation, Brightness) bytes is Unreal's FGetHSV: `V = b*1.4/255; V *= 0.7/(0.01+sqrt(V))`; hue picks a point on
+  the red-green-blue ring (0-85 red to green, 86-170 green to blue, 171-255 blue to red); saturation 255 is WHITE. It reproduces the
+  zones' stored `AmbientVector` to 4 digits (SP-Captured zone 3: hsv(149,150,50) = 0.2116 0.2483 0.3232, stored 0.2117 0.2483 0.3233).
+- Class defaults (Engine.u class exports, tagged defaults): Light brightness 64, radius 64, saturation 255, type steady;
+  ZoneInfo ambient saturation 255, fog colour (128,128,128), start 3000, end 8000. `Sunlight` = Light + LightEffect sunlight.
+- World radius of a light = 25 * (LightRadius + 1) units (the engine's WorldLightRadius); capped at 120 m.
+- An actor's `Region` struct ends `04 01 <zone number> 00`; the ZoneInfo standing in the zone of the player start sets the map's
+  ambient and fog (maps whose start has no ZoneInfo use the first terrain zone, else the first zone). Fog colour is a BGRA Color.
+- The sun: the brightest `Sunlight` (the engine has one sun; Coliseum has a second, fainter blue one and Palace up to five); its
+  `Rotation` (pitch, yaw, roll, 65536 per turn) points along the light. Maps without a Sunlight get a black sun.
+- Light types: 1 steady, 2 pulse, 3 blink, 4 flicker, 5 strobe, 7 subtle pulse (animated by `MapLights.energy_scale`).
+- No lightmaps, so the map's ambient never falls below `AMBIENT_FLOOR` (0.25): rooms whose zones have ambient 0 rely on the baked lightmaps, which are not decoded.
+  A map without a sun (interiors) is lifted to the mean colour of its placed lights x 0.9, at most 0.5 (`tv_lights.interior_ambient`), so the
+  rooms read between the lamps; the engine has one ambient per map, not one per zone.
+- `DynLightHanging` / `DynLightStrip` are physics props (a mesh with no light), not lights.
+
+## AI goals (`tools/tv_script.py` op `goal`, `game/games/tribes_v/tv_npc_goals.gd`)
+`ActionAddGoal` / `ActionReplaceGoal` / `ActionRemoveGoal` (Target = AI actor, spawn point or `AISquad` label; `goal` names an
+`AI_*Goal` export placed in the map) become `{op: goal, mode, target, name, goal}`. Verified on the 29 SP maps: 45 AddGoal, 45
+ReplaceGoal, 4 RemoveGoal in the first five maps alone; every soldier has an implicit `DefaultGuardGoal` (ReplaceGoal's
+`nameOfGoalToReplace`). Goal properties read: `goalName`, `Priority` (default 50), `destinationName` (a node label, MoveTo /
+SquadMoveTo), `targetName` (Attack / Follow; `Player` is the player), `movementAreaCenterName` + `movementAreaRadius` (Guard /
+SquadGuard, units), `proximity` (Follow), `patrolPointNames` (a compact-index array of name-table indices naming the nodes;
+`bExecuteOnce`). Converted kinds: move, guard, wander, patrol, attack, follow. Not converted (no engine counterpart yet): vehicle
+goals (VehicleMoveTo / Patrol / Attack / Guard, EnterVehicle, ExpellOccupant), turret goals (GunnerGuard / GunnerFireAt, FireAt),
+animation / turn / ski goals, dodge / react / get-out-of-way (reflexes the bot brain has).
 
 ## Editor brushes (approximation, `tools/tv_bsp.py`)
 The compiled BSP (`Model` exports of 4 to 20 MB) is not decoded. Instead every `Brush` actor with CsgOper add/subtract is read
@@ -83,7 +118,9 @@ through its Model's `Polys` export (polygon lists in brush space; trailer 13 byt
 cut-outs, no zones, portals or invisible faces. Each polygon's material ref (Polys trailer) resolves through the shader chain to a
 Texture; UVs = (vertex - Base) . TextureU/V divided by the texture size (shifted to start near 0, textures repeat). Polygons
 whose material is an editor placeholder (engine `DefaultTexture`, `ConsoleBK`, both P8 without a palette) or absent are skipped,
-which removes the big white volume boxes. Collision is the trimesh of the shell.
+which removes the big white volume boxes (the skip must look the name up per material ref: a stale name from the previous
+material let those faces through and made SP-Captured a white sheet). Collision is the trimesh of the shell. `python tools/tv_bsp.py <game root> <pack>`
+rebuilds the shells without the full import.
 
 ## Audio (done, `tools/tv_audio.py`)
 `Content/Sounds/*.pkg`: every `Sound` export holds a complete RIFF/WAVE (PCM 16-bit, 22.05 or 44.1 kHz mono) after the tagged
@@ -156,7 +193,7 @@ Run time is roughly 15 to 25 minutes (inflating 3 GB, innoextract, 33 maps).
 - Terrain layers/detail/holes, `TerrainSector` visibility; decoration layers (grass, trees) (M).
 - Weapon first-person skeletal meshes and the vehicle bindings / animations (L); the unplayed speech (about half of the 6353 files, MP quick chat).
 - AI goals, cinematics and the remaining script messages (M); the class defaults (real meshes, sounds, weapons per character) (M).
-- Lighting (Light actors, baked lightmaps), water, sky boxes (`Content/Art/SkyBoxes`), particle emitters.
+- Baked lightmaps (BSP, terrain) and vertex lighting, water, sky boxes (`Content/Art/SkyBoxes`), particle emitters.
 
 ## Legal
 Code and format notes only; no game data in the repo; everything is read from the user's own copy. innoextract is a

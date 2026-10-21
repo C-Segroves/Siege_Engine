@@ -2,25 +2,19 @@ class_name CallinDirector
 extends Node
 ## The call-ins of an extraction raid (child "Callins" of the ExtractionDirector; every peer;
 ## docs/design/lobby_loadout_economy.md section 9). Host authoritative:
-##   request   the player opens the menu (callin_menu: L, or LB + RB on a pad) and picks one; the host decides
-##             (make_refusal: the raid, the points, cooldowns, caps, the saved vehicle, a roof overhead, a landing zone),
-##             takes the raid points and makes a CallinOrder
-##   orders    REQUESTED -> MARKED -> INBOUND -> DELIVERING -> ACTIVE -> EXPIRING -> DONE (or CANCELLED with a refund):
-##             pods fall from orbit (CallinPods), a vehicle is flown in (CallinVehicleRun), a sweep marks the hostile
-##             units near the caller; the crates give armour and ammunition (CallinSupplies)
-##   telling   every state change and, twice a second, the countdowns go to the caller and his team (the full view) and to
-##             the players within sight of the zone (the marker view); impacts to everybody; balances and cooldowns to the owner
+##   request   the caller designates a point with the Targeting Laser (CallinDesignator; menu key L, or LB + RB on a pad)
+##             or on the command map (source "map"); the host judges it (CallinChecks), takes the raid points and makes a
+##             CallinOrder (CallinOrders) for the runner registered for its kind (register_runner); a runner never picks a point
+##   orders    REQUESTED -> MARKED -> INBOUND -> DELIVERING -> ACTIVE -> EXPIRING -> DONE (or CANCELLED with a refund): pods fall
+##             from orbit (CallinPods), a vehicle is flown in (CallinVehicleRun), a sweep marks the hostile units near the
+##             caller; the crates give armour and ammunition (CallinSupplies)
+##   telling   state changes and, twice a second, the countdowns go to the caller's team (full view) and to the players within
+##             sight of the zone (marker view); impacts to everybody; balances and cooldowns to the owner (CallinTelling)
 ##   noise     every call-in is loud (CallinAlert): hostile AI within its radius investigates, sleepers wake
 ## Transports, vehicles, crates and stations are normal battle entities, built the same on every peer.
-##
-## Where: every call-in is a CallinRequest (kind, caller, point, direction, source). The caller designates the point with the
-## Targeting Laser (CallinDesignator: it comes up when the menu opens, shows green or red with the reason on the spot, fire
-## designates) or orders it on the command map (CommandMapCallins, source "map"). The host judges the request again
-## (CallinChecks.make_plan) and hands it to the runner registered for its kind (register_runner); a runner never picks a point.
 
 const NODE_NAME := "Callins"
 const ALL_PEERS := -1
-const VIEW_SECONDS := 0.5
 
 var director: ExtractionDirector
 var battle: Battle
@@ -57,9 +51,8 @@ var sweep_contacts: Array:
 	get: return sweep.contacts
 var sweep_left: float:
 	get: return sweep.left
-var _next_order := 1
-var _view_clock := MissionClock.new()
-var _chord := ChordAction.new("callin_menu")
+var input: CallinInput
+var order_maker: CallinOrders
 ## Tests: called as tap(peer or ALL_PEERS, method, args) for every message the host sends.
 var tap := Callable()
 
@@ -78,6 +71,8 @@ func _init(p_director: ExtractionDirector) -> void:
 	content = CallinContent.new(self)
 	delivery = CallinDelivery.new(self)
 	designator = CallinDesignator.new(self)
+	input = CallinInput.new(self)
+	order_maker = CallinOrders.new(self)
 	laser_sync = CallinLaserSync.new(self)
 	for pod_kind in CallinRules.POD_KINDS + [CallinRules.KIND_VEHICLE]:
 		register_runner(pod_kind, delivery.apply_start_marked)
@@ -97,53 +92,26 @@ func _ready() -> void:
 	points.apply_local_start()
 
 
-# ------------------------------------------------------------------ local input
-
 func _process(delta: float) -> void:
-	apply_chord_frame(_make_pad_reader())
-	apply_forget_stale_views()
+	apply_chord_frame(CallinInput.make_pad_reader())
+	telling.apply_forget_stale_views()
 	laser_sync.apply_forget_stale()
 	designator.apply_frame(delta)
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if designator.apply_input(event):
+	if input.apply_event(event):
 		get_viewport().set_input_as_handled()
-	elif event.is_action_pressed("callin_menu") and may_open_menu():
-		get_viewport().set_input_as_handled()
-		toggle_menu()
 
 
 ## One frame of the pad chord (LB + RB): `is_down` answers "is this pad button held?".
 func apply_chord_frame(is_down: Callable) -> void:
-	_chord.advance_with(is_down)
-	if _chord.just_fired and may_open_menu():
-		if designator.is_designating():
-			designator.apply_cancel()
-		else:
-			toggle_menu()
+	input.apply_chord_frame(is_down)
 
 
 ## Opens the call-in menu (the laser comes up with it), or closes it when it is open (the laser goes down).
 func toggle_menu() -> void:
 	CallinMenu.toggle(director)
-
-
-static func _make_pad_reader() -> Callable:
-	var pads := Input.get_connected_joypads()
-	var device: int = pads[0] if not pads.is_empty() else -1
-	return func(button: int) -> bool: return device >= 0 and Input.is_joy_button_pressed(device, button)
-
-
-## A marker view (no owner) that the host stopped refreshing (its player walked out of sight) is dropped.
-func apply_forget_stale_views() -> void:
-	telling.apply_forget_stale_views()
-
-
-## The menu opens for the local player while he is in the raid and up.
-func may_open_menu() -> bool:
-	return not battle.is_over() and director.my_status == ExtractionDirector.STATUS_IN_RAID \
-		and not DownedState.is_downed(battle.player) and not director.revive.is_local_reviving()
 
 
 # ------------------------------------------------------------------ requests
@@ -238,44 +206,14 @@ func make_heading(peer: int) -> float:
 	return soldier.global_rotation.y if soldier != null else 0.0
 
 
-# ------------------------------------------------------------------ host: making the order
-
 ## Host: `peer` asks for a call-in at his own feet (tests and scripts). Returns the order, null when it was refused.
 func apply_request(peer: int, kind: String, variant: String) -> CallinOrder:
 	return apply_order(checks.make_feet_request(peer, kind, variant))
 
 
-## Host: judges `request` (CallinChecks.make_plan: the facts, then the designated point) and, when it passes, takes the raid
-## points, starts the cooldown and hands the order to the runner of its kind. Returns the order, null when it was refused
-## (the caller is told why).
+## Host: judges a request and makes its order (CallinOrders). Returns the order, null when it was refused.
 func apply_order(request: CallinRequest) -> CallinOrder:
-	var plan := checks.make_plan(request)
-	if bool(plan.ok) and not runners.has(request.kind):
-		plan = {"ok": false, "pos": request.point, "reason": CallinRefusals.NO_COST}
-	if not bool(plan.ok):
-		director.notify(request.peer, str(plan.reason))
-		return null
-	var soldier := battle.occupancy.soldier_of(request.peer)
-	var order := CallinOrder.new()
-	order.id = _next_order
-	_next_order += 1
-	order.kind = request.kind
-	order.variant = request.variant
-	order.peer = request.peer
-	order.team = soldier.team
-	order.source = request.source
-	order.lz = plan.pos
-	order.direction = request.make_direction(-soldier.global_basis.z)
-	order.vehicle_id = checks.make_vehicle_id(request.peer) if request.kind == CallinRules.KIND_VEHICLE else ""
-	order.cost = CallinRules.make_cost(request.kind, request.variant, order.vehicle_id)
-	points.apply_spend(request.peer, order.cost)
-	cooldowns.apply_use(request.peer, request.kind, battle.config)
-	orders[order.id] = order
-	(runners[request.kind] as Callable).call(order, request)
-	apply_broadcast(order)
-	telling.send_player_state(request.peer)
-	director.notify(request.peer, "%s called in (%d RP)." % [CallinRules.make_label(request.kind), order.cost])
-	return order
+	return order_maker.apply_order(request)
 
 
 ## Registers the runner of a call-in kind: `start` is called as start(order, request) once the order is made, with the
@@ -295,66 +233,26 @@ func apply_clear_cooldowns(peer: int) -> void:
 	telling.send_player_state(peer)
 
 
-## Host: cancels an order that is on its way: the pod, the transport and the load go, and with `refund` the raid points
-## and the use come back.
+
+## Host: cancels an order that is on its way (CallinOrders); with `refund` the raid points and the use come back.
 func apply_cancel(order: CallinOrder, reason: String, refund: bool) -> void:
-	if not order.is_open():
-		return
-	if order.kind == CallinRules.KIND_VEHICLE:
-		vehicles.apply_cancel(order)
-	air.apply_cancel(order)
-	if refund:
-		points.apply_refund(order.peer, order.cost)
-		cooldowns.apply_unuse(order.peer, order.kind)
-		telling.send_player_state(order.peer)
-	order.cancel_reason = reason
-	order.apply_state(CallinOrder.State.CANCELLED)
-	director.notify(order.peer, "%s cancelled: %s%s" % [CallinRules.make_label(order.kind), reason, "  Raid points refunded." if refund else ""])
-	apply_broadcast(order)
+	order_maker.apply_cancel(order, reason, refund)
 
 
 ## Host: the orders of `peer` on their way are cancelled with a refund (he extracted: the points stay with him).
 func apply_peer_extracted(peer: int) -> void:
-	for o in orders.values():
-		if (o as CallinOrder).peer == peer and (o as CallinOrder).is_in_flight():
-			apply_cancel(o, "You left the raid.", true)
-	air.apply_caller_gone(peer)
-	supplies.apply_forget(peer)
+	order_maker.apply_peer_extracted(peer)
 
 
 ## Host: `peer` died or left: his orders on their way are cancelled and his points are gone.
 func apply_peer_dead(peer: int) -> void:
-	for o in orders.values():
-		var order := o as CallinOrder
-		if order.peer != peer:
-			continue
-		if order.is_in_flight():
-			apply_cancel(order, "The operator is gone.", false)
-		elif order.kind == CallinRules.KIND_RADAR and order.is_open():
-			order.apply_state(CallinOrder.State.DONE)   # a sweep shows its caller only
-			apply_broadcast(order)
-	air.apply_caller_gone(peer)
-	supplies.apply_forget(peer)
-	points.apply_clear(peer)
+	order_maker.apply_peer_dead(peer)
 
-
-# ------------------------------------------------------------------ host: running the orders
 
 func _physics_process(delta: float) -> void:
 	if not multiplayer.is_server() or director.transports == null or battle.is_over():
 		return
-	cooldowns.apply_tick(delta)
-	alert.apply_tick(delta)
-	supplies.apply_tick(delta)
-	pods.apply_station_tick(delta)
-	vehicles.apply_departures()
-	air.apply_tick(delta)
-	for o in orders.values().duplicate():
-		delivery.apply_tick_order(o as CallinOrder, delta)
-	if _view_clock.make_step(delta, VIEW_SECONDS) > 0.0:
-		for o in orders.values():
-			if (o as CallinOrder).is_open():
-				apply_broadcast(o)
+	order_maker.apply_tick(delta)
 
 
 # ------------------------------------------------------------------ the radar sweep

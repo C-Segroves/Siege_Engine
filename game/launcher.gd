@@ -19,10 +19,7 @@ const CAMPAIGN_START_MODES := ["continue", "new_campaign", "load"]
 ## Library entries that open a lobby at once (meta "start_mode"): the lobby kind (GameOptionsModel.KIND_*) and whether it
 ## is an offline session.
 const LOBBY_START_KINDS := {
-	"arena": {"kind": GameOptionsModel.KIND_VERSUS, "solo": false},
 	"host": {"kind": GameOptionsModel.KIND_VERSUS, "solo": false},
-	"coop": {"kind": GameOptionsModel.KIND_COOP, "solo": false},
-	"coop_campaign": {"kind": GameOptionsModel.KIND_CAMPAIGN, "solo": false},
 }
 ## Library entry that opens the LAN browser (meta "start_mode").
 const JOIN_START_MODE := "join"

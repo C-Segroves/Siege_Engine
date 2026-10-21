@@ -4,9 +4,9 @@ extends RefCounted
 ## and building a vehicle (player, AI Herc or flyer) from a spawn spec on every peer.
 ##
 ## Spawn spec (sent with Battle._spawn): {net_id, vehicle, team, owner, xf, loadout, name, ai, protection,
-## garage} where `ai` holds the AI settings ({} for players), `protection` the spawn protection seconds
-## and `garage` (campaign Hercs only: Garage.make_battle_tag) the garage Herc it is - its condition is
-## applied and the mission result reports it back (BattleSalvage).
+## cloak_s, mounts, garage} where `ai` holds the AI settings ({} for players), `protection` the spawn protection seconds,
+## `cloak_s` the seconds a pad-launched vehicle is cloaked, `mounts` the fitted components (HercMounts), and `garage` (campaign Hercs only: Garage.make_battle_tag)
+## the garage Herc it is - its condition is applied and the mission result reports it back (BattleSalvage).
 
 const SPAWN_POINT_COUNT := 24
 const RING_RADIUS := 120.0          # metres; skirmish / co-op ring round the centre
@@ -225,7 +225,7 @@ func _make_player_spec(peer: int, e: Dictionary, placement: Dictionary) -> Dicti
 		loadout = Packs.vehicle(e.vehicle).get("loadout", [])
 	return {"net_id": allocate_id(), "vehicle": e.vehicle, "team": team, "owner": peer, "xf": xf,
 		"loadout": loadout, "name": e.get("name", "Pilot"), "ai": {}, "protection": _make_protection_seconds(),
-		"garage": e.get("garage", {}), "skin": str(e.get(PlayerProfile.HERC_SKIN_KEY, ""))}
+		"garage": e.get("garage", {}), "skin": str(e.get(PlayerProfile.HERC_SKIN_KEY, "")), "mounts": e.get("mounts", [])}
 
 
 func _make_ai_spec(a: Dictionary, placement: Dictionary) -> Dictionary:
@@ -286,12 +286,34 @@ func build_vehicle(spec: Dictionary) -> Herc:
 	h.apply_spawn_protection()
 	h.add_to_group("team_%d" % spec.team)
 	h.equip(spec.loadout)
+	apply_pad_cloak(h, float(spec.get("cloak_s", 0.0)))
+	apply_mounts(h, spec)
 	_apply_garage(h, spec.get("garage", {}))
 	battle.vehicles[spec.net_id] = h
 	battle.entities.register(spec.net_id, h)
 	if h is Flyer and not ai.has("skill"):
 		(h as Flyer).apply_player_start()
 	return h
+
+
+## A vehicle leaving a Tribes 2 pad is cloaked for `seconds` by the scripts' timed cloak (serverVehicleHud.cs).
+static func apply_pad_cloak(h: Herc, seconds: float) -> void:
+	if seconds <= 0.0:
+		return
+	if not h.cloak.is_equipped():
+		h.cloak.apply_profile(CloakProfile.of(CloakProfile.make_timed_id(h)))
+	h.cloak.apply_forced(seconds)
+
+
+## A Starsiege Herc with component slots carries the cloak its pilot fitted (the spec's "mounts", else the garage
+## Herc's); a Herc without slots, or with the factory fit everywhere, keeps the cloak of its catalog entry.
+static func apply_mounts(h: Herc, spec: Dictionary) -> void:
+	var mounts: Array = spec.get("mounts", [])
+	if mounts.is_empty():
+		mounts = (spec.get("garage", {}) as Dictionary).get("mounts", [])
+	if mounts.is_empty() or not HercMounts.has_slots(h.def):
+		return
+	h.cloak.apply_profile(HercMounts.make_cloak(h.def, HercMounts.make_sanitized(h.def, mounts)))
 
 
 ## A campaign garage Herc starts in the condition it came back in; it remembers which Herc it is.

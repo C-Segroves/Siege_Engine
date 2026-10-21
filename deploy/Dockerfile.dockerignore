@@ -3,3 +3,4 @@
 !game/
 game/.godot/
 **/__pycache__
+!deploy/server_override.cfg

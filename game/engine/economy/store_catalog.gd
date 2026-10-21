@@ -279,6 +279,7 @@ static func _apply_details(e: Dictionary) -> void:
 			e.slots = 1 if str(e.kind) == "weapon" else 0
 		"herc_weapon":
 			e.rating = float(ExtractionItems.item(ExtractionItems.make_id("salvage", ref)).get("rating", 0.0))
+			e.detail = _make_mount_text(Packs.weapon(ref))
 		"vehicle":
 			e.rating = Packs.combat_rating(Packs.vehicle(ref))
 			e.shape_id = SkinCatalog.make_vehicle_shape(ref)
@@ -290,6 +291,12 @@ static func _apply_details(e: Dictionary) -> void:
 			e.detail = "%d weapons" % e.slots
 		"body", "skin", "herc_skin":
 			e.shape_id = UnlockId.shape_of(str(e.id))
+
+
+## "Large mount": the hardpoint size class a Herc weapon needs ("" when it has none).
+static func _make_mount_text(weapon: Dictionary) -> String:
+	var size := WeaponFit.size_of(weapon)
+	return "%s mount" % size.capitalize() if size != "" else ""
 
 
 static func _is_wanted(e: Dictionary, filter: Dictionary) -> bool:

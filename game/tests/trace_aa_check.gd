@@ -4,6 +4,8 @@ extends Node
 ## Missions (the aa_campaign_check scenarios): training 1 (30 s idle), the first generators mission (every
 ## generator reported destroyed), MISSION06 Onslaught (scripted: vehicle pad, WAYPT1, preparation time skipped)
 ## and MISSION01 (arena: score limit reached by kills).
+## A second trace, tests/golden/aa_end.json, records one scripted closing-prompt ending (the script's Success prompt: the
+## voice plays, then END_DELAY, then the end) so the grace-after-voice path has its own golden.
 ## Records chat / radio, objectives, spawns, script state, kills and the end; writes tests/golden/aa.json when
 ## missing. Skips when Aerial Assault or Tribes 2 is not imported.
 
@@ -16,6 +18,7 @@ const STEP_FRAMES := 40
 const AFTER_END_FRAMES := 40
 
 var _trace
+var _end_trace
 var _failures := 0
 
 
@@ -31,6 +34,11 @@ func _ready() -> void:
 	await _scripted()
 	await _arena()
 	_failures += _trace.finish()
+	_end_trace = TraceSupport.new("aa_end", get_tree())
+	_trace = _end_trace
+	await _closing_prompt()
+	_failures += _end_trace.finish()
+	print("trace_aa_check: aa_end %s (%s)" % [_end_trace.last_status, _end_trace.summary()])
 	print("trace_aa_check: %s (%s; %d failures)" % ["OK" if _failures == 0 else "FAILED", _trace.summary(), _failures])
 	get_tree().quit(1 if _failures > 0 else 0)
 
@@ -137,4 +145,17 @@ func _arena() -> void:
 		rt.on_unit_destroyed(foe)
 	_trace.add("step", "score limit", int(rt.logic.score_limit))
 	await _frames(30)
+	await _stop(b)
+
+
+func _closing_prompt() -> void:
+	var b := await _start(0)
+	var rt := b.mission as AAMissionRuntime
+	if rt == null or rt.vm == null:
+		await _stop(b)
+		return
+	await _frames(2 * FPS)
+	rt.vm_end(true, int(rt.vm.program.get("death", 0)) if int(rt.vm.program.get("death", 0)) > 0 else 1)
+	_trace.add("step", "closing prompt", 1)
+	await _frames(20 * FPS)
 	await _stop(b)

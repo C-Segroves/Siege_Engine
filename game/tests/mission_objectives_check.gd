@@ -78,6 +78,7 @@ func _run() -> void:
 	_check_code_source()
 	_check_set()
 	_check_fail_rules()
+	_check_ender_rearm()
 	_check_waves()
 	print("mission_objectives_check: %d failures" % _fails)
 	get_tree().quit(1 if _fails > 0 else 0)
@@ -339,6 +340,26 @@ func _check_fail_rules() -> void:
 	_expect(stale.make_verdict(w, 0.0) == null, "stalemate: someone lives")
 	w.living = [0, 0]
 	_expect(stale.make_verdict(w, 0.0).code == 7, "stalemate: nobody lives")
+
+
+## ES2 status 7 -> 8: the new code restarts the grace of the pending left-area verdict (DBSIM 0x4131ac).
+func _check_ender_rearm() -> void:
+	var ended := []
+	var ender := MissionEnder.new(func(ok: bool, code: int, _t: String) -> void: ended.append([ok, code]), func() -> bool: return false)
+	ender.apply_verdict(MissionVerdict.make_loss(7, "left", 4.9).apply_rearm_on_code_change())
+	ender.apply_tick(3.0)
+	ender.apply_verdict(MissionVerdict.make_loss(7, "left", 4.9).apply_rearm_on_code_change())
+	ender.apply_verdict(MissionVerdict.make_loss(8, "far", 4.9).apply_rearm_on_code_change())
+	ender.apply_tick(3.0)
+	_expect(ended.is_empty(), "a changed code restarts the grace (nothing ended after 3 + 3 s)")
+	ender.apply_tick(2.0)
+	_expect(ended == [[false, 8]], "the new code ends after its own grace (%s)" % str(ended))
+	var plain := []
+	var first := MissionEnder.new(func(_ok: bool, code: int, _t: String) -> void: plain.append(code), func() -> bool: return false)
+	first.apply_verdict(MissionVerdict.make_loss(1, "a", 2.0))
+	first.apply_verdict(MissionVerdict.make_loss(2, "b", 2.0))
+	first.apply_tick(2.5)
+	_expect(plain == [1], "without the flag the first verdict wins (%s)" % str(plain))
 
 
 func _check_waves() -> void:

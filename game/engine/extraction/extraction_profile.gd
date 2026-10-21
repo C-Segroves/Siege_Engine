@@ -57,7 +57,7 @@ func save() -> bool:
 
 func apply_new(pilot_name: String) -> void:
 	pilot = pilot_name
-	money = int(ExtractionRules.data().get("start_money", 0))
+	money = EconomyRules.start_credits()
 	_wear_armor(make_free_armor_id())
 	for stack in make_starter_stacks(InfantryCatalog.armor(kit_armor)):
 		kit.apply_add(str(stack[0]), int(stack[1]))

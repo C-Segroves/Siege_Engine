@@ -22,6 +22,7 @@ const TRANSPORT_SKILL := 0.5
 const DROP_LANDING_SPACING := 35.0
 const DELIVERY_DROPSHIP := "dropship"
 const DELIVERY_TROOP := "troop"
+const STATE_CLOSED := "closed"
 
 var director: ExtractionDirector
 var battle: Battle
@@ -29,6 +30,10 @@ var battle: Battle
 var exfils := {}
 ## [{net_id, state ("inbound" / "unloading" / "departing"), t}]
 var drops := []
+## Zones the Cybrid siege closed for good (CybridSiege): no exfil is called to them any more.
+var closed: Array[int] = []
+## Multiplies the exfil call delay (the siege shortens it).
+var delay_factor := 1.0
 var _holds := {}          # peer -> seconds standing in an open zone
 
 
@@ -201,12 +206,48 @@ func request_exfil(peer: int) -> String:
 	var soldier := battle.occupancy.soldier_of(peer)
 	if soldier == null or not soldier.alive or soldier.stowed:
 		return "Exfil can only be called on foot."
-	var zone := director.map.find_nearest_zone(soldier.global_position)
+	var zone := find_nearest_open_zone(soldier.global_position)
+	if zone < 0:
+		return "Every exfil is closed."
 	if exfils.has(zone):
 		return "Exfil to zone %s is already %s." % [make_zone_name(zone), str(exfils[zone].state)]
-	exfils[zone] = {"zone": zone, "state": STATE_CALLED, "t": ExtractionRules.timer(battle.config, "exfil_delay_s"),
+	exfils[zone] = {"zone": zone, "state": STATE_CALLED, "t": ExtractionRules.timer(battle.config, "exfil_delay_s") * delay_factor,
 		"net_id": -1, "depart_t": -1.0}
 	return "Exfil called to zone %s: %d s." % [make_zone_name(zone), int(exfils[zone].t)]
+
+
+## Index of the zone nearest `p` that is not closed (-1 when all are).
+func find_nearest_open_zone(p: Vector3) -> int:
+	var best := -1
+	for i in director.map.zones.size():
+		if not closed.has(i) and (best < 0 or director.map.zones[i].distance_to(p) < director.map.zones[best].distance_to(p)):
+			best = i
+	return best
+
+
+## Host: zone `zone` closes for good. A transport on its way leaves, one on the ground lifts off with whoever boarded,
+## a call or an open zone simply ends.
+func apply_close(zone: int) -> void:
+	if closed.has(zone):
+		return
+	closed.append(zone)
+	if not exfils.has(zone):
+		return
+	var e: Dictionary = exfils[zone]
+	match str(e.state):
+		STATE_LANDED:
+			e.t = 0.0
+		STATE_FLYING:
+			var flight := _flight_of(int(e.net_id))
+			if flight == null:
+				exfils.erase(zone)
+			else:
+				flight.depart()
+				e.state = STATE_DEPARTING
+		STATE_DEPARTING:
+			pass
+		_:
+			exfils.erase(zone)
 
 
 static func make_zone_name(zone: int) -> String:
@@ -351,4 +392,6 @@ func make_states() -> Array:
 	for zone in exfils:
 		var e: Dictionary = exfils[zone]
 		out.append({"zone": int(zone), "state": str(e.state), "seconds": maxf(float(e.t), 0.0), "net_id": int(e.net_id)})
+	for zone in closed:
+		out.append({"zone": int(zone), "state": STATE_CLOSED, "seconds": 0.0, "net_id": -1})
 	return out

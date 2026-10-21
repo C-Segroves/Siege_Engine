@@ -17,6 +17,8 @@ const CROP_W := 200
 const CROP_H := 300
 const FADE_STEPS := 6
 const FADE_SECONDS := 2.0
+const FLASH_FRAMES := 9
+const FLASH_STEP_S := 0.12
 const SITE_RINGS := [0, 1, 2, 3, 4, 5, 6]
 const SITE_DIRECTIONS := 8
 const SITE_RING_STEP_M := 25.0
@@ -48,6 +50,7 @@ func _ready() -> void:
 	await _film_backgrounds(battle, cam, site)
 	await _film_fade(battle, cam, site)
 	await _film_herc(battle, cam, site + Vector3(0, 0, -100))
+	await _film_station_flash(battle, cam, site + Vector3(30, 0, 0))
 	print("cloak_shots: %s (%d failures)" % ["OK" if _failures == 0 else "FAILED", _failures])
 	get_tree().quit(1 if _failures > 0 else 0)
 
@@ -146,6 +149,27 @@ func _film_herc(battle: Battle, cam: Camera3D, site: Vector3) -> void:
 	h.cloak_input = false
 	await get_tree().create_timer(FADE_SECONDS, true, true).timeout
 	await _shot("cloak_herc_plain_zoom")
+	cam.fov = 75.0
+
+
+## The inventory station's flash (station.cs: setCloaked(true), plain again 500 ms later), as a sheet of crops
+## (cloak_station_flash.png): before the purchase, then every 0.1 s while the flash fades in and out.
+func _film_station_flash(battle: Battle, cam: Camera3D, site: Vector3) -> void:
+	site.y = MapBuilder.ground_height(battle, site)
+	var s := battle.spawn_soldier_for(93, 2, "Buyer", Transform3D(Basis(), site + Vector3(0, 0.3, 0)))
+	s.apply_armor("tribes2:LIGHT", ["tribes2:CHAINGUN"], "", "")
+	s.end_spawn_protection()
+	await _frames(30)
+	cam.fov = ZOOM_FOV
+	_aim(cam, s.global_position, SOLDIER_DISTANCE * 1.6, LOOK_HEIGHT)
+	var crops: Array[Image] = []
+	crops.append(await _grab_crop(cam, s))
+	TribesStations.apply_station_flash(s)
+	for i in FLASH_FRAMES:
+		await get_tree().create_timer(FLASH_STEP_S, true, true).timeout
+		crops.append(await _grab_crop(cam, s))
+		_expect(true, "flash frame %d: fade %.2f, cloaked %s" % [i, s.cloak.fade, s.cloak.is_cloaked()])
+	_save_sheet(crops, "cloak_station_flash", FLASH_FRAMES + 1)
 	cam.fov = 75.0
 
 

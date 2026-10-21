@@ -67,15 +67,15 @@ static func _make_slot_card(g: Garage, slot: int, herc_index: int) -> Dictionary
 	var armed := Garage.make_armed_count(e)
 	return _make_card("wingman:%d" % slot, SquadRoster.make_pilot_name(g, herc_index, Net.player_name),
 		{"title": LobbyCards.VEHICLE_HEADER, "text": GaragePicker.make_entry_name(e),
-		"detail": "%d/%d armed" % [armed, (e.loadout as Array).size()]}, EDIT_NOTE, str(e.vehicle))
+		"detail": "%d/%d armed" % [armed, (e.loadout as Array).size()]}, EDIT_NOTE, str(e.vehicle), CharacterSlot.make_strings(e.loadout))
 
 
 static func _make_fixed_card() -> Dictionary:
 	return _make_card(FIXED_KEY, FIXED_TEXT, {"title": LobbyCards.VEHICLE_HEADER, "text": FIXED_NOTE, "detail": ""}, "locked")
 
 
-static func _make_card(key: String, name: String, vehicle: Dictionary, note: String, vehicle_id := "") -> Dictionary:
-	var vehicle_model := {"vehicle": vehicle_id, "skin": ""} if vehicle_id != "" else {"label": EMPTY_TEXT.to_upper() if note != "locked" else FIXED_TEXT.to_upper()}
+static func _make_card(key: String, name: String, vehicle: Dictionary, note: String, vehicle_id := "", loadout := []) -> Dictionary:
+	var vehicle_model := {"vehicle": vehicle_id, "skin": "", "loadout": loadout} if vehicle_id != "" else {"label": EMPTY_TEXT.to_upper() if note != "locked" else FIXED_TEXT.to_upper()}
 	return {"models": {"infantry": LobbyCards.make_default_infantry({}), "vehicle": vehicle_model}, "key": key, "kind": KIND, "peer": 0, "name": name, "you": false, "host": false, "ready": true, "team": 0,
 		"team_visible": false, "team_color": Color.TRANSPARENT, "ping": "", "state": "locked" if note == "locked" else "",
 		"infantry": {"title": LobbyCards.INFANTRY_HEADER, "text": "", "detail": ""}, "vehicle": vehicle,

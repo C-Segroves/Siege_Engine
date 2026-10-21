@@ -10,10 +10,13 @@ extends VBoxContainer
 ##   setup(vehicle_id, current, availability)   rebuild for a vehicle; `current` is used when it fits
 ##   changed(loadout)                weapon ids in hardpoint order ("" = empty)
 ##   hardpoint_focused(index)        the player is looking at hardpoint `index` (for the hangar)
+##   mounts_changed(mounts)          a Starsiege Herc's component slots (HercMounts), one picker per slot below the
+##                                   weapons: the factory fit, empty, or a cloak that fits the slot's size
 ##   focus_hardpoint(index)          moves keyboard / gamepad focus to that hardpoint's picker
 
 signal changed(loadout: Array)
 signal hardpoint_focused(index: int)
+signal mounts_changed(mounts: Array)
 
 ## Hardpoint masks (WeaponFit ladder): 7 small / missile, 15 medium, 31 large, 63 extra large (Starsiege).
 const MOUNT_NAMES := {7: "small", 15: "medium", 31: "large", 63: "extra large"}
@@ -21,16 +24,20 @@ const DEFAULT_MASK := 15
 const WEAPON_FAMILY := "herc"
 const EMPTY_SLOT := ""
 const STANDARD_ARMAMENT := "Standard armament  -  fixed, as in %s"
+const COMPONENTS_TITLE := "Components  -  %d slots"
 const UNARMED := "Unarmed  -  no weapons of its own (AI only)"
 
 var vehicle_id := ""
 var loadout: Array = []
+var mounts: Array = []           # HercMounts value per component slot ([] = the vehicle has none)
 var availability := {}           # CampaignAvailability context ({} = no limits)
 var _choices: Array = []         # per hardpoint: Array of weapon ids, index = picker item
 var _pickers: Array = []         # per hardpoint: its OptionButton
+var _mount_pickers: Array = []   # per component slot: its OptionButton
+var _mount_ids: Array = []       # per component slot: the value of each picker item
 
 
-func setup(p_vehicle_id: String, current: Array = [], p_availability := {}) -> void:
+func setup(p_vehicle_id: String, current: Array = [], p_availability := {}, p_mounts: Array = []) -> void:
 	vehicle_id = p_vehicle_id
 	availability = p_availability
 	for c in get_children():
@@ -38,7 +45,10 @@ func setup(p_vehicle_id: String, current: Array = [], p_availability := {}) -> v
 		c.queue_free()
 	_choices.clear()
 	_pickers.clear()
+	_mount_pickers.clear()
+	_mount_ids.clear()
 	var v := Packs.vehicle(vehicle_id)
+	mounts = HercMounts.make_sanitized(v, p_mounts)
 	if PackVehicleLoader.has_fixed_loadout(v):
 		_build_standard_armament(v)
 		return
@@ -49,11 +59,49 @@ func setup(p_vehicle_id: String, current: Array = [], p_availability := {}) -> v
 	for i in masks.size():
 		add_child(_build_row(v, i, masks[i]))
 	_apply_stock_limits()
+	_build_component_rows(v)
 
 
 ## Hardpoint masks of a vehicle (WeaponFit.hardpoint_masks).
 static func hardpoint_masks(v: Dictionary) -> Array:
 	return WeaponFit.hardpoint_masks(v)
+
+
+## One picker per component slot (HercMounts.make_rows): the factory fit, empty, or a cloak that fits the slot.
+func _build_component_rows(v: Dictionary) -> void:
+	var rows := HercMounts.make_rows(v, mounts)
+	if rows.is_empty():
+		return
+	add_child(Widgets.section(COMPONENTS_TITLE % rows.size()))
+	for i in rows.size():
+		var row: Dictionary = rows[i]
+		var ids := []
+		var labels := []
+		for o in row.options:
+			ids.append(int(o.id))
+			labels.append(make_component_label(o))
+		var picker := Widgets.option_button(labels, maxi(ids.find(int(row.current)), 0))
+		_mount_ids.append(ids)
+		_mount_pickers.append(picker)
+		picker.item_selected.connect(func(k: int) -> void: _on_component_picked(i, k))
+		add_child(OptionRow.new(str(row.label), picker))
+
+
+## "Chameleon Cloak  [M, 1.0 t]" - a part with its mount size and mass; the factory / empty choices as they are.
+static func make_component_label(option: Dictionary) -> String:
+	if str(option.size) == "":
+		return str(option.name)
+	return "%s  [%s, %.1f t]" % [option.name, option.size, float(option.mass_t)]
+
+
+func _on_component_picked(slot: int, choice: int) -> void:
+	if HercMounts.apply_set(Packs.vehicle(vehicle_id), mounts, slot, int(_mount_ids[slot][choice])):
+		mounts_changed.emit(mounts)
+
+
+func focus_component(slot: int) -> void:
+	if is_inside_tree() and slot >= 0 and slot < _mount_pickers.size():
+		(_mount_pickers[slot] as OptionButton).grab_focus()
 
 
 ## Read-only rows: one per fixed mount, its weapon and stats.

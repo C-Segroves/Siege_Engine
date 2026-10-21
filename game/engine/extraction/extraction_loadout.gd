@@ -41,14 +41,30 @@ static func can_equip(soldier: Infantry, item_id: String) -> bool:
 
 ## The weapon ids `soldier` should carry from `inv`.
 static func make_weapon_loadout(soldier: Infantry, inv: ExtractionInventory) -> Array:
+	return make_kit_weapons(soldier.armor_id, inv)
+
+
+## The weapon ids armour `armor_id` carries from `inv` (what the raid spawn gives, and what Operator Setup shows).
+static func make_kit_weapons(armor_id: String, inv: ExtractionInventory) -> Array:
 	var out := []
-	var slots := int(soldier.armor.get("max_weapons", 3))
+	var slots := int(InfantryCatalog.armor(armor_id).get("max_weapons", 3))
 	for id in inv.stacks:
 		if ExtractionItems.kind_of(id) != "weapon" or out.size() >= slots:
 			continue
 		var wid := ExtractionItems.ref_of(id)
-		if InfantryCatalog.allows_weapon(soldier.armor_id, wid) and not out.has(wid):
+		if InfantryCatalog.allows_weapon(armor_id, wid) and not out.has(wid):
 			out.append(wid)
+	return out
+
+
+## What a raider in `armor_id` really carries from kit `inv`: its weapons, else the rules' free weapon (apply_free_weapon).
+static func make_raid_weapons(armor_id: String, inv: ExtractionInventory) -> Array:
+	var out := make_kit_weapons(armor_id, inv)
+	if not out.is_empty():
+		return out
+	for wid in ExtractionRules.data().get("free_weapons", []):
+		if InfantryCatalog.allows_weapon(armor_id, str(wid)) and ExtractionItems.has(ExtractionItems.make_id("weapon", str(wid))):
+			return [str(wid)]
 	return out
 
 

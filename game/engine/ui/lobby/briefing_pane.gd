@@ -2,12 +2,13 @@ class_name BriefingPane
 extends VBoxContainer
 ## Option B of the lobby's right pane: the campaign briefing (docs/design/lobby_loadout_economy.md section 5.1). From the
 ## top: the mission heading, the leader video in a MediaBox (at most half the screen high, only while the campaign has
-## clips to play, once per mission), the mission map (only when
-## BriefingSource has a picture), the briefing text and the objectives.
+## clips to play, once per mission), the mission map (a note when
+## BriefingSource has no picture), the briefing text and the objectives.
 ##   show_briefing(BriefingSource.make_briefing(settings))
 
 var heading: Label
 var map_view: TextureRect
+var map_note: Label
 var text_label: Label
 var objectives_label: Label
 var media: MediaBox
@@ -21,9 +22,12 @@ func _init() -> void:
 	map_view = TextureRect.new()
 	map_view.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	map_view.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	map_view.custom_minimum_size = Vector2(0, Widgets.metric("row_height") * 4)
+	map_view.custom_minimum_size = Vector2(0, Widgets.metric("row_height") * 8)
 	map_view.visible = false
 	add_child(map_view)
+	map_note = Widgets.label(BriefingMap.NO_TERRAIN_NOTE, "DimLabel")
+	map_note.visible = false
+	add_child(map_note)
 	text_label = Widgets.paragraph("")
 	add_child(text_label)
 	_objectives_title = Widgets.section("Objectives")
@@ -46,6 +50,7 @@ func show_briefing(b: Dictionary) -> void:
 	objectives_label.text = "- " + "\n- ".join(PackedStringArray(objectives)) if not objectives.is_empty() else ""
 	map_view.texture = b.map
 	map_view.visible = b.map != null
+	map_note.visible = b.map == null and not str(b.heading).is_empty()
 	if not (b.movies as Array).is_empty() or not (b.talks as Array).is_empty():
 		_present(b)
 

@@ -34,12 +34,14 @@ static func apply_entry(slot: CharacterSlot, entry: Dictionary, selected_row: St
 			return _make_result(LoadoutLayout.apply_set(slot, "vehicle", ref), label, "%s is not installed" % label)
 		"herc_skin":
 			return _apply_herc_skin(slot, id, label)
+		MountEntries.KIND_PART:
+			return _apply_mount_part(slot, entry, label)
 	return _make_fail("%s cannot be equipped" % label)
 
 
 ## "" when `entry` could be put on `slot` (somewhere), else why not ("does not fit Light Armor"). Used for the red
 ## "does not fit" mark on store entries; it is a quick test, apply_entry has the last word.
-static func make_fit_reason(slot: CharacterSlot, entry: Dictionary) -> String:
+static func make_fit_reason(slot: CharacterSlot, entry: Dictionary, selected_row := "") -> String:
 	var armor := InfantryCatalog.armor(slot.armor)
 	var ref := UnlockId.ref_of(str(entry.id))
 	var armor_name := str(armor.get("name", slot.armor))
@@ -53,7 +55,7 @@ static func make_fit_reason(slot: CharacterSlot, entry: Dictionary) -> String:
 		"pack":
 			return "" if (armor.get("packs", []) as Array).has(ref) else "does not fit %s" % armor_name
 		"herc_weapon":
-			return "" if _find_hardpoint(slot, ref, false) >= 0 else "fits no hardpoint of this vehicle"
+			return _make_hardpoint_reason(slot, ref, selected_row)
 		"body":
 			return "" if _offers_body(slot, UnlockId.shape_of(str(entry.id))) else "does not fit %s" % armor_name
 		"skin":
@@ -61,6 +63,20 @@ static func make_fit_reason(slot: CharacterSlot, entry: Dictionary) -> String:
 		"herc_skin":
 			return "" if UnlockId.shape_of(str(entry.id)) == SkinCatalog.make_vehicle_shape(slot.vehicle) else "is for another vehicle"
 	return ""
+
+
+## Why Herc weapon `weapon_id` does not fit: the selected hardpoint when one is selected, else every hardpoint.
+static func _make_hardpoint_reason(slot: CharacterSlot, weapon_id: String, selected_row: String) -> String:
+	var v := Packs.vehicle(slot.vehicle)
+	if PackVehicleLoader.has_fixed_loadout(v):
+		return "this vehicle has a fixed loadout"
+	var masks := WeaponFit.hardpoint_masks(v)
+	var weapon := Packs.weapon(weapon_id)
+	if selected_row.begins_with("hardpoint:"):
+		var index := int(selected_row.get_slice(":", 1))
+		if index >= 0 and index < masks.size():
+			return "" if WeaponFit.fits_mask(weapon, int(masks[index])) else "too big for a %s hardpoint" % WeaponFit.hardpoint_size(v, index)
+	return "" if _find_hardpoint(slot, weapon_id, false) >= 0 else "fits no hardpoint of this vehicle"
 
 
 static func _make_result(ok: bool, label: String, fail_text: String) -> Dictionary:
@@ -139,6 +155,15 @@ static func _apply_skin(slot: CharacterSlot, skin_unlock_id: String, label: Stri
 	if shape != (slot.body if slot.body != "" else PlayerProfile.make_default_body(slot.armor)):
 		_apply_body(slot, shape, label)
 	return _make_result(LoadoutLayout.apply_set(slot, "skin", UnlockId.skin_of(skin_unlock_id)), label, "%s is not offered for this body" % label)
+
+
+static func _apply_mount_part(slot: CharacterSlot, entry: Dictionary, label: String) -> Dictionary:
+	var mounts := slot.make_mounts()
+	var index: int = MountEntries.make_slot_index(str(entry.mount_row))
+	if not HercMounts.apply_set(Packs.vehicle(slot.vehicle), mounts, index, int(entry.mount_value)):
+		return _make_fail("%s does not fit that component slot" % label)
+	slot.herc_mounts = mounts
+	return {"ok": true, "text": "Equipped %s" % label}
 
 
 static func _apply_herc_skin(slot: CharacterSlot, skin_unlock_id: String, label: String) -> Dictionary:

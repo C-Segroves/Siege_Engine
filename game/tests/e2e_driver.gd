@@ -23,9 +23,12 @@ const CALLIN_VEHICLE := "es1:RAPTOR"
 const CALLIN_POD_SECONDS := 120.0
 const CALLIN_VEHICLE_SECONDS := 240.0
 const CALLIN_START_POINTS := 5000
-const CALLIN_RINGS_M := [12.0, 24.0, 40.0, 60.0, 90.0]
+const CALLIN_RINGS_M := [12.0, 24.0, 40.0, 60.0, 90.0, 130.0, 170.0, 210.0]
 const CALLIN_DIRECTIONS := 12
 const CALLIN_ANSWER_SECONDS := 1.5
+## The mission ender's verdict grace plus its closing voice prompt (MissionEnder.VOICE_WAIT_MAX): a co-op match ends this long
+## after the last enemy dies (it measured about 15 s).
+const MISSION_END_SECONDS := 30.0
 const MOVIE_START_MSEC := 2500
 const MOVIE_NEXT_MSEC := 600
 const MOVIE_ROUNDS := 6
@@ -465,10 +468,14 @@ func check_player_moves(b: Battle, sec := 2.5) -> void:
 		fail("battle has no player vehicle (%s)" % describe_battle(b))
 		return
 	var p0 := p.global_position
+	# A soldier reads the movement input every frame (the new spawn path starts a pilot on foot beside his Herc);
+	# a Herc keeps the throttle lever where it is put.
+	Input.action_press("throttle_up")
 	p.throttle = 0.8
 	await wait(sec)
 	var d := p.global_position.distance_to(p0)
 	expect(d > 1.0, "player %s moved %.1f m in %.1f s (speed %.1f)" % [p.vehicle_id, d, sec, p.speed])
+	Input.action_release("throttle_up")
 	p.throttle = 0.0
 
 
@@ -483,6 +490,7 @@ func flow_library() -> void:
 	await wait_screen("home")
 	await wait(1.0)
 	await shot("01_home")
+	await click_text("Your library")   # imports, game cards, soundtracks
 	# pack toggle (click the first content check box twice)
 	var cb: CheckBox = null
 	for c in all_controls(lib, []):
@@ -523,7 +531,8 @@ func flow_library() -> void:
 		await click_text("Back to library")
 		await wait_screen("home", 5)
 	# options: volume + rebind
-	var opt := find_button("Options")
+	await click_text("Options & tools")
+	var opt := find_button("Options", lib.current)
 	await click(opt, "Options")
 	if await wait_screen("options", 5):
 		await wait(0.3)
@@ -557,6 +566,10 @@ func flow_library() -> void:
 			k.pressed = false
 			Input.parse_input_event(k)
 			await frames(3)
+			# Z already belongs to the torso-center action: the screen asks Swap / Clear / Cancel; Swap gives Z to throttle_stop
+			if expect(find_button("Swap") != null, "binding Z, which another action uses, asks Swap / Clear / Cancel"):
+				await click_text("Swap")
+				await frames(3)
 			var evs := InputMap.action_get_events("throttle_stop")
 			var txt := []
 			for e in evs:
@@ -577,6 +590,7 @@ func flow_library() -> void:
 				expect(not str(evs2).contains("Z"), "reset restores throttle_stop (%s)" % [evs2])
 		await click_text("Back")
 		await wait_screen("home", 5)
+	await wait(0.3)   # the home page lays itself out
 	# quit confirm: cancel, then confirm
 	await click_text("Quit")
 	await frames(3)
@@ -586,13 +600,13 @@ func flow_library() -> void:
 		await click(cancel, "Cancel")
 		await frames(3)
 		expect(find_button("Cancel") == null, "Cancel closes the quit dialog")
-	# Arena / versus button routes to the launcher
-	await click_text("Arena / versus")
+	# Host LAN game (the primary button) routes to the launcher
+	await click_text("Host LAN game")
 	await wait_scene_class("Launcher", 10)
 	await wait(0.5)
 	log_line("arena/versus opened launcher screen '%s'" % screen())
 	await shot("08_arena_versus")
-	expect(screen() == "lobby", "Arena / versus opens the standard lobby (%s)" % screen())
+	expect(screen() == "lobby", "Host LAN game opens the standard lobby (%s)" % screen())
 	await click_text("Leave")   # the lobby was the first page: Leave goes to the front end, the library
 	await wait_scene_class("Library", 10)
 	await wait(1.0)
@@ -1004,7 +1018,7 @@ func gamepad_check_soldier(b: Battle) -> void:
 ## Menu -> Skirmish: the offline lobby. --mapname= picks the map the way Game Options does; --veh= puts that vehicle on the
 ## active operator slot (Operator Setup's Herc), parked beside the soldier.
 func skirmish_from_menu() -> void:
-	await click_text("Skirmish")
+	await click_text("Host LAN game")   # skirmish is a hosted game alone against the bots
 	await wait_screen("lobby", 5)
 	await wait(0.8)
 	var lobby := (cur() as Launcher).current as LobbyScreen
@@ -1079,14 +1093,14 @@ func flow_gamepad() -> void:
 	await wait_screen("home")
 	await wait(0.5)
 	log_line("focus on open: %s" % focus_text())
-	# walk down with the d-pad until "Arena / versus" (primary) is focused
+	# walk down with the d-pad until "Host LAN game" (primary) is focused
 	var n := 0
-	while not focus_text().contains("Arena / versus") and n < 60:
+	while not focus_text().contains("Host LAN game") and n < 60:
 		await pad_button(JOY_BUTTON_DPAD_DOWN)
 		n += 1
 	log_line("after %d d-pad downs focus: %s" % [n, focus_text()])
 	await shot("01_lib_focus")
-	if not expect(focus_text().contains("Arena / versus"), "d-pad reaches 'Arena / versus'"):
+	if not expect(focus_text().contains("Host LAN game"), "d-pad reaches 'Host LAN game'"):
 		return
 	await pad_button(JOY_BUTTON_A)
 	await wait_scene_class("Launcher", 10)
@@ -1096,23 +1110,16 @@ func flow_gamepad() -> void:
 	await pad_button(JOY_BUTTON_B)
 	await wait(0.5)
 	log_line("pad B -> '%s' focus %s" % [screen(), focus_text()])
-	expect(scene_name() == "Library" and screen() == "home", "pad B from Arena / versus returns to the library (the main menu)")
+	expect(scene_name() == "Library" and screen() == "home", "pad B from Host LAN game returns to the library (the main menu)")
 	n = 0
-	while not focus_text().contains("Skirmish, training") and n < 60:
-		await pad_button(JOY_BUTTON_DPAD_DOWN)
-		n += 1
-	await pad_button(JOY_BUTTON_A)
-	await wait_scene_class("Launcher", 10)
-	await wait(0.5)
-	expect(screen() == "menu", "the library's Skirmish, training, extraction opens the launcher menu")
-	n = 0
-	while not focus_text().contains("Skirmish") and n < 40:
+	while not focus_text().contains("Host LAN game") and n < 60:
 		await pad_button(JOY_BUTTON_DPAD_DOWN)
 		n += 1
 	log_line("focus %s after %d" % [focus_text(), n])
 	await pad_button(JOY_BUTTON_A)
+	await wait_scene_class("Launcher", 10)
 	await wait(1.0)
-	expect(screen() == "lobby", "pad A on Skirmish opens the skirmish lobby (%s)" % screen())
+	expect(screen() == "lobby", "pad A on Host LAN game opens the lobby, alone it is a skirmish against bots (%s)" % screen())
 	await shot("03_lobby")
 	await wait(1.0)
 	await pad_button(JOY_BUTTON_START)   # menu_primary: the footer's Start match
@@ -1298,7 +1305,7 @@ func flow_battle() -> void:
 
 # ------------------------------------------------------------------ flow: LAN through the UI (two processes)
 
-## lan_host: menu -> Host LAN game (or Host co-op campaign) -> mode (--mode=coop|vs|team_vs|campaign) in the lobby's Game
+## lan_host: menu -> Host LAN game -> mode (--mode=coop|vs|team_vs|campaign) in the lobby's Game
 ## Options -> wait for the client -> Start match. lan_join: menu -> Join LAN game -> discovered server -> Ready.
 ## lobby_host / lobby_join open the lobby without the menu and check its chat and the client's read-only options too.
 func flow_lan() -> void:
@@ -1451,7 +1458,7 @@ func flow_lan() -> void:
 		if mode == "campaign":
 			await finish_coop_campaign_mission(b, remote)
 		elif not mode in ["vs", "team_vs"]:
-			await wait_for(func() -> bool: return b.is_over(), 10.0, "co-op match end after all enemies died")
+			await wait_for(func() -> bool: return b.is_over(), MISSION_END_SECONDS, "co-op match end after all enemies died")
 		if not b.is_over():
 			b.end_match("QA end")
 	else:
@@ -1512,10 +1519,10 @@ func lan_check_chat(role: String, b: Battle) -> void:
 	await wait(2.0)   # the other side may still be waiting for these lines
 
 
-## The menu way in: Host LAN game (a versus lobby with its default settings at once; "Host co-op campaign (LAN)" for the
+## The menu way in: Host LAN game (a versus lobby with its default settings at once)
 ## campaign) -> the host sets the mode, map, bots and team mode in Game Options (here through the model the panel uses).
 func lan_open_lobby_from_menu(mode: String) -> void:
-	await click_text("Host co-op campaign (LAN)" if mode == "campaign" else "Host LAN game")
+	await click_text("Host LAN game")
 	if not await wait_screen("lobby", 5):
 		return
 	await wait(0.5)
@@ -1531,13 +1538,30 @@ func lan_open_lobby_directly(mode: String) -> void:
 	await lan_apply_host_options(mode)
 
 
+## The host picks `kind` (a MatchFlow mode) in the lobby's Game Options mode picker, the way a player does (mouse or pad:
+## the OptionButton's own selection signal).
+func lan_pick_mode(lobby: LobbyScreen, kind: String) -> bool:
+	var picker := lobby.options.controls.get("mode") as OptionButton
+	var at := MatchFlow.make_offered_modes().find(kind)
+	if picker == null or at < 0:
+		fail("the host's mode picker offers no '%s'" % kind)
+		return false
+	picker.select(at)
+	picker.item_selected.emit(at)
+	await wait(0.5)
+	if not expect(str(Net.settings.get("mode", "")) == kind, "picking '%s' in the lobby sets the mode (%s)" % [kind, Net.settings.get("mode")]):
+		return false
+	return true
+
+
 ## Applies the mode and the --mapname / --ai / --bots / --infantry arguments to the host's lobby, as Game Options does.
 func lan_apply_host_options(mode: String) -> void:
 	var lobby := (cur() as Launcher).current as LobbyScreen
 	var s := Net.settings
 	var kind := "vs" if mode == "team_vs" else mode
 	if str(s.get("mode", "")) != kind:
-		s = GameOptionsModel.make_with_mode(s, kind)
+		await lan_pick_mode(lobby, kind)
+		s = Net.settings
 	if _arg("mapname") != "":
 		var es := MapPicker.make_entries()
 		for i in es.size():
@@ -2074,7 +2098,8 @@ func _extraction_host_lobby() -> void:
 	await wait_screen("lobby", 5)
 	await wait(0.5)
 	var lobby := (cur() as Launcher).current as LobbyScreen
-	var s := GameOptionsModel.make_with_mode(Net.settings, ExtractionRules.MODE)
+	await lan_pick_mode(lobby, ExtractionRules.MODE)
+	var s := Net.settings
 	var entries := MapPicker.make_entries()
 	for i in entries.size():
 		if str(entries[i].name).contains("Katabatic"):
@@ -2205,16 +2230,19 @@ func _extraction_host_callins(b: Battle, x: ExtractionDirector) -> void:
 func _request_callin_ahead(b: Battle, c: CallinDirector, kind: String) -> bool:
 	var me := b.player
 	var points_before := c.points.mine
+	var reasons := {}
 	for ring in CALLIN_RINGS_M:
 		for i in CALLIN_DIRECTIONS:
 			var spot: Vector3 = me.global_position + Vector3.FORWARD.rotated(Vector3.UP, TAU * float(i) / CALLIN_DIRECTIONS) * ring
 			var request := CallinRequest.make(kind, "", Net.my_id(), spot)
-			if not bool(c.checks.make_plan(request, true).ok):
+			var plan: Dictionary = c.checks.make_plan(request, true)
+			if not bool(plan.ok):
+				reasons[str(plan.get("reason", ""))] = int(reasons.get(str(plan.get("reason", "")), 0)) + 1
 				continue
 			c.request_designated(request)
 			if await wait_for(func() -> bool: return c.points.mine < points_before, CALLIN_ANSWER_SECONDS):
 				return true
-	log_line("client: the host made no %s order on any spot around %s" % [kind, me.global_position])
+	log_line("client: the host made no %s order on any spot around %s (spots refused: %s)" % [kind, me.global_position, reasons])
 	return false
 
 

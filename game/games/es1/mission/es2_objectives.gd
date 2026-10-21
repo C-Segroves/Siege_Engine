@@ -162,7 +162,7 @@ func _scan_targets() -> Array:
 
 
 ## True when a scan target other than `me` lies within `reach` (a structure's slack added) of `me` and inside the cone.
-## The angle is the signed one of Vector2.angle_to, as the original port of the test has it.
+## The cone is +-cone (es2.md 10.2 mode 3/7: facing +-45 degrees), so the angle is absolute.
 func is_facing_scan_target(me: Node3D, reach: float, cone: float) -> bool:
 	var near := false
 	for t in _scan_targets():
@@ -170,7 +170,7 @@ func is_facing_scan_target(me: Node3D, reach: float, cone: float) -> bool:
 			var to: Vector3 = t.global_position - me.global_position
 			var fwd: Vector3 = -me.aim_basis().z
 			var range := reach + SCAN_RANGE_STRUCTURE_EXTRA * float(t is Structure)
-			if to.length() < range and Vector2(fwd.x, fwd.z).angle_to(Vector2(to.x, to.z)) < cone:
+			if to.length() < range and absf(Vector2(fwd.x, fwd.z).angle_to(Vector2(to.x, to.z))) < cone:
 				near = true
 	return near
 

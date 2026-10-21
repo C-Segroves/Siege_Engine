@@ -5,9 +5,13 @@ extends RefCounted
 
 const NOBODY := ""
 const NO_TEAM := -1
+## Counted events (add_event): a pilot capturing or returning a flag; the match stats pay them as objectives.
+const EVENT_FLAG_CAPTURE := "flag_capture"
+const EVENT_FLAG_RETURN := "flag_return"
 
 var teams := {}      # team id -> points
 var players := {}    # player key -> points
+var events := {}     # player key -> {event name -> count}, host only (the match stats read it; not synced)
 
 
 func add_team(team: int, points: float) -> void:
@@ -20,6 +24,18 @@ func add_player(key: String, points: float) -> void:
 	if key == NOBODY:
 		return
 	players[key] = player_score(key) + points
+
+
+func add_event(key: String, event: String) -> void:
+	if key == NOBODY:
+		return
+	var counts: Dictionary = events.get(key, {})
+	counts[event] = int(counts.get(event, 0)) + 1
+	events[key] = counts
+
+
+func event_count(key: String, event: String) -> int:
+	return int((events.get(key, {}) as Dictionary).get(event, 0))
 
 
 func team_score(team: int) -> float:

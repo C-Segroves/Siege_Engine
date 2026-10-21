@@ -5,11 +5,13 @@ extends RefCounted
 ## pilot picks his own goals (up to goals.max_individual); there is no team vote and no leader pick: the lobby shows the
 ## squad's picks read-only (make_teammate_picks) and the squad coordinates by chat. A goal:
 ## {id, scope: "individual", kind, text, count, reward}.
-## Progress kinds read the end-of-match stats: kills, vehicle_kills, objectives, flag_captures, survived.
+## Progress kinds read the end-of-match stats the host keeps (BattleStats): kills, vehicle_kills, assists, objectives,
+## flag_captures, damage, extractions, survived (finished alive) and seconds_alive.
 
 const SCOPE_INDIVIDUAL := "individual"
 const STAT_BY_KIND := {"kills": "kills", "vehicle_kills": "vehicle_kills", "objectives": "objectives",
-	"flag_captures": "flag_captures", "survived": "survived"}
+	"flag_captures": "flag_captures", "survived": "survived", "assists": "assists", "damage": "damage",
+	"extractions": "extractions", "seconds_alive": "seconds_alive"}
 
 
 ## The board of `mode_key` for `seed_value` (the host's seed in the session settings gives everybody the same list).

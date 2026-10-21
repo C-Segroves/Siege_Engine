@@ -42,12 +42,18 @@ var blocked_by_jam_field := false
 ## Seconds of the timed cloaks the game's scripts apply: after a respawn and on a new vehicle (0 = none).
 var respawn_cloak_s := 0.0
 var vehicle_pad_cloak_s := 0.0
+## Tribes 2: seconds the inventory station flashes its buyer cloaked (station.cs StationInventory::stationReady).
+var station_flash_s := 0.0
 ## Starsiege: the standard sensor's modes {"a": {base, camo, stop, slow, fast, activ, sweep_s ...}, "p": {...}}.
 var sensor_modes := {}
 ## Starsiege: health fractions below which the cloak glitches / fails, and the glitch rate.
 var glitch_health := 0.0
 var glitch_coef := 0.0
 var fail_health := 0.0
+## Starsiege components: the catalog's mount size ("S" / "M" / "L" / "X"), mass (tonnes) and tech level.
+var mount_size := ""
+var mass_t := 0.0
+var tech_level := 0
 var ai_uses := false
 var ai_order := ""
 var sound_loop := ""
@@ -75,10 +81,14 @@ static func make_from(d: Dictionary) -> CloakProfile:
 	p.blocked_by_jam_field = bool(d.get("blocked_by_jam_field", false))
 	p.respawn_cloak_s = float(d.get("respawn_cloak_s", 0.0))
 	p.vehicle_pad_cloak_s = float(d.get("vehicle_pad_cloak_s", 0.0))
+	p.station_flash_s = float(d.get("station_flash_s", 0.0))
 	p.sensor_modes = d.get("sensor_modes", {})
 	p.glitch_health = float(d.get("glitch_health", 0.0))
 	p.glitch_coef = float(d.get("glitch_coef", 0.0))
 	p.fail_health = float(d.get("fail_health", 0.0))
+	p.mount_size = str(d.get("mount_size", ""))
+	p.mass_t = float(d.get("mass_t", 0.0))
+	p.tech_level = int(d.get("tech_level", 0))
 	p.ai_uses = bool(d.get("ai_uses", false))
 	p.ai_order = str(d.get("ai_order", ""))
 	p.sound_loop = str(d.get("sound_loop", ""))
@@ -98,6 +108,17 @@ static func of(profile_id: String) -> CloakProfile:
 ## The cloak component `component_id` of Starsiege-style numbered equipment of `pack_name`, or NONE.
 static func of_component(pack_name: String, component_id: int) -> CloakProfile:
 	return of("%s:%d" % [pack_name, component_id])
+
+
+## The cloak components of `pack_name` (Starsiege Chameleon / Cuttlefish), lowest component id first.
+static func make_components(pack_name: String) -> Array:
+	_ensure_loaded()
+	var out := []
+	for p in _by_id.values():
+		if (p as CloakProfile).component_id_of(pack_name) > 0:
+			out.append(p)
+	out.sort_custom(func(a: CloakProfile, b: CloakProfile) -> bool: return a.component_id_of(pack_name) < b.component_id_of(pack_name))
+	return out
 
 
 ## The id of the script-driven cloak (respawn, station, vehicle pad) of the game `unit` plays in: "<pack>:timed_cloak".
@@ -163,6 +184,13 @@ static func _ensure_loaded() -> void:
 
 func is_real() -> bool:
 	return id != ""
+
+
+## The numbered component id of this profile in `pack_name` ("starsiege:830" -> 830), 0 when it is not a component.
+func component_id_of(pack_name: String) -> int:
+	var prefix := pack_name + ":"
+	var rest := id.substr(prefix.length())
+	return int(rest) if id.begins_with(prefix) and rest.is_valid_int() else 0
 
 
 ## True when the profile has the Starsiege-style sensor modes (detection by chance per sweep).

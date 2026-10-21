@@ -23,10 +23,24 @@ func _init(p_end: Callable, p_is_voice_busy: Callable) -> void:
 
 ## Takes `verdict` when no verdict came before it.
 func apply_verdict(verdict: MissionVerdict) -> void:
-	if verdict == null or _verdict != null:
+	if verdict == null:
+		return
+	if _verdict != null:
+		_apply_rearm(verdict)
 		return
 	_verdict = verdict
 	_delay_left = verdict.delay
+
+
+## A pending verdict that re-arms on a code change gives way to one of another code, and its grace starts over.
+func _apply_rearm(verdict: MissionVerdict) -> void:
+	if _ended or not _verdict.rearms_on_code_change or not verdict.rearms_on_code_change:
+		return
+	if verdict.code == _verdict.code:
+		return
+	_verdict = verdict
+	_delay_left = verdict.delay
+	_waited_voice = 0.0
 
 
 ## A verdict that cannot wait for the one held (a script's own debriefing during a death grace): it takes over, unless

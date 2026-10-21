@@ -16,7 +16,10 @@ Output (all positions metres in the engine frame):
   scripts   [{label, message, by: [labels], enabled, actions: [action]}]   action = {op, ...} (ops below)
   triggers  [{label, tag, pos, radius, height, max_enter, enabled}]
   actors    {label: [x, y, z]} positions of the labels the scripts name
-Ops: speak wait obj_add obj_status obj_remove exec exit_script if loop exit_loop for var enable disable destroy spawn_on spawn_off
+  ActionAddGoal / ActionReplaceGoal / ActionRemoveGoal   Target = the AI actor, AISquad or spawn point label; goal = the name of an AI_*Goal
+                     export (kind, destination / target / patrol-point names, Priority, movement area); goalName names the goal for
+                     removal ("DefaultGuardGoal" is every soldier's guard-the-spawn goal)
+Ops: goal speak wait obj_add obj_status obj_remove exec exit_script if loop exit_loop for var enable disable destroy spawn_on spawn_off
 teleport damage prompt sound next fail countdown noop(class)
 """
 import re
@@ -24,6 +27,11 @@ import re
 import ue2_package as U
 import tv_audio
 
+# The ground-soldier goals the engine acts on (the vehicle, turret, animation and ski goals are not converted).
+GOAL_KINDS = {'AI_MoveToGoal': 'move', 'AI_SquadMoveToGoal': 'move', 'AI_GuardGoal': 'guard', 'AI_SquadGuardGoal': 'guard',
+              'AI_WanderGoal': 'wander', 'AI_PatrolGoal': 'patrol', 'AI_AttackGoal': 'attack', 'AI_SquadAttackGoal': 'attack',
+              'AI_FollowGoal': 'follow', 'AI_SquadFollowGoal': 'follow'}
+DEFAULT_PRIORITY = 50
 SKIP_CLASSES = ('Script', 'Brush', 'StaticMeshActor', 'StaticMeshInstance', 'TerrainSector', 'Light', 'Polys', 'Model', 'ActorGroup',
                 'Camera', 'SpriteEmitter', 'Projector', 'ZoneInfo', 'DynamicLight')
 
@@ -86,6 +94,38 @@ class Compiler:
         if name and name != 'None':
             self.labels.add(str(name))
         return str(name) if name else ''
+
+    def goal_export(self, name):
+        for e in self.pkg.exports:
+            if e['name'] == name and self.pkg.class_name(e) in GOAL_KINDS:
+                return e
+        return None
+
+    def name_list(self, raw):
+        """The names of a compact-index array property (patrolPointNames)."""
+        return [self.pkg.name(i) for i in _refs(raw)]
+
+    def goal(self, name):
+        """{kind, name, priority, dest, target, center, radius, points} of the AI_*Goal export called `name` (None when the
+        engine does not act on its kind). Names of actors are labels (recorded so their positions are exported)."""
+        e = self.goal_export(name)
+        if e is None:
+            return None
+        p = self.props(e)
+        g = p.get
+        kind = GOAL_KINDS[self.pkg.class_name(e)]
+        out = {'kind': kind, 'name': str(g('goalName', '')), 'priority': int(g('Priority', DEFAULT_PRIORITY))}
+        for key, field in (('destinationName', 'dest'), ('targetName', 'target'), ('movementAreaCenterName', 'center')):
+            if g(key):
+                out[field] = self.label(g(key))
+        if kind == 'guard':
+            out['radius'] = round(float(g('movementAreaRadius', 0.0)) * self.mpu, 1)
+        if kind == 'follow':
+            out['radius'] = round(float(g('proximity', 0.0)) * self.mpu, 1)
+        if kind == 'patrol':
+            out['points'] = [self.label(n) for n in self.name_list(g('patrolPointNames'))]
+            out['once'] = bool(g('bExecuteOnce', False))
+        return out
 
     def test(self, e):
         p = self.props(e)
@@ -158,6 +198,13 @@ class Compiler:
         if cls == 'ActionPlaySound':
             stem = tv_audio.sound_import_name(self.pkg, p.refs.get('SoundToPlay', 0))
             return {'op': 'sound', 'stem': stem, 'at': self.label(g('actorLabel', '')), 'radius': float(g('Radius', 0.0)) * self.mpu}
+        if cls in ('ActionAddGoal', 'ActionReplaceGoal', 'ActionRemoveGoal'):
+            mode = {'ActionAddGoal': 'add', 'ActionReplaceGoal': 'replace', 'ActionRemoveGoal': 'remove'}[cls]
+            goal = self.goal(str(g('goal', ''))) if mode != 'remove' else None
+            if mode != 'remove' and goal is None:
+                return None
+            return {'op': 'goal', 'mode': mode, 'target': self.label(g('Target', '')), 'goal': goal,
+                    'name': str(g('goalName', '') or g('nameOfGoalToReplace', ''))}
         if cls == 'ActionNextCampaignMission':
             return {'op': 'next'}
         if cls == 'ActionFailCampaignMission':

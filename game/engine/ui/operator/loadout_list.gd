@@ -114,6 +114,8 @@ func _make_shown_row(r: Dictionary) -> Dictionary:
 func _make_part_name(r: Dictionary) -> String:
 	if str(r.kind) == "ammo":
 		return ""
+	if str(r.kind) == MountEntries.KIND_ROW:
+		return str(r.current)
 	if str(r.kind) == "gear" and str(r.current) != "":
 		return ""
 	if str(r.key) == "herc_skin":
@@ -140,8 +142,18 @@ func _on_row_pressed(row_key: String) -> void:
 	var r := _state.find_row(row_key)
 	if r.is_empty():
 		return
+	if str(r.kind) == MountEntries.KIND_ROW and bool(r.locked):
+		_state.apply_status("In a raid the vehicle is fitted at the call-in, not here.")
+		return
+	if str(r.kind) == MountEntries.KIND_ROW:
+		_state.apply_select_row(row_key)
+		row_chosen.emit(row_key)
+		return
 	if str(r.kind) in ["ammo", "gear"]:
 		_state.apply_fill(row_key)
+		return
+	if str(r.kind) == "hardpoint" and bool(r.locked):
+		_state.apply_status(OperatorText.make_hardpoint_locked_text(_state.ctx))
 		return
 	if bool(r.locked) or str(r.kind) == "armour":
 		_state.apply_status("The armour is chosen under Look.")

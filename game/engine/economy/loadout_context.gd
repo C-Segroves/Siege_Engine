@@ -29,6 +29,8 @@ var availability := {}
 var store_enabled := true
 var loss_on_death := false
 var unlocks := Unlocks.new()
+## In a raid the kit the operator takes in (weapons he does not carry are marked "not in your kit"); null elsewhere.
+var raid_kit: ExtractionInventory = null
 
 
 ## The context of a pilot in a match with `settings` (Net.settings): role "player" or "bot". `p_unlocks` are the
@@ -52,6 +54,11 @@ static func make_for(settings: Dictionary, role := ROLE_PLAYER, p_unlocks: Unloc
 		c.source = SOURCE_STASH
 		c.loss_on_death = true
 	return c
+
+
+## Raid context: the slot's weapons are checked against `kit` (what the spawn gives, ExtractionLoadout.make_raid_weapons).
+func apply_raid_kit(kit: ExtractionInventory) -> void:
+	raid_kit = kit if source == SOURCE_STASH else null
 
 
 ## Why `id` cannot be fielded in this match ("" = allowed): its game is not installed, the match's infantry game or

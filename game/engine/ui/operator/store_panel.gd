@@ -57,6 +57,8 @@ func _init(state: OperatorState, tooltip: ItemTooltip) -> void:
 	_scroll.add_child(_list)
 	_footnote = Widgets.paragraph("", "DimLabel")
 	add_child(_footnote)
+	_state.side_changed.connect(_on_side_changed)
+	_state.selection_changed.connect(_on_selection_changed)
 
 
 func get_category() -> String:
@@ -197,6 +199,28 @@ func _is_open_for(category_id: String, kinds: Array) -> bool:
 	return true
 
 
+## Showing the vehicle opens the weapons list narrowed to what its hardpoints take.
+func _on_side_changed() -> void:
+	if _state.side == LoadoutLayout.SIDE_VEHICLE:
+		_fits.set_pressed_no_signal(true)
+		_category = "weapons" if _is_open_for("weapons", VEHICLE_KINDS) and _has_category("weapons") else _category
+		_sync_category_buttons()
+	else:
+		_fits.set_pressed_no_signal(false)
+
+
+## Selecting a hardpoint row shows the weapons that fit it.
+func _on_selection_changed() -> void:
+	if _state.side == LoadoutLayout.SIDE_VEHICLE and _state.selected_row.begins_with("hardpoint:") and _has_category("weapons"):
+		_category = "weapons"
+		_fits.set_pressed_no_signal(true)
+		_sync_category_buttons()
+
+
+func _has_category(id: String) -> bool:
+	return _categories.any(func(c: Dictionary) -> bool: return c.id == id)
+
+
 func _on_filter_changed() -> void:
 	_shown = PAGE_SIZE
 	refresh()
@@ -212,6 +236,9 @@ func _make_filter() -> Dictionary:
 	if _fits.button_pressed and FITTING_ROWS.has(row_key.get_slice(":", 0)):
 		filter.fits_slot = row_key
 		filter.slot = _state.make_slot()
+	elif _fits.button_pressed and _state.side == LoadoutLayout.SIDE_VEHICLE and _category == "weapons":
+		filter.fits_slot = LoadoutLayout.ROW_ANY_HARDPOINT
+		filter.slot = _state.make_slot()
 	return filter
 
 
@@ -221,12 +248,14 @@ func _make_fitting_first(entries: Array) -> Array:
 	var fits := []
 	var rest := []
 	for e in entries:
-		var ok: bool = bool(e.get("stock", false)) or OperatorEquip.make_fit_reason(slot, e) == ""
+		var ok: bool = bool(e.get("stock", false)) or OperatorEquip.make_fit_reason(slot, e, _state.selected_row) == ""
 		(fits if ok else rest).append(e)
 	return fits + rest
 
 
 func _make_current_entries() -> Array:
+	if MountEntries.is_mount_row(_state.selected_row) and _state.side == LoadoutLayout.SIDE_VEHICLE:
+		return MountEntries.make_entries(_state.make_slot(), _state.selected_row)
 	if _category == "":
 		return []
 	return StoreCatalog.make_entries(_make_filter(), _state.ctx, _state.profile)
@@ -248,7 +277,7 @@ func _rebuild_rows() -> void:
 
 
 func _make_row(e: Dictionary, slot: CharacterSlot) -> StoreRow:
-	var fit_reason := "" if bool(e.get("stock", false)) else OperatorEquip.make_fit_reason(slot, e)
+	var fit_reason := "" if bool(e.get("stock", false)) else OperatorEquip.make_fit_reason(slot, e, _state.selected_row)
 	var row := StoreRow.make(e, fit_reason)
 	row.pressed.connect(_on_entry_pressed.bind(e))
 	row.mouse_entered.connect(_state.apply_preview.bind(e))

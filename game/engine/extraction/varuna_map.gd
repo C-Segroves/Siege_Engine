@@ -18,6 +18,8 @@ const FALLBACK_COLOURS := {"north_mountains": Color(0.62, 0.64, 0.68), "central_
 const MASK_STEP := 32.0
 const SPAWN_TRIES := 14
 const SPAWN_CLEAR_OF_PADS := 25.0
+## Brightness of the tiles of the baked colour map (each tile picks one): the repeat has no uniform tone.
+const TILE_GAINS := [0.96, 1.0, 1.04]
 
 static var _cache := {}
 static var _definition := {}
@@ -85,11 +87,13 @@ static func _expand(d: Dictionary) -> Dictionary:
 		"flight_ceiling": 700.0}
 	m["terrain"] = {"heights_data": terrain.make_heights(), "size": [terrain.samples, terrain.samples], "square": terrain.square,
 		"origin": [terrain.origin.x, terrain.origin.y], "height_scale": 1.0, "albedo_data": _bake_albedo(terrain, d),
-		"albedo_repeat": 1.0}
+		"albedo_repeat": 1.0, "detail": td.get("detail", {})}
 	var env: Dictionary = (d.environment as Dictionary).duplicate(true)
 	env["skybox_faces"] = SKY_FACES
 	env["skybox_layout"] = MapEnvironment.LAYOUT_TORQUE
 	env["water"] = d.water
+	if env.has("day_cycle"):   # the raid's day (its night weighs the site timers) also drives the picture
+		(env.day_cycle as Dictionary)["timing"] = SiteSpawner.rules().get("day", {})
 	m["environment"] = env
 	var out := {"interiors": [], "statics": [], "stations": [], "mode_objects": [], "power_groups": [], "sites": [], "loot_areas": []}
 	var rng := RandomNumberGenerator.new()
@@ -105,6 +109,7 @@ static func _expand(d: Dictionary) -> Dictionary:
 	m.merge(out)
 	m["spawns"] = []
 	m["rules"] = d.rules
+	m["cybrid_siege"] = d.get("cybrid_siege", {})   # the hidden easter egg (CybridSiege)
 	m["notes"] = str(d.notes)
 	return m
 
@@ -310,23 +315,48 @@ static func _make_faded(layer: Image, alpha: PackedFloat32Array, n: int) -> Imag
 static func _make_tiled(spec: Dictionary, region_id: String, size: int, tile: int, patch_px: int) -> Image:
 	var patch := _load_patch(spec, region_id, patch_px)
 	patch.resize(tile, tile, Image.INTERPOLATE_LANCZOS)
-	var variants: Array[Image] = [patch]
-	var fx := patch.duplicate() as Image
-	fx.flip_x()
-	var fy := patch.duplicate() as Image
-	fy.flip_y()
-	var fxy := fx.duplicate() as Image
-	fxy.flip_y()
-	variants.append_array([fx, fy, fxy])
+	var variants := _make_tile_variants(patch)
 	var img := Image.create(size, size, false, Image.FORMAT_RGBA8)
 	var row := 0
 	for ty in range(0, size, tile):
 		var col := 0
 		for tx in range(0, size, tile):
-			img.blit_rect(variants[(col % 2) + 2 * (row % 2)], Rect2i(0, 0, tile, tile), Vector2i(tx, ty))
+			var h := _hash_cell(col, row, region_id.hash())
+			img.blit_rect(variants[h % variants.size()], Rect2i(0, 0, tile, tile), Vector2i(tx, ty))
 			col += 1
 		row += 1
 	return img
+
+
+## The patch in its eight orientations (flips and quarter turns) each at three brightnesses, so neighbouring tiles
+## differ in layout and tone instead of a mirrored checkerboard.
+static func _make_tile_variants(patch: Image) -> Array[Image]:
+	var turns: Array[Image] = [patch]
+	var fx := patch.duplicate() as Image
+	fx.flip_x()
+	turns.append(fx)
+	var cur := patch
+	for _q in 3:
+		cur = cur.duplicate() as Image
+		cur.rotate_90(CLOCKWISE)
+		turns.append(cur)
+	var fy := patch.duplicate() as Image
+	fy.flip_y()
+	turns.append(fy)
+	var out: Array[Image] = []
+	for t in turns:
+		for gain in TILE_GAINS:
+			var v := t.duplicate() as Image
+			for y in v.get_height():
+				for x in v.get_width():
+					var c := v.get_pixel(x, y)
+					v.set_pixel(x, y, Color(minf(c.r * gain, 1.0), minf(c.g * gain, 1.0), minf(c.b * gain, 1.0), c.a))
+			out.append(v)
+	return out
+
+
+static func _hash_cell(col: int, row: int, salt: int) -> int:
+	return absi(hash(Vector3i(col, row, salt)))
 
 
 ## A square crop of another Tribes 2 map's baked colour map (spec {map, at}); a flat colour when the file is missing.

@@ -36,6 +36,8 @@ class Host:
 		events.append(["teleport", label, to])
 	func apply_damage(label: String, amount: float) -> void:
 		events.append(["damage", label, amount])
+	func apply_goal(label: String, mode: String, name: String, goal: Dictionary) -> void:
+		events.append(["goal", label, mode, name, goal])
 	func apply_end(success: bool) -> void:
 		ended = 1 if success else 0
 
@@ -69,6 +71,7 @@ func _run() -> void:
 		Assets.data_root = root
 		Packs.reload()
 	_check_interpreter()
+	_check_goals()
 	if Assets.has_pack(PACK):
 		_check_maps()
 	print("tv_script_check: %d failures" % _fails)
@@ -109,6 +112,52 @@ func _check_interpreter() -> void:
 	_expect(h.ended == 1 and h.host.make_objective_records().map(func(o: Dictionary) -> int: return o.state) == [1], "the target's death completes the objective and ends the mission")
 
 
+## TVNpcGoals: the goal of highest priority steers a brain (a recording stand-in), replace / remove, patrols.
+class FakeBrain:
+	extends Node
+	var soldier := Node3D.new()
+	var objective := {}
+	var guard_point := Vector3.ZERO
+	var guard_radius := 0.0
+
+
+func _check_goals() -> void:
+	var brain := FakeBrain.new()
+	add_child(brain)
+	brain.soldier.name = "Soldier"
+	add_child(brain.soldier)
+	var e := {"brain": brain, "goals": {}}
+	var spawn := Vector3(10, 0, 10)
+	var actors := {"NodeA": [50.0, 0.0, 0.0], "NodeB": [60.0, 0.0, 0.0]}
+	var player := Vector3(5, 0, 5)
+	TVNpcGoals.steer(e, actors, player, spawn)
+	_expect(brain.guard_point == spawn and brain.guard_radius == TVNpcGoals.GUARD_RADIUS and brain.objective.is_empty(), "no goal: guard the spawn")
+	TVNpcGoals.apply(e, "replace", TVNpcGoals.DEFAULT_GOAL, {"kind": "move", "name": "Move", "priority": 100, "dest": "NodeA"})
+	TVNpcGoals.steer(e, actors, player, spawn)
+	_expect(brain.objective.get("point") == Vector3(50, 0, 0) and bool(brain.objective.urgent), "a move goal walks to its node (urgent at priority 100)")
+	TVNpcGoals.apply(e, "add", "", {"kind": "guard", "name": "Guard", "priority": 30, "center": "Player", "radius": 28.0})
+	TVNpcGoals.steer(e, actors, player, spawn)
+	_expect(brain.objective.has("point"), "the higher priority goal wins")
+	TVNpcGoals.apply(e, "remove", "Move", {})
+	TVNpcGoals.steer(e, actors, player, spawn)
+	_expect(brain.objective.is_empty() and brain.guard_point == player and brain.guard_radius == 28.0, "removing it leaves the player-centred guard area")
+	TVNpcGoals.apply(e, "remove", "Guard", {})
+	TVNpcGoals.steer(e, actors, player, spawn)
+	_expect(brain.guard_radius == TVNpcGoals.IDLE_RADIUS, "default removed and nothing left: hold still")
+	TVNpcGoals.apply(e, "add", "", {"kind": "patrol", "name": "Patrol", "priority": 50, "points": ["NodeA", "NodeB"], "once": true})
+	TVNpcGoals.steer(e, actors, player, spawn)
+	_expect(brain.objective.get("point") == Vector3(50, 0, 0), "a patrol starts at its first node")
+	brain.soldier.global_position = Vector3(50, 0, 0)
+	TVNpcGoals.steer(e, actors, player, spawn)
+	_expect(brain.objective.get("point") == Vector3(60, 0, 0), "reaching a node sends the patrol to the next")
+	brain.soldier.global_position = Vector3(60, 0, 0)
+	TVNpcGoals.steer(e, actors, player, spawn)
+	_expect((e.goals as Dictionary).is_empty(), "a once-only patrol ends at its last node")
+	TVNpcGoals.apply(e, "add", "", {"kind": "attack", "name": "A", "priority": 52, "target": "Player"})
+	TVNpcGoals.steer(e, actors, player, spawn)
+	_expect(brain.guard_radius == 0.0, "an attack goal hunts the enemy across the map")
+
+
 func _check_maps() -> void:
 	var idx = Assets.load_json("maps/_index.json", PACK)
 	if not (idx is Array):
@@ -116,6 +165,7 @@ func _check_maps() -> void:
 	var scripted := 0
 	var with_end := 0
 	var with_objectives := 0
+	var goal_ops := 0
 	for e in idx:
 		var path := Assets.path("maps/%s/script.json" % e.id, PACK)
 		if not FileAccess.file_exists(path):
@@ -130,6 +180,7 @@ func _check_maps() -> void:
 		run.fire("MessagePlayerStart", "all")
 		for _i in 600:
 			run.tick(0.1)
+		goal_ops += h.events.filter(func(ev: Array) -> bool: return ev[0] == "goal").size()
 		if not h.host.make_objective_records().is_empty():
 			with_objectives += 1
 		else:
@@ -137,6 +188,7 @@ func _check_maps() -> void:
 		var ends := JSON.stringify(data.scripts).contains("\"op\":\"next\"")
 		if ends:
 			with_end += 1
+	_expect(goal_ops > 0, "%d AI goal ops reached the host in the first minutes" % goal_ops)
 	_expect(scripted >= 29, "%d maps carry scripts" % scripted)
 	_expect(with_end == scripted, "every scripted map has a mission end (%d of %d)" % [with_end, scripted])
 	_expect(with_objectives >= scripted / 3, "%d maps add an objective in their first minute" % with_objectives)

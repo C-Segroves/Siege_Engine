@@ -7,7 +7,9 @@ extends Node
 ##   4 Tribes 2 soldiers in a battle: the pack is offered to light armour only, pack_use cloaks the wearer, enemy
 ##     radar / T-targeting / turrets / bots lose him (teammates keep him), the motion sensor and a close enemy do not;
 ##   5 the snapshot flag and the shader override;
-##   6 Starsiege: a Herc with a cloak component, the cloak order and key, hidden from enemy pilots and radar.
+##   6 Starsiege: a Herc with a cloak component, the cloak order and key, hidden from enemy pilots and radar;
+##   7 Starsiege component slots: the slots and what fits (mount sizes), the garage fitting a cloak, the spawn
+##     giving the Herc that cloak and Ctrl+X toggling it.
 ##   godot --headless --audio-driver Dummy --path game res://tests/cloak_check.tscn
 
 const MAP := "tribes2:Katabatic"
@@ -15,6 +17,12 @@ const SETTLE_FRAMES := 20
 const T2_PACK := "tribes2:CLOAKING_PACK"
 const T2_PROFILE := "tribes2:cloaking_pack"
 const SS_HERC := "starsiege:rb_eman"
+const SS_UNCLOAKED_HERC := "starsiege:ca_basl"
+const SS_MEDIUM_SLOT_HERC := "starsiege:rb_eman"
+const CHAMELEON := 830
+const CUTTLEFISH := 831
+const STATION_FLASH_S := 0.5
+const PAD_CLOAK_S := 4.8
 const STEP := 0.1
 const SITE_RINGS := [0, 1, 2, 3, 4, 5, 6]
 const SITE_DIRECTIONS := 8
@@ -51,6 +59,7 @@ func _ready() -> void:
 	battle.queue_free()
 	await _frames(3)
 	await _check_starsiege()
+	await _check_starsiege_components()
 	print("cloak_check: %s (%d failures)" % ["OK" if _failures == 0 else "FAILED", _failures])
 	get_tree().quit(1 if _failures > 0 else 0)
 
@@ -322,6 +331,7 @@ func _check_soldiers(battle: Battle) -> void:
 	_check_worn_pack_jams(battle, wearer, enemy)
 	await _check_jam_field(battle, wearer, site)
 	await _check_timed(wearer, site)
+	await _check_flashes(battle, wearer)
 
 
 func _turret_finds(target: Node3D, sensor: Dictionary) -> bool:
@@ -404,6 +414,32 @@ func _check_timed(wearer: Infantry, site: Vector3) -> void:
 	wearer.cloak.apply_scripted(false)
 	await _frames(2)
 	_expect(not wearer.cloak.is_cloaked(), "and setCloaked(false) ends it")
+
+
+## The inventory station flashes its buyer cloaked (station.cs:275-276, 0.5 s) and a vehicle leaving its pad is cloaked
+## (serverVehicleHud.cs:144-148, 4.8 s).
+func _check_flashes(battle: Battle, wearer: Infantry) -> void:
+	var t2 := CloakProfile.of(CloakProfile.make_timed_id(wearer))
+	_expect(is_equal_approx(t2.station_flash_s, STATION_FLASH_S), "the timed cloak's station flash is 0.5 s (station.cs)")
+	wearer.apply_armor("tribes2:LIGHT", ["tribes2:CHAINGUN"], "", "")
+	await _seconds(1.6)
+	_expect(not wearer.cloak.is_cloaked(), "control: the soldier is plain before the purchase")
+	TribesStations.apply_station_flash(wearer)
+	await _seconds(0.2)
+	_expect(wearer.cloak.is_cloaked(), "buying at the inventory station flashes the buyer cloaked")
+	await _seconds(STATION_FLASH_S + 0.5)
+	_expect(not wearer.cloak.is_cloaked(), "and the flash ends after the script's 500 ms")
+	_expect(is_equal_approx(TribesStations.make_pad_cloak_s(wearer), PAD_CLOAK_S), "a vehicle off a pad is cloaked %.1f s (profile)" % PAD_CLOAK_S)
+	var site := wearer.global_position + Vector3(0, 0, 60)
+	var tribes_vehicles := Packs.vehicles.values().filter(func(d: Dictionary) -> bool: return str(d.get("pack", "")) == "tribes2" and str(d.get("category", "")) == "vehicle")
+	var vehicle: Herc = battle.spawn_ai(str(tribes_vehicles[0].id), wearer.team, Transform3D(Basis(), site), [], "PadCloak", {})
+	_expect(vehicle != null and not vehicle.cloak.is_equipped(), "control: a Tribes 2 vehicle has no cloak of its own")
+	BattleSpawner.apply_pad_cloak(vehicle, TribesStations.make_pad_cloak_s(wearer))
+	await _seconds(0.3)
+	_expect(vehicle.cloak.is_cloaked(), "a vehicle launched from a pad is cloaked")
+	await _seconds(PAD_CLOAK_S)
+	_expect(not vehicle.cloak.is_cloaked(), "and shows again after the pad's 4.8 s")
+	vehicle.queue_free()
 
 
 # ------------------------------------------------------------------ 5 network and shader
@@ -491,5 +527,72 @@ func _check_starsiege() -> void:
 	await _seconds(1.5)
 	_expect(human.cloak.is_cloaked(), "the pilot's cloak_toggle wish cloaks his own Herc (Cuttlefish)")
 	_expect(BattleNetSync.make_controls(human).get("cloak", false) == true, "and is sent to the host with the controls")
+	battle.queue_free()
+	await _frames(2)
+
+
+# ------------------------------------------------------------------ 7 Starsiege component slots
+
+func _check_starsiege_components() -> void:
+	print("7 Starsiege component slots:")
+	var v := Packs.vehicle(SS_UNCLOAKED_HERC)
+	var medium := Packs.vehicle(SS_MEDIUM_SLOT_HERC)
+	var slots := HercMounts.make_slots(v)
+	_expect(slots.size() == 2 and slots[0].size == "L" and slots[1].size == "L", "%s has two large free slots (mountpoints 6 and 7)" % SS_UNCLOAKED_HERC)
+	_expect(HercMounts.make_options(v, 0).size() == 2, "a large slot takes both cloaks (Chameleon M, Cuttlefish L)")
+	var medium_ids := HercMounts.make_options(medium, 0).map(func(p: CloakProfile) -> int: return p.component_id_of("starsiege"))
+	_expect(medium_ids == [CHAMELEON], "a medium slot takes the Chameleon only, not the large Cuttlefish")
+	_expect(not HercMounts.is_allowed(v, 0, 900) and not HercMounts.has_slots(Packs.vehicle("es1:RAPTOR")), "no other part fits, and an Earthsiege Herc has no slots")
+	_expect(not HercMounts.make_cloak(v, [0, 0]).is_real(), "the factory fit of %s has no cloak" % SS_UNCLOAKED_HERC)
+	var mounts := HercMounts.make_sanitized(v, [])
+	_expect(HercMounts.apply_set(v, mounts, 1, CHAMELEON) and HercMounts.make_cloak(v, mounts).id == "starsiege:830", "fitting a Chameleon gives its profile")
+	_expect(not HercMounts.apply_set(medium, HercMounts.make_sanitized(medium, []), 0, CUTTLEFISH), "the slot-size rule refuses a Cuttlefish in a medium slot")
+	var rows := HercMounts.make_rows(v, mounts)
+	_expect(rows.size() == 2 and rows[1].current == CHAMELEON and rows[0].options.size() == 4, "the loadout rows list each slot: factory, empty and the cloaks")
+	await _check_garage_fitting()
+	await _check_spawn_and_toggle()
+
+
+func _check_garage_fitting() -> void:
+	var g := Garage.make([Garage.make_entry(SS_UNCLOAKED_HERC)], {})
+	_expect(g.selected_entry().mounts == [0, 0], "a garage Herc starts with the factory fit")
+	_expect(g.can_mount(0, CUTTLEFISH) and g.apply_mount(0, CUTTLEFISH) and g.selected_entry().mounts == [CUTTLEFISH, 0], "the garage fits a Cuttlefish")
+	_expect(not g.apply_mount(0, 900) and g.selected_entry().mounts[0] == CUTTLEFISH, "and refuses what does not fit")
+	var saved := Garage.from_dict(g.to_dict())
+	_expect(saved.selected_entry().mounts == [CUTTLEFISH, 0], "the fitting survives a save")
+	_expect(g.make_battle_entry().garage.mounts == [CUTTLEFISH, 0], "and rides into the battle with the garage tag")
+	var editor := LoadoutEditor.new()
+	add_child(editor)
+	editor.setup(SS_UNCLOAKED_HERC, [], {}, [0, CHAMELEON])
+	_expect(editor.find_children("*", "OptionButton", true, false).size() >= 2, "the hangar editor lists the component slots")
+	editor.queue_free()
+
+
+func _check_spawn_and_toggle() -> void:
+	var config := BattleSetup.make_default_config(SS_UNCLOAKED_HERC)
+	config.merge({"mode": "vs", "respawn": true, "teams": true, "ai": []}, true)
+	var battle: Battle = load("res://games/es1/battle.tscn").instantiate()
+	battle.config = config
+	get_tree().root.add_child(battle)
+	get_tree().current_scene = battle
+	await _frames(SETTLE_FRAMES)
+	var human := battle.player as Herc
+	_expect(human != null and human.vehicle_id == SS_UNCLOAKED_HERC and not human.cloak.is_equipped(), "a %s pilot starts with no cloak" % SS_UNCLOAKED_HERC)
+	BattleSpawner.apply_mounts(human, {"mounts": [0, CHAMELEON]})
+	_expect(human.cloak.profile.id == "starsiege:830", "the spawn's mounts install the fitted Chameleon")
+	var pilot: PlayerPilot = battle.pilot if battle.pilot != null and battle.pilot.herc == human else PlayerPilot.make_for(human)
+	_expect(pilot != null, "the player has a pilot")
+	var key := InputEventAction.new()
+	key.action = "cloak_toggle"
+	key.pressed = true
+	pilot._apply_command(key)
+	await _seconds(1.5)
+	_expect(human.cloak_input and human.cloak.is_cloaked(), "Ctrl+X (cloak_toggle) cloaks the Herc")
+	pilot._apply_command(key)
+	await _seconds(1.5)
+	_expect(not human.cloak.is_cloaked(), "and toggles it off again")
+	var bare := {"garage": {"mounts": [CUTTLEFISH, 0]}}
+	BattleSpawner.apply_mounts(human, bare)
+	_expect(human.cloak.profile.id == "starsiege:831", "a garage Herc's tag carries its mounts when the spec has none")
 	battle.queue_free()
 	await _frames(2)

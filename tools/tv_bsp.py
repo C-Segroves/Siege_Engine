@@ -147,6 +147,7 @@ def export_bsp(idx, pkg, out_dir, map_id, mpu):
                     sizes[ref] = (rgba.shape[1], rgba.shape[0])
                 texture_slots[ref] = len(slot_names)
                 slot_names.append(name)
+            name = slot_names[texture_slots[ref]]
             if not name:
                 continue                                       # editor placeholders (DefaultTexture, ConsoleBK, no material)
             w, h = sizes.get(ref, (256, 256))
@@ -188,3 +189,32 @@ def _shape_json(polys, slot_names, mpu, name):
             'nodes': [{'parent': -1, 'default': 0, 'name': 'Shape'}], 'transforms': [[0, 0, 0, 0, 0, 0, 1]], 'ds_sequences': [],
             'bounds': {'header': [lo.tolist(), hi.tolist()]},
             'materials': [{'name': n, 'flags': 0, 'texture': 'textures/tv/%s.png' % n if n else '', 'w': 0, 'h': 0} for n in slot_names]}
+
+
+def rebuild(game_root, pack_dir, log=print):
+    """Rewrites shapes/bsp_<map>.json of the pack's campaign maps from the game's own packages, without redoing the rest of
+    the import (the map.json statics entry of a brush shell does not change)."""
+    import tv_assets
+    import tv_import
+    idx = tv_assets.PackageIndex(game_root)
+    content = os.path.join(game_root, 'Content')
+    chapters = tv_import.parse_campaign_ini(tv_import.read_text(os.path.join(content, 'System', 'Campaign.ini')))
+    for ch in chapters:
+        for entry in ch['maps']:
+            path = tv_import._ci_file(os.path.join(content, 'Maps'), entry['map'] + '.tvm')
+            if not path:
+                continue
+            map_id = os.path.splitext(os.path.basename(path))[0]
+            if not os.path.isfile(os.path.join(pack_dir, 'shapes', 'bsp_%s.json' % map_id.lower())):
+                continue
+            pkg = U.load(path)
+            pkg.stem = entry['map'].lower()
+            export_bsp(idx, pkg, pack_dir, map_id.lower(), tv_import.METRES_PER_UU)
+            log('%-26s brush shell rebuilt' % entry['map'])
+
+
+if __name__ == '__main__':
+    import sys
+    if len(sys.argv) != 3:
+        sys.exit('python tools/tv_bsp.py <game root: the unpacked "Tribes Vengeance" folder> <pack folder>')
+    rebuild(sys.argv[1], sys.argv[2])

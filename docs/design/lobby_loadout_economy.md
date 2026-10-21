@@ -267,7 +267,7 @@ unlock ids to the owner with the death result.
   slot's armour. `_apply_migration_v2()` does the conversions in 2.4.
 - `ExtractionItems`: kinds `armor` and `callin` removed from `KINDS`; `ExtractionShop.BUY_CATEGORIES` loses them.
   Prices still come from `ExtractionItems.make_price` (the economy reuses them as bases).
-- `extraction_rules.json` keys `start_money`, `item_kinds.callin`, `item_kinds.armor.price_by_size` become ignored
+- `extraction_rules.json` keys `start_money`, `item_kinds.callin`, `item_kinds.armor.price_by_size` are deleted (ExtractionItems, ExtractionProfile read the economy_rules values)
   (code stops reading them); the file itself is edited only by chunk 4 (adds `raid_points`, `callins`) and chunk 5
   (deletes the dead keys).
 - Task board: `RaidTaskBoard` unchanged; shown as individual goals; `tasks.max_picked` -> 3 (chunk 4 edits the JSON).

@@ -12,7 +12,6 @@ extends AAMissionRuntime
 const TV_PACK := "tribes_v"
 const NPC_SPAWN_RADIUS := 170.0
 const NPC_SPAWNS_PER_TICK := 4
-const NPC_GUARD_RADIUS := 25.0
 const NPC_SKILL := 0.45
 ## A trigger reaches this far above and below its height (the Unreal collision cylinder's slack).
 const TRIGGER_VERTICAL_SLACK := 2.5
@@ -169,7 +168,7 @@ func _build_npcs() -> void:
 	for rec in map.get("npc_spawns", []):
 		if str(rec.get("body", "")) == "":
 			continue
-		var e := {"rec": rec, "enabled": bool(rec.get("enabled", true)), "spawned": false, "dead": false, "brain": null}
+		var e := {"rec": rec, "enabled": bool(rec.get("enabled", true)), "spawned": false, "dead": false, "brain": null, "goals": {}}
 		_npcs.append(e)
 		var squad := str(rec.get("squad", ""))
 		if squad != "":
@@ -180,6 +179,7 @@ func _sync_npcs() -> void:
 	var p: Herc = battle.player
 	if p == null or not is_instance_valid(p):
 		return
+	_steer_npcs()
 	var spawned := 0
 	for e in _npcs:
 		if not bool(e.enabled) or bool(e.spawned) or bool(e.dead):
@@ -218,11 +218,36 @@ func _spawn_npc(e: Dictionary) -> bool:
 	if brain == null:
 		return false
 	e.brain = brain
-	brain.guard_point = pos
-	brain.guard_radius = NPC_GUARD_RADIUS
+	_steer(e)
 	_npc_of[int(brain.soldier.net_id)] = e
 	script_run.fire("MessageAISpawned", str(rec.get("label", "")))
 	return true
+
+
+## Writes the goals of entry `e` onto its brain (TVNpcGoals).
+func _steer(e: Dictionary) -> void:
+	var p: Herc = battle.player
+	var at: Vector3 = p.global_position if p != null and is_instance_valid(p) else Vector3.ZERO
+	TVNpcGoals.steer(e, script_data.get("actors", {}), at, _vec(e.rec.pos))
+
+
+func _steer_npcs() -> void:
+	for e in _npcs:
+		if bool(e.spawned) and not bool(e.dead) and e.brain != null:
+			_steer(e)
+
+
+## The placed soldiers a goal op addresses: the actor by label, its spawn point, or every member of the squad of that label.
+func _entries_for_goal(label: String) -> Array:
+	return _npcs.filter(func(e: Dictionary) -> bool:
+		return str(e.rec.get("label", "")) == label or str(e.rec.get("spawn_label", "")) == label or str(e.rec.get("squad", "")) == label)
+
+
+func apply_goal(label: String, mode: String, name: String, goal: Dictionary) -> void:
+	for e in _entries_for_goal(label):
+		TVNpcGoals.apply(e, mode, name, goal)
+		if bool(e.spawned) and not bool(e.dead) and e.brain != null:
+			_steer(e)
 
 
 func _is_ally(team: String) -> bool:

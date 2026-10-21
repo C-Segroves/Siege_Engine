@@ -18,6 +18,8 @@ const WALL_NORMAL_Y := 0.7
 const MAX_UNIT_SKIPS := 3
 const SLIDES := 2
 const MIN_STEP_M := 0.001
+## An airborne soldier reaching a slope too steep to stand on is held this far off it.
+const STEEP_SKIN := 0.05
 
 ## Off: far soldiers use move_and_slide as the NEAR ones do (the load bench's `--no-cheap-step`, to measure the saving).
 static var enabled := true
@@ -39,13 +41,15 @@ static func apply(s: Infantry, delta: float) -> void:
 	if next.landed:
 		_apply_landing(s, before, next.normal)
 		s.velocity.y = 0.0
+	elif next.get("slide", false):
+		s.velocity = s.velocity.slide(next.normal)   # a slope too steep to stand on: he skids down it like move_and_slide
 	elif next.grounded:
 		s.velocity.y = 0.0
 	s.cheap_floor = next.grounded
 	s.global_position = next.position
 
 
-## {position, grounded, landed, blocked, normal}: where the step ends. Up to SLIDES attempts, each along the wall
+## {position, grounded, landed, blocked, normal, slide?}: where the step ends. Up to SLIDES attempts, each along the wall
 ## the last one met.
 static func _make_next_spot(s: Infantry, pos: Vector3, flat: Vector3, rise: float, grounded: bool) -> Dictionary:
 	var move := flat
@@ -71,7 +75,7 @@ static func _make_slide(move: Vector3, normal: Vector3) -> Vector3:
 static func _make_floor_spot(s: Infantry, pos: Vector3, move: Vector3, rise: float, grounded: bool) -> Dictionary:
 	var target := pos + move
 	var up := PROBE_UP + (move.length() if grounded else 0.0)
-	var top := target.y + up if grounded else maxf(pos.y, pos.y + rise) + PROBE_UP
+	var top := target.y + up if grounded else maxf(pos.y, pos.y + rise) + PROBE_UP + move.length()   # (a slope may rise as far as the soldier travels)
 	var bottom := target.y - PROBE_DOWN - move.length() if grounded else pos.y + rise
 	var hit := _cast(s, Vector3(target.x, top, target.z), Vector3(target.x, bottom, target.z))
 	var walkable := not hit.is_empty() and (hit.normal as Vector3).y >= cos(s.floor_max_angle)
@@ -80,6 +84,8 @@ static func _make_floor_spot(s: Infantry, pos: Vector3, move: Vector3, rise: flo
 			return {"position": hit.position, "grounded": true, "landed": false, "blocked": false, "normal": hit.normal}
 		return {"position": target, "grounded": false, "landed": false, "blocked": false, "normal": Vector3.UP}   # walked off an edge
 	target.y = pos.y + rise
+	if not hit.is_empty() and not walkable and float(hit.position.y) >= target.y - MIN_STEP_M:
+		return {"position": hit.position + (hit.normal as Vector3) * STEEP_SKIN, "grounded": false, "landed": false, "blocked": false, "normal": hit.normal, "slide": true}
 	if walkable and float(hit.position.y) >= target.y - MIN_STEP_M:
 		return {"position": hit.position, "grounded": true, "landed": true, "blocked": false, "normal": hit.normal}
 	return {"position": target, "grounded": false, "landed": false, "blocked": false, "normal": Vector3.UP}

@@ -35,6 +35,7 @@ static func make_for(p_profile: OperatorProfile, p_ctx: LoadoutContext) -> Opera
 		s.side = LoadoutLayout.SIDE_VEHICLE   # the campaign flies Hercs: the garage opens on the vehicle
 	if p_ctx.source == LoadoutContext.SOURCE_STASH:
 		s.extraction = ExtractionProfile.load_for(p_profile.pilot)
+		p_ctx.apply_raid_kit(s.extraction.kit)
 	return s
 
 
@@ -192,7 +193,12 @@ func _make_refreshed(entry: Dictionary) -> Dictionary:
 ## Right click / pad X on a row: empties it (the armour and an empty row do nothing).
 func apply_remove(row_key: String) -> void:
 	var row := find_row(row_key)
-	if row.is_empty() or bool(row.locked) or str(row.current) == "" or str(row.kind) == "armour":
+	if row.is_empty() or bool(row.locked):
+		return
+	if str(row.kind) == MountEntries.KIND_ROW:
+		_apply_empty_mount(row_key)
+		return
+	if str(row.current) == "" or str(row.kind) == "armour":
 		return
 	if str(row.kind) == "ammo":
 		return
@@ -202,6 +208,18 @@ func apply_remove(row_key: String) -> void:
 		selected_row = ""
 		selection_changed.emit()
 	apply_changed()
+
+
+func _apply_empty_mount(row_key: String) -> void:
+	var slot := make_slot()
+	var mounts := slot.make_mounts()
+	var index: int = MountEntries.make_slot_index(row_key)
+	if mounts[index] == HercMounts.EMPTIED:
+		return
+	if HercMounts.apply_set(Packs.vehicle(slot.vehicle), mounts, index, HercMounts.EMPTIED):
+		slot.herc_mounts = mounts
+		apply_status("Emptied component slot %d" % (index + 1))
+		apply_changed()
 
 
 ## Left / right on an ammunition or gear row: `direction` -1 or +1.
@@ -235,7 +253,12 @@ func apply_fill(row_key: String) -> void:
 
 
 func make_rows() -> Array:
-	return LoadoutLayout.make_rows(side, make_slot(), ctx) if side != SIDE_STASH else []
+	if side == SIDE_STASH:
+		return []
+	var rows := LoadoutLayout.make_rows(side, make_slot(), ctx)
+	if side == LoadoutLayout.SIDE_VEHICLE:
+		rows.append_array(MountEntries.make_rows(make_slot(), ctx))
+	return rows
 
 
 func find_row(row_key: String) -> Dictionary:

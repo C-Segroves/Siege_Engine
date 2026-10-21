@@ -9,6 +9,8 @@ extends RefCounted
 const SIDE_INFANTRY := "infantry"
 const SIDE_VEHICLE := "vehicle"
 const KG_PRECISION := 0.01
+## The store filter key for "any hardpoint of the vehicle" (no hardpoint row selected).
+const ROW_ANY_HARDPOINT := "hardpoint"
 
 
 static func make_rows(side: String, slot: CharacterSlot, ctx: LoadoutContext) -> Array:
@@ -89,7 +91,17 @@ static func apply_clear(slot: CharacterSlot, row_key: String) -> void:
 
 ## True when `id` could be put in `row_key` of a copy of `slot` (the store's "fits slot" filter).
 static func is_fit(slot: CharacterSlot, row_key: String, id: String) -> bool:
+	if row_key == ROW_ANY_HARDPOINT:
+		return _is_fit_any_hardpoint(slot, id)
 	return apply_set(slot.make_copy(), row_key, id)
+
+
+static func _is_fit_any_hardpoint(slot: CharacterSlot, id: String) -> bool:
+	var count := WeaponFit.hardpoint_masks(Packs.vehicle(slot.vehicle)).size()
+	for i in count:
+		if apply_set(slot.make_copy(), "hardpoint:%d" % i, id):
+			return true
+	return false
 
 
 # ------------------------------------------------------------------ rows

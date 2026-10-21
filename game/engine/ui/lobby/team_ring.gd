@@ -16,7 +16,8 @@ extends Control
 ## while the stage has focus) orbits the view round the focused member: a full turn sideways, a small clamped pitch;
 ## the spotlight follows the view so he stays lit from the viewer's side. The orbit glides back home when the ring turns
 ## to another member, the mode switches, or on a right double-click.
-##   set_members(members)   members: [{key, models: {infantry: {shape, skin, label}, vehicle: {vehicle | shape, skin, label}}}]
+##   set_members(members)   members: [{key, models: {infantry: {shape, skin, label, armor, weapon}, vehicle: {vehicle | shape, skin, label, loadout}}}]
+## `weapon` stands in the soldier's hand, `loadout` (weapon ids in gun order) on the vehicle's hardpoints (LobbyArmament).
 ##   set_mode(mode) / set_focus(index)
 
 const MODE_INFANTRY := "infantry"
@@ -341,6 +342,8 @@ func _ensure_models() -> void:
 		models[i] = holder
 		var model := _make_model(spec, holder)
 		_heights[i] = _fit_model(model) if model != null else 0.0
+		if model != null and str(spec.get("weapon", "")) != "":
+			LobbyArmament.apply_held_weapon(model, str(spec.get("armor", "")), str(spec.weapon))   # after the fit: the gun does not shrink the soldier
 		if str(spec.get("label", "")) != "":
 			holder.add_child(_make_label(str(spec.label)))
 
@@ -349,8 +352,9 @@ func _ensure_models() -> void:
 func _make_model(spec: Dictionary, holder: Node3D) -> Node3D:
 	var shape_id := str(spec.get("shape", ""))
 	var vehicle_id := str(spec.get("vehicle", ""))
+	var vdef := {}
 	if vehicle_id != "":
-		var vdef := Packs.vehicle(vehicle_id)
+		vdef = Packs.vehicle(vehicle_id)
 		shape_id = str(vdef.get("shape", vdef.get("id", vehicle_id)))
 	if shape_id == "":
 		return null
@@ -361,6 +365,10 @@ func _make_model(spec: Dictionary, holder: Node3D) -> Node3D:
 	model.texture_overrides = SkinCatalog.make_texture_overrides(str(sdef.get("id", "")), str(spec.get("skin", "")))
 	holder.add_child(model)   # in the tree first, as the hangar does
 	model.build(sdef, 0, Packs.default_palette(str(sdef.get("pack", "es1"))))
+	if vehicle_id != "" and not vdef.is_empty():
+		LobbyArmament.apply_vehicle_weapons(model, vdef, spec.get("loadout", []))
+	elif str(spec.get("weapon", "")) != "":
+		LobbyArmament.apply_stand_pose(model)
 	return model
 
 

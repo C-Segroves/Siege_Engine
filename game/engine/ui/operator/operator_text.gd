@@ -29,6 +29,13 @@ static func make_row_key_of_part(part: String) -> String:
 	return "armour" if part == "armor" else part
 
 
+## Why a hardpoint cannot be changed here.
+static func make_hardpoint_locked_text(ctx: LoadoutContext) -> String:
+	if ctx.source == LoadoutContext.SOURCE_STASH:
+		return "In a raid the vehicle is armed at the call-in, not here."
+	return "This vehicle has a fixed loadout."
+
+
 ## What the row shows for its part: the name, or the empty-row prompt.
 static func make_row_name(row: Dictionary, has_store: bool) -> String:
 	var id := make_row_unlock_id(row)

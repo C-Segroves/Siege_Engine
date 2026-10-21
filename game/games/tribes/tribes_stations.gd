@@ -228,8 +228,21 @@ func _apply_kit(net_id: int, armor_id: String, loadout: Array, grenade: String, 
 	var soldier := battle.vehicles.get(net_id) as Infantry
 	if soldier:
 		soldier.apply_armor(armor_id, loadout, grenade, pack_choice)
+		apply_station_flash(soldier)
 		if soldier == battle.player:
 			battle.refresh_player_view()
+
+
+## StationInventory::stationReady: `%player.setCloaked(true); %player.schedule(500, "setCloaked", false)` (scripts/station.cs
+## lines 275-276) around the purchase; the flash is the timed cloak (a shot ends it, like any script cloak).
+static func apply_station_flash(soldier: Infantry) -> void:
+	InfantryPack.apply_cloak_profile(soldier)
+	soldier.cloak.apply_forced(soldier.cloak.profile.station_flash_s)
+
+
+## Seconds a vehicle leaving a pad is cloaked (serverVehicleHud.cs lines 144-148: setCloaked(true), schedule(4800, ...false)).
+static func make_pad_cloak_s(soldier: Infantry) -> float:
+	return CloakProfile.of(CloakProfile.make_timed_id(soldier)).vehicle_pad_cloak_s
 
 
 func request_vehicle(vehicle_id: String, station: int) -> void:
@@ -257,7 +270,8 @@ func apply_vehicle_purchase(peer: int, vehicle_id: String, station: int) -> void
 	var xf: Transform3D = pad[0]
 	battle.send_spawn({"net_id": battle.spawner.allocate_id(), "vehicle": vehicle_id, "team": soldier.team,
 		"owner": VehicleOccupancy.EMPTY, "xf": xf, "loadout": Packs.vehicle(vehicle_id).get("loadout", []),
-		"name": str(Packs.vehicle(vehicle_id).get("name", vehicle_id)), "ai": {}, "parked": true, "protection": 0.0})
+		"name": str(Packs.vehicle(vehicle_id).get("name", vehicle_id)), "ai": {}, "parked": true, "protection": 0.0,
+		"cloak_s": make_pad_cloak_s(soldier)})
 
 
 ## [pad transform] of the nearest vehicle pad within PAD_SEARCH_RADIUS of `near` with no vehicle on it ([] none).

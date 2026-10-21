@@ -154,8 +154,9 @@ func _fill_details(ctx: Dictionary) -> void:
 	_details.add_child(OptionRow.new("Herc name", herc_name))
 	_details.add_child(_build_condition_row(ctx, e))
 	_editor = LoadoutEditor.new()
-	_editor.setup(str(e.vehicle), e.loadout, ctx)
+	_editor.setup(str(e.vehicle), e.loadout, ctx, e.get("mounts", []))
 	_editor.changed.connect(_on_loadout_edited)
+	_editor.mounts_changed.connect(_on_mounts_edited)
 	_editor.hardpoint_focused.connect(func(i: int) -> void:
 		_show_selected()
 		hangar.highlight_hardpoint(i))
@@ -274,6 +275,18 @@ func _on_loadout_edited(lo: Array) -> void:
 	for i in mini(lo.size(), current.size()):
 		if str(lo[i]) != str(current[i]):
 			_arm(i, str(lo[i]))
+			return
+
+
+## The editor reports the component slots; the one that differs is fitted through the garage.
+func _on_mounts_edited(fitted: Array) -> void:
+	var current: Array = garage.selected_entry().get("mounts", [])
+	for i in mini(fitted.size(), current.size()):
+		if int(fitted[i]) != int(current[i]):
+			garage.apply_mount(i, int(fitted[i]))
+			set_status("")
+			_after_change()
+			_editor.focus_component.call_deferred(i)
 			return
 
 

@@ -50,8 +50,9 @@ static func build(parent: Node3D, e: Dictionary, dir := "") -> void:
 	var env_node := WorldEnvironment.new()
 	env_node.environment = env
 	parent.add_child(env_node)
-	_add_sun(parent, e)
+	var sun := _add_sun(parent, e)
 	if draws:
+		_add_day_cycle(parent, e, env, sun)
 		_add_weather(parent, e)
 
 
@@ -101,6 +102,14 @@ static func _skybox(faces: Dictionary, dir: String, layout: String) -> Sky:
 	return sky
 
 
+## A map with "day_cycle" lets the sun, sky, ambient light and fog follow a clock (DayCycleLight).
+static func _add_day_cycle(parent: Node3D, e: Dictionary, env: Environment, sun: DirectionalLight3D) -> void:
+	var d: Array = e.get("sun_dir", DEFAULT_SUN_DIR)
+	var cycle := DayCycleLight.make(e, env, sun, Vector3(float(d[0]), float(d[1]), float(d[2])).normalized())
+	if cycle:
+		parent.add_child(cycle)
+
+
 static func _add_weather(parent: Node3D, e: Dictionary) -> void:
 	if not e.get("weather") is Dictionary:
 		return
@@ -109,7 +118,7 @@ static func _add_weather(parent: Node3D, e: Dictionary) -> void:
 		parent.add_child(weather)
 
 
-static func _add_sun(parent: Node3D, e: Dictionary) -> void:
+static func _add_sun(parent: Node3D, e: Dictionary) -> DirectionalLight3D:
 	var sun := DirectionalLight3D.new()
 	var d: Array = e.get("sun_dir", DEFAULT_SUN_DIR)
 	var sdir := Vector3(float(d[0]), float(d[1]), float(d[2])).normalized()
@@ -120,6 +129,7 @@ static func _add_sun(parent: Node3D, e: Dictionary) -> void:
 	sun.directional_shadow_max_distance = SUN_SHADOW_DISTANCE
 	SceneLighting.apply_sun_direction(sdir)
 	SceneLighting.apply_scene_light(sun.light_color, make_color(e.get("ambient", DEFAULT_AMBIENT)), true)
+	return sun
 
 
 ## Map colour [r, g, b]: 0..255 unless every component is a fraction in 0..1 (e.g. Tribes 2);

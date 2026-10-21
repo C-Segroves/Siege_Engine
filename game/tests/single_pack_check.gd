@@ -97,7 +97,7 @@ func _check_library() -> void:
 	var text := _all_text(library)
 	var others := Packs.ERA_DEFAULTS.keys().filter(func(p: String) -> bool: return p != _pack and text.contains("(%s)" % p))
 	_record("library card of this game only", text.contains("(%s)" % _pack) and others.is_empty(), "other cards: %s" % [others])
-	_record("library has a playable Arena / versus", _enabled_button(library, "Arena / versus"), "")
+	_record("library has a playable Host LAN game", _enabled_button(library, "Host LAN game"), "")
 	await _save_shot("library")
 	library.go("options", {"home": "home"})
 	await _frames(SHOT_DELAY_FRAMES)

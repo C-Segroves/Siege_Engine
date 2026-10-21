@@ -87,6 +87,9 @@ static func build(parent: Node3D, map_id: String) -> Dictionary:
 static func _build_ground(parent: Node3D, m: Dictionary) -> void:
 	MapEnvironment.build(parent, m.get("environment", {}), m._dir)
 	MapWater.build(parent, m.get("environment", {}))
+	var lights := MapLights.make(m.get("point_lights", []))
+	if lights:
+		parent.add_child(lights)
 	if m.get("terrain") is Dictionary:
 		MapTerrain.build(parent, m.terrain, m._dir)
 	else:

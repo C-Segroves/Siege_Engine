@@ -191,7 +191,8 @@ func flow_es1_crew() -> void:
 	if not await shell_wait_menu(EsShell.MAIN_MENU, 120):
 		return
 	await shell_click(EsShell.CAREER_MENU)
-	await wait(0.6)
+	if not await shell_wait_menu(EsShell.CAREER_MENU, 15):
+		return
 	await shell_click(EsShell.REGISTER_MENU)
 	await wait(0.6)
 	ShellDebug._type_text("QACREW")

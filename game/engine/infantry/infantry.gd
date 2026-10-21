@@ -66,6 +66,8 @@ var skin_id := ""
 ## The armour the soldier respawns in: the player's choice (BattleInfantry); "" = the pack's light armour, as
 ## Tribes respawns its players (Game::playerSpawn / DefaultGame::equip).
 var spawn_armor_id := ""
+## The weapons he comes back with (his slot's, else the armour's default_loadout).
+var spawn_loadout: Array = []
 ## func(soldier: Infantry, attacker: Node) -> bool: returns true when it took the lethal hit itself, e.g. the
 ## extraction mode's downed state; the soldier then does not die. Called on the host only (puppets take no hits).
 var lethal_hit_guard := Callable()
@@ -484,12 +486,13 @@ func is_inside_geometry() -> bool:
 
 
 func _apply_fell_through() -> void:
-	var p := global_position
-	if is_on_floor_now() or velocity.y >= 0.0:
-		return
-	if get_parent().get("bounds") != null:
+	var world := get_parent() as Node3D
+	if world == null or not is_inside_tree() or is_on_floor_now() or velocity.y >= 0.0:
+		return   # (a soldier leaving the tree in a teardown has no world to fall out of)
+	if world.get("bounds") != null:
 		return   # the battle's BattleBounds knows the buildings below the terrain (underground bases)
-	if p.y < MapBuilder.ground_height(get_parent() as Node3D, p) - FELL_THROUGH_DEPTH:
+	var p := global_position
+	if p.y < MapBuilder.ground_height(world, p) - FELL_THROUGH_DEPTH:
 		jetting = false
 		_die_of(KillText.CAUSE_BOUNDS)
 
@@ -617,7 +620,7 @@ func respawn(xf: Transform3D) -> void:
 	kit.apply_spawn(armor)
 	InfantryPack.apply_cloak_profile(self)
 	cloak.apply_forced(cloak.profile.respawn_cloak_s)
-	equip(armor.get("default_loadout", []))
+	equip(spawn_loadout if not spawn_loadout.is_empty() and again == spawn_armor_id else armor.get("default_loadout", []))
 	velocity = Vector3.ZERO
 	torso_target = rotation.y
 

@@ -21,6 +21,8 @@ const ARMOR_KIND := "armor"
 const GEAR_KINDS := ["grenade", "concussion", "mine", "repair_kit"]
 const GEAR_PRICE_RANK := {"grenade": 0.3, "concussion": 0.2, "mine": 0.6, "repair_kit": 1.0}
 const MIN_AMMO_STACK := 10
+const CALLIN_KG := 0.0   # a call-in token weighs nothing; its price is the economy's vehicle base range
+const FREE_ARMOR_SIZE := "light"   # light armour is standard issue; medium and heavy cost the economy's armour base
 
 static var _items := {}
 static var _key := ""
@@ -212,8 +214,9 @@ static func _add_valuables() -> void:
 
 static func _add_callins() -> void:
 	for v in Packs.pilotable():
-		_add("callin", str(v.id), {"name": "Call-in: %s" % str(v.get("name", v.id)), "pack": str(v.pack),
-			"rating": Packs.combat_rating(v)})
+		var rating := Packs.combat_rating(v)
+		_add("callin", str(v.id), {"name": "Call-in: %s" % str(v.get("name", v.id)), "pack": str(v.pack), "rating": rating,
+			"kg": CALLIN_KG, "stack": 1, "price": make_rated_price(EconomyRules.vehicle_base_range(), rating)})
 
 
 static func _add_armors() -> void:
@@ -223,7 +226,7 @@ static func _add_armors() -> void:
 			var size := str(a.get("size", "light"))
 			_add(ARMOR_KIND, str(a.id), {"name": "%s (%s)" % [str(a.get("name", a.id)), Packs.pack_name(pack)], "pack": pack,
 				"kg": float((rules.get("kg_by_size", {}) as Dictionary).get(size, 10.0)),
-				"price": int((rules.get("price_by_size", {}) as Dictionary).get(size, 0))})
+				"price": 0 if size == FREE_ARMOR_SIZE else EconomyRules.make_armor_base(size)})
 
 
 ## True for the rules' standard-issue weapons (free_weapons: the Tribes 1 Blaster, playtest X5): price 0, given to a

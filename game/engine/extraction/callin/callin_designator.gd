@@ -128,7 +128,7 @@ func apply_frame(delta: float) -> void:
 	if phase == Phase.IDLE:
 		_release_weapon(callins.battle.player)
 		return
-	if soldier == null or not callins.may_open_menu() or (phase == Phase.PICKING and not _is_menu_open()):
+	if soldier == null or not callins.input.may_open_menu() or (phase == Phase.PICKING and not _is_menu_open()):
 		apply_lower()
 		return
 	aim = aim_override.call() if aim_override.is_valid() else _make_aim(soldier)

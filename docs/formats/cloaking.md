@@ -163,8 +163,15 @@ Assumptions (flagged, not in the data): the 1 s fade and the exact distortion st
 (stop below 5 % of top speed, slow below 50 %); health glitch / fail read from the unit's integrity; the jam-field block
 applies to any sensor jammer field; Starsiege cloaks cost no energy and nothing breaks them. Done for Tribes 2 soldiers: the script cloaks (`tribes2:timed_cloak`): a respawn cloaks the soldier for
 `$InvincibleTime` (6 s, a shot ends it) with no pack, and a mission script's `setCloaked(on)` / `isCloaked()` are real
-(`Tribes2Methods`, no longer ignored presentation calls). Not done: the vehicle-pad (4.8 s) and inventory-station
-(0.5 / 0.9 s) flashes are in the profile (`vehicle_pad_cloak_s`) but not started by the station code; Starsiege
-components cannot be bought in the garage (components are not modelled there); the Aerial Assault and Vengeance
+(`Tribes2Methods`, no longer ignored presentation calls). Station flashes (done): an inventory-station purchase flashes the buyer cloaked for `station_flash_s` (0.5 s,
+`station.cs:275-276` `StationInventory::stationReady`; the Mobile Base station's 0.9 s, `station.cs:563-564`, is exported as
+`mobile_station_flash_s` but the remake has no mobile station) through `TribesStations.apply_station_flash`, and a vehicle bought at
+a pad leaves it cloaked for `vehicle_pad_cloak_s` (4.8 s, `serverVehicleHud.cs:144-148`) through the spawn spec's `cloak_s`
+(`BattleSpawner.apply_pad_cloak`; the 3.7 s appear sound and the turret's own cloak are not done). Starsiege component slots (done):
+`HercMounts` reads the Herc's `mountpoints` (a slot is a mountpoint that allows `Cloak`) and `default_mountables`, and a component fits when its
+`mount_size` (cloak.json) is no larger than the slot's; the choice per slot (0 factory fit, -1 emptied, else 830 / 831) is the garage
+entry's `mounts`, the character slot's `herc_mounts`, the roster / spawn spec's `mounts` and the garage tag's `mounts`; the hangar's
+`LoadoutEditor` shows a picker per slot and Ctrl+X toggles the fitted cloak. No cost or tonnage is charged yet and the lobby's Operator
+Setup list does not show the rows yet (`HercMounts.make_rows` is ready for it). Not done: the Aerial Assault and Vengeance
 soldiers have no pack kit. Tests: `tests/cloak_check.tscn` (headless), `tests/cloak_shots.tscn` (windowed renders:
 `cloak_soldier_plain / cloaked / close`, `cloak_herc_plain / cloaked`, `cloak_herc_*_zoom`, and the sheets `cloak_backgrounds` (the soldier cloaked from 8 sides against ground, slope, sky, buildings) and `cloak_fade` (6 steps in, 6 out)). Before / after renders: `renders/cloak_before`, `renders/cloak_after`.

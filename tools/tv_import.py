@@ -25,6 +25,7 @@ import fx_default  # noqa: E402
 import tv_assets  # noqa: E402
 import tv_audio  # noqa: E402
 import tv_bsp  # noqa: E402
+import tv_lights  # noqa: E402
 import tv_script  # noqa: E402
 import tv_skeletal  # noqa: E402
 import tv_statics  # noqa: E402
@@ -178,7 +179,7 @@ def export_map(pkg, map_id, name, props=None):
          'stations': [], 'power': [], 'switch': [], 'power_groups': [], 'waypoints': waypoints, 'cameras': [],
          'npc_spawns': npcs, 'objectives': objectives,
          'notes': 'Tribes: Vengeance %s: terrain heightmap, textured static meshes and the editor brushes (approximate '
-                  'room shells) are converted; the compiled BSP, lighting, water, decorations and skeletal models are not. '
+                  'room shells) are converted, with the sun, zone ambient, fog and point lights; the compiled BSP, lightmaps, water, decorations and skeletal models are not. '
                   'Flat ground at ground_y where the map has no terrain. Positions are metres (Unreal units x %.5f).'
                   % (map_id, METRES_PER_UU)}
     return m
@@ -293,6 +294,7 @@ def import_campaign(game_root, pack_dir, log=print, only=None):
             bsp = tv_bsp.export_bsp(idx, pkg, pack_dir, m['id'].lower(), METRES_PER_UU)
             if bsp:
                 m['statics'].insert(0, bsp)
+            m['environment'], m['point_lights'] = tv_lights.export_lighting(pkg, to_world, METRES_PER_UU)
             m['sounds'], m['voice'] = map_sounds(pkg, voice_files, pack_dir)
             texts = {k.lower(): v for sec in list(tx_sections(chapter_texts.get(ch['number'], {}))) + list(prompts.values()) for k, v in sec.items()}
             script = tv_script.compile_map(pkg, to_world, texts, METRES_PER_UU)

@@ -42,6 +42,7 @@ func _touch_own_flag(player: Dictionary, flag: ModeObject) -> void:
 	elif flag.state == ModeObject.DROPPED:
 		return_home(flag)
 		score.add_player(str(player.key), _num("score_per_flag_return", 1.0))
+		score.add_event(str(player.key), ModeScore.EVENT_FLAG_RETURN)
 		announce("%s returned the %s flag." % [player.key, make_team_name(flag.team)])
 		_changed()
 
@@ -55,6 +56,7 @@ func _try_capture(player: Dictionary) -> void:
 		return_home(flag)
 		score.add_team(int(player.team), _num("score_per_team_flag_cap", 1.0))
 		score.add_player(str(player.key), _num("score_per_player_flag_cap", 1.0))
+		score.add_event(str(player.key), ModeScore.EVENT_FLAG_CAPTURE)
 		announce("%s captured the %s flag for %s!" % [player.key, make_team_name(flag.team), make_team_name(int(player.team))])
 	_changed()
 	check_team_limit(int(player.team))

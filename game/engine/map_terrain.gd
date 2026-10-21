@@ -11,6 +11,13 @@ const HOLE := 255
 const DEFAULT_COLOUR := Color(0.45, 0.42, 0.36)
 const DEFAULT_SIZE := [256, 256]
 const DEFAULT_SQUARE := 8.0
+const TERRAIN_SHADER := preload("res://engine/shaders/terrain.gdshader")
+const NOISE_SIZE := 256
+## Strengths of the world-space variation (terrain.gdshader uniforms); a map overrides them with terrain "detail".
+const DETAIL_DEFAULTS := {"warp": 0.0, "macro_amount": 0.14, "mid_amount": 0.08, "fine_amount": 0.06, "grit_amount": 0.08,
+	"warm_amount": 0.05}
+
+static var _noise_texture: ImageTexture
 
 
 ## Builds the terrain body under `parent`. t: the map's terrain dict; dir: the map folder.
@@ -81,21 +88,65 @@ static func _make_hole_mask(squares: Array, w: int, h: int) -> PackedByteArray:
 	return mask if mask.count(HOLE) > 0 else PackedByteArray()
 
 
-static func _material(t: Dictionary, dir: String) -> StandardMaterial3D:
-	var mat := StandardMaterial3D.new()
-	mat.roughness = 1.0
+## The terrain material: the map's colour map under the world-space variation of terrain.gdshader (the map's "detail"
+## record overrides DETAIL_DEFAULTS), so repeated or coarse colour maps show no grid or tiling from the air.
+static func _material(t: Dictionary, dir: String) -> ShaderMaterial:
+	var mat := ShaderMaterial.new()
+	mat.shader = TERRAIN_SHADER
+	mat.set_shader_parameter("noise_tex", _make_noise_texture())
 	var ap := dir.path_join(String(t.get("albedo", "albedo.png")))
+	var img: Image = null
 	if t.get("albedo_data") is Image:   # baked in memory (the generated extraction map, VarunaMap)
-		var baked: Image = t.albedo_data
-		baked.generate_mipmaps()
-		mat.albedo_texture = ImageTexture.create_from_image(baked)
+		img = t.albedo_data
 	elif FileAccess.file_exists(ap):
-		var img := Image.load_from_file(ap)
+		img = Image.load_from_file(ap)
+	if img != null:
 		img.generate_mipmaps()
-		mat.albedo_texture = ImageTexture.create_from_image(img)
+		mat.set_shader_parameter("albedo_tex", ImageTexture.create_from_image(img))
+		mat.set_shader_parameter("has_albedo", 1.0)
 	else:
-		mat.albedo_color = DEFAULT_COLOUR
+		mat.set_shader_parameter("has_albedo", 0.0)
+		mat.set_shader_parameter("base_color", DEFAULT_COLOUR)
+	var detail: Dictionary = DETAIL_DEFAULTS.duplicate()
+	if t.get("detail") is Dictionary:   # (a Tribes 2 map's "detail" is its detail texture file name)
+		detail.merge(t.detail, true)
+	for k in detail:
+		mat.set_shader_parameter(k, float(detail[k]))
 	return mat
+
+
+## Four seamless noise fields (one per channel, normalised to the full 0..1 range) that terrain.gdshader samples at
+## its scales; made once.
+static func _make_noise_texture() -> ImageTexture:
+	if _noise_texture != null:
+		return _noise_texture
+	var channels: Array[Image] = []
+	for c in 4:
+		var n := FastNoiseLite.new()
+		n.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+		n.fractal_type = FastNoiseLite.FRACTAL_FBM
+		n.fractal_octaves = 4
+		n.frequency = 0.02
+		n.seed = 7101 + c * 977
+		var ch := n.get_seamless_image(NOISE_SIZE, NOISE_SIZE)
+		ch.convert(Image.FORMAT_L8)
+		channels.append(ch)
+	var bytes := PackedByteArray()
+	bytes.resize(NOISE_SIZE * NOISE_SIZE * 4)
+	for c in 4:
+		var src := channels[c].get_data()
+		var lo := 255
+		var hi := 0
+		for v in src:
+			lo = mini(lo, v)
+			hi = maxi(hi, v)
+		var span := float(maxi(hi - lo, 1))
+		for i in src.size():
+			bytes[i * 4 + c] = int(float(src[i] - lo) / span * 255.0)
+	var img := Image.create_from_data(NOISE_SIZE, NOISE_SIZE, false, Image.FORMAT_RGBA8, bytes)
+	img.generate_mipmaps()
+	_noise_texture = ImageTexture.create_from_image(img)
+	return _noise_texture
 
 
 ## HeightMapShape3D is centred on its node and spaced 1 unit -> scaled by the square size.

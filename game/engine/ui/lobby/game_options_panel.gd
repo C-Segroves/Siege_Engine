@@ -6,7 +6,7 @@ extends VBoxContainer
 ## sends `settings_changed(new_settings)` and the lobby applies them.
 ##   refresh(settings, is_host, roster)
 ##   settings_changed(s) / assign_all_requested / shuffle_requested / save_requested / hangar_requested /
-##   teams_requested / options_requested
+##   teams_requested / options_requested / training_requested(pack)
 
 signal settings_changed(new_settings: Dictionary)
 signal assign_all_requested
@@ -15,6 +15,7 @@ signal save_requested
 signal hangar_requested
 signal teams_requested
 signal options_requested
+signal training_requested(pack: String)
 
 const READ_ONLY_HINT := "Only the host changes these."
 const HOST_HINT := "You are the host: these are yours to change."
@@ -76,7 +77,7 @@ func _build_host_rows() -> void:
 	var mode := str(settings.get("mode", ""))
 	if _can_change_mode():
 		var modes := _make_changeable_modes()
-		var picker := Widgets.option_button(modes.map(MatchFlow.make_mode_name))
+		var picker := Widgets.option_button(modes.map(_make_short_mode_name))   # the long names ("Extraction raid (loot, exfil, PvPvE)") clip in the row
 		picker.item_selected.connect(func(i: int) -> void: _emit(GameOptionsModel.make_with_mode(settings, str(modes[i]))))
 		_add_row("mode", "Mode", picker)
 	if mode == GameOptionsModel.KIND_VERSUS:
@@ -94,6 +95,7 @@ func _build_host_rows() -> void:
 	_body.add_child(Widgets.button("Game options...", func() -> void: options_requested.emit()))
 	controls["options"] = _body.get_child(_body.get_child_count() - 1)
 	_build_team_buttons()
+	_build_training_buttons(mode)
 	if mode == GameOptionsModel.KIND_CAMPAIGN:
 		_build_campaign_buttons()
 
@@ -110,6 +112,18 @@ func _build_team_buttons() -> void:
 	controls["shuffle"] = shuffle
 
 
+## Training: the Tribes missions are single player scenarios, picked on their own screen (the lobby is left).
+func _build_training_buttons(mode: String) -> void:
+	if mode == GameOptionsModel.KIND_CAMPAIGN:
+		return
+	for pack in TribesMissionRuntime.PACKS:
+		if TribesMissionRuntime.list_missions(pack).is_empty():
+			continue
+		var button := Widgets.button("%s training..." % Packs.pack_name(pack), func() -> void: training_requested.emit(pack))
+		_body.add_child(button)
+		controls["training_%s" % pack] = button
+
+
 func _build_campaign_buttons() -> void:
 	var save := Widgets.small_button("Save game", func() -> void: save_requested.emit())
 	var hangar := Widgets.small_button("Hangar", func() -> void: hangar_requested.emit())
@@ -123,13 +137,18 @@ func _add_row(key: String, text: String, control: Control) -> void:
 	_body.add_child(OptionRow.new(text, control))
 
 
+## The mode's short title, which fits the picker at any width.
+static func _make_short_mode_name(mode: String) -> String:
+	return str(LobbySettings.MODE_TITLES.get(mode, MatchFlow.make_mode_name(mode)))
+
+
 func _can_change_mode() -> bool:
-	return Net.is_online() and str(settings.get("mode", "")) != GameOptionsModel.KIND_CAMPAIGN and _make_changeable_modes().size() > 1
+	return Net.is_online() and _make_changeable_modes().size() > 1
 
 
-## The modes a host may switch between inside the lobby (the campaign has its own entry).
+## The modes a host may switch between inside the lobby (MatchFlow.make_offered_modes: versus, co-op, co-op campaign, raid).
 func _make_changeable_modes() -> Array:
-	return MatchFlow.make_offered_modes().filter(func(m: String) -> bool: return m != GameOptionsModel.KIND_CAMPAIGN)
+	return MatchFlow.make_offered_modes()
 
 
 ## Puts the settings into the host's controls without sending anything.
@@ -140,6 +159,7 @@ func _sync_values() -> void:
 	if controls.has("mode"):
 		var picker := controls.mode as OptionButton
 		picker.select(maxi(_make_changeable_modes().find(str(settings.get("mode", ""))), 0))
+		picker.tooltip_text = MatchFlow.make_mode_name(str(settings.get("mode", "")))
 	if controls.has("game_mode"):
 		_sync_game_modes(controls.game_mode as OptionButton)
 	if controls.has("map"):

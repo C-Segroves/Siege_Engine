@@ -90,14 +90,22 @@ static func make_with_game_mode(s: Dictionary, mode_id: String) -> Dictionary:
 	return _apply_game_mode(s.duplicate(true), _find_game_mode(entry, mode_id))
 
 
-## Another mode of the lobby: versus, co-op or an extraction raid (the campaign has its own entry).
+## Another mode of the lobby: versus, co-op, the co-op campaign or an extraction raid. Versus and co-op keep the map, game
+## mode and opponents; the campaign and the raid start from their own defaults (other maps, opponents and limits).
 static func make_with_mode(s: Dictionary, mode: String) -> Dictionary:
-	var out := LobbySettings.make({"mode": mode, "world_idx": int(s.get("world_idx", 0)), "map_name": s.get("map", ""),
-		"game_mode": _find_game_mode(make_map_entry(s), str(s.get(LobbySettings.GAME_MODE_KEY, ""))), "ai": int(s.get("ai", DEFAULT_AI)),
-		InfantryBots.CONFIG_KEY: int(s.get(InfantryBots.CONFIG_KEY, 0)), "balance": s.get("balance", MatchFlow.BALANCES[0]),
-		"infantry_pack": s.get(LobbySettings.INFANTRY_PACK_KEY, ""), "relations": s.get(LobbySettings.RELATIONS_KEY, ""),
-		"frag_limit": int(s.get("frag_limit", MatchFlow.DEFAULT_FRAG_LIMIT))})
-	for key in ["solo", "coop", GOAL_SEED_KEY, InfantryBots.MEMBER_TEAMS_KEY]:
+	var out: Dictionary
+	if mode in [KIND_CAMPAIGN, KIND_EXTRACTION] or str(s.get("mode", "")) in [KIND_CAMPAIGN, KIND_EXTRACTION]:
+		out = make_default_settings(mode, bool(s.get("solo", false)))
+		out[LobbySettings.INFANTRY_PACK_KEY] = s.get(LobbySettings.INFANTRY_PACK_KEY, out.get(LobbySettings.INFANTRY_PACK_KEY, ""))
+		out["balance"] = s.get("balance", out.balance)
+	else:
+		out = LobbySettings.make({"mode": mode, "world_idx": int(s.get("world_idx", 0)), "map_name": s.get("map", ""),
+			"game_mode": _find_game_mode(make_map_entry(s), str(s.get(LobbySettings.GAME_MODE_KEY, ""))), "ai": int(s.get("ai", DEFAULT_AI)),
+			InfantryBots.CONFIG_KEY: int(s.get(InfantryBots.CONFIG_KEY, 0)), "balance": s.get("balance", MatchFlow.BALANCES[0]),
+			"infantry_pack": s.get(LobbySettings.INFANTRY_PACK_KEY, ""), "relations": s.get(LobbySettings.RELATIONS_KEY, ""),
+			"frag_limit": int(s.get("frag_limit", MatchFlow.DEFAULT_FRAG_LIMIT))})
+		out["solo"] = bool(s.get("solo", false))
+	for key in [GOAL_SEED_KEY, InfantryBots.MEMBER_TEAMS_KEY, BotBudget.CONFIG_KEY]:
 		if s.has(key):
 			out[key] = s[key]
 	return out

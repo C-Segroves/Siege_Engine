@@ -19,6 +19,7 @@
   "square": 16.0,
   "water_level": 8.0,
   "albedo_size": 768,
+  "detail": {"warp": 0.007, "macro_amount": 0.22, "mid_amount": 0.14, "fine_amount": 0.1, "grit_amount": 0.12, "warm_amount": 0.09},
   "regions": [
    {
     "id": "north_mountains",
@@ -275,7 +276,19 @@
    0.44,
    0.48
   ],
-  "fog_sky_affect": 0.6
+  "fog_sky_affect": 0.6,
+  "day_cycle": {
+   "max_elevation_deg": 62,
+   "stops": [
+    {"h": -1.0, "sun_color": [0.45, 0.55, 0.9], "sun_energy": 0.32, "ambient": [0.085, 0.105, 0.19], "fog_color": [0.035, 0.045, 0.085], "horizon_color": [0.035, 0.045, 0.085], "sky_tint": [0.08, 0.1, 0.24], "fog_start": 500, "fog_end": 2800},
+    {"h": -0.15, "sun_color": [0.45, 0.55, 0.9], "sun_energy": 0.28, "ambient": [0.09, 0.11, 0.2], "fog_color": [0.04, 0.05, 0.09], "horizon_color": [0.04, 0.05, 0.09], "sky_tint": [0.09, 0.11, 0.25], "fog_start": 500, "fog_end": 2800},
+    {"h": -0.04, "sun_color": [0.45, 0.5, 0.8], "sun_energy": 0.0, "ambient": [0.1, 0.09, 0.16], "fog_color": [0.2, 0.14, 0.2], "horizon_color": [0.2, 0.14, 0.2], "sky_tint": [0.25, 0.16, 0.28], "fog_start": 550, "fog_end": 3000},
+    {"h": 0.0, "sun_color": [1.0, 0.5, 0.25], "sun_energy": 0.0, "ambient": [0.2, 0.17, 0.22], "fog_color": [0.55, 0.35, 0.32], "horizon_color": [0.55, 0.35, 0.32], "sky_tint": [0.85, 0.45, 0.35], "fog_start": 600, "fog_end": 3200},
+    {"h": 0.08, "sun_color": [1.0, 0.55, 0.3], "sun_energy": 0.55, "ambient": [0.28, 0.25, 0.3], "fog_color": [0.72, 0.5, 0.42], "horizon_color": [0.72, 0.5, 0.42], "sky_tint": [1.0, 0.65, 0.5], "fog_start": 700, "fog_end": 3600},
+    {"h": 0.3, "sun_color": [1.0, 0.86, 0.7], "sun_energy": 0.9, "ambient": [0.38, 0.38, 0.42], "fog_color": [0.74, 0.72, 0.76], "horizon_color": [0.74, 0.72, 0.76], "sky_tint": [1.0, 0.92, 0.88], "fog_start": 850, "fog_end": 4100},
+    {"h": 0.9, "sun_color": [0.95, 0.92, 0.85], "sun_energy": 1.0, "ambient": [0.42, 0.44, 0.48], "fog_color": [0.72, 0.76, 0.82], "horizon_color": [0.72, 0.76, 0.82], "sky_tint": [1.0, 1.0, 1.0], "fog_start": 900, "fog_end": 4200}
+   ]
+  }
  },
  "water": [
   {
@@ -964,5 +977,40 @@
    "barrel": "MortarBarrelLarge",
    "spec": "mortarbarrellarge"
   }
- ]
+ ],
+ "cybrid_siege": {
+  "notes": "The hidden easter egg of Varuna's Fall (docs/design/cybrid_siege.md; CybridSiege). Our own story and layout: three buried ark beacon relays at the Prow Fortress, the Chapel Fortress and the Crater Docks wake in a per-raid order that only the scattered radio fragments tell. 'area' is the index of the site's spawn area the relay is buried at. 'fragments.lines' is [first, second, third] per relay: the line a fragment tells when its relay has that place in the order. 'spots' are wreck sites where the recorders lie (the dry ones are used), 'echoes' are places where the static speaks to whoever passes.",
+  "relays": [
+   {"id": "prow", "site": "prow_fortress", "area": 0},
+   {"id": "chapel", "site": "chapel_fortress", "area": 1},
+   {"id": "docks", "site": "crater_docks", "area": 2}
+  ],
+  "last_exfil": "EXFIL B",
+  "fragments": {
+   "lines": {
+    "prow": [
+     "...the sleeper in the northern valley speaks first. Wake the prow before anything else answers...",
+     "...once one voice has sounded, the high prow is the next in the chain, never the opening one...",
+     "...and when the others are lit the prow closes the circle. The valley keeps the last word..."
+    ],
+    "chapel": [
+     "...the bell house in the eastern ruins rings first. The ark was meant for it before it was meant for anywhere...",
+     "...the chapel is the middle of the chain: one voice in front of it, one behind...",
+     "...finish in the east, among the broken pews. The chapel is the last of the three..."
+    ],
+    "docks": [
+     "...begin with the water. The stilts over the flooded crater hold the first buried plate...",
+     "...the drowned crater answers second, once the first plate is warm...",
+     "...the docks come last. Everything else must be lit before the water is touched..."
+    ]
+   },
+   "spots": [[400, -300], [-700, -150], [1200, 400], [-1300, 800], [300, -1500], [-900, -1200], [1700, -700], [1500, 500],
+             [700, 1700], [-1100, 1900], [-450, -650], [1000, -1250], [-1700, 1100], [2000, 900]],
+   "echoes": [
+    {"pos": [-150, -250], "radius": 35},
+    {"pos": [900, -900], "radius": 35},
+    {"pos": [-1500, 1500], "radius": 35}
+   ]
+  }
+ }
 }

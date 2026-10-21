@@ -135,7 +135,7 @@ the HUD; Bioderm animations once the Tribes 2 .dsq sequences are decoded (the ma
   `pickup_reach_m`; what does not fit stays. **[MVP]**
 - **Drop**: the inventory panel drops one / all of an item into a bag at your feet. **[MVP]**
 - **Armour is an item** (`armor/<armour id>`; user decision "Armor can be dropped"): medium and heavy armours cost
-  `price_by_size` (1800 / 3600) and weigh 15 / 25 kg as loot; the shop sells them, weapons lockers roll them
+  the economy's `armor_base_by_size` (1800 / 3600) and weigh 15 / 25 kg as loot; the shop sells them, weapons lockers roll them
   (armory weight `armor` 1). Light armours are **standard issue**: price 0, always wearable, never stashed, sold,
   rolled or dropped (`ExtractionItems.is_free_armor`), so a broke pilot can always raid. Wearing a paid armour takes it
   out of the stash (`ExtractionProfile.apply_kit_armor`; only owned ones are offered); the raid spends it with the kit;
@@ -171,7 +171,7 @@ the HUD; Bioderm animations once the Tribes 2 .dsq sequences are decoded (the ma
 ## 5. Economy, shop and vehicle call-ins
 
 - **Shop** (`ExtractionShop`, the Operator Setup store): buys weapons, ammunition (by the load), gear, backpacks and call-ins;
-  everything sells back for `sell_fraction` (50 %). New profiles start with `start_money` (3000) and a starter kit
+  everything sells back for `sell_fraction` (50 %). New profiles start with the economy's `start_credits` and a starter kit
   (the light armour's spawn weapons, two loads, grenades, a repair kit). **[MVP]**
 - **Vehicle call-ins**: a bought token is an item; carried into the raid, the inventory panel's **Use** puts that
   vehicle on the ground in front of the soldier, empty and parked; he boards it with the usual rules (hatch for

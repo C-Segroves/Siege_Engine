@@ -561,6 +561,7 @@ def export_cloak(S, SFX, comps):
         rating = MASK_RATING_RX.search(S.get(CLOAK_SPEC_TAGS.get(cid, ''), ''))
         profiles['starsiege:%d' % cid] = {
             'id': 'starsiege:%d' % cid, 'name': c['name'], 'kind': 'component', 'component_id': cid,
+            'mount_size': c.get('mount_size', ''), 'mass_t': c.get('mass_t', 0.0), 'tech_level': c.get('tech_level', 0),
             'source': 'scripts/datIntMounts.cs newCloak (%s)' % ', '.join(str(x) for x in raw),
             'mask_rating': int(rating.group(1)) if rating else int(raw[1]) // 10,
             'glitch_health': r(raw[2]), 'glitch_coef': r(raw[3]), 'fail_health': r(raw[4]), 'fail_coef': r(raw[5]),

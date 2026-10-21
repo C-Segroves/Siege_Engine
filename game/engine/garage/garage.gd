@@ -4,9 +4,10 @@ extends RefCounted
 ## sections 6-8): the Hercs the player owns with their loadouts, condition and pilots, the one selected
 ## for the next mission, the armory stock of counted weapons, the salvage pool and the crew.
 ##
-##   vehicles   [{uid, vehicle, name, loadout, pilot_id, condition, build_left}]  vehicle = qualified id
+##   vehicles   [{uid, vehicle, name, loadout, mounts, pilot_id, condition, build_left}]  vehicle = qualified id
 ##              ("es1:RAPTOR"); loadout = weapon id per hardpoint in the vehicle's gun order ("" =
-##              empty); pilot_id = the crew pilot flying it ("" = none, or the player); condition =
+##              empty); mounts = the component per free slot of a Starsiege Herc (HercMounts: 0 factory fit,
+##              -1 emptied, else a component id; [] = the vehicle has no slots); pilot_id = the crew pilot flying it ("" = none, or the player); condition =
 ##              HercCondition fractions ([] = pristine); build_left = missions until it is built
 ##   selected   index of the Herc the player takes into the next mission
 ##   stock      {base weapon id: units in the armory}; counted weapons only (salvage, start stock)
@@ -56,7 +57,7 @@ static func make_entry(vid: String, loadout: Array = []) -> Dictionary:
 	for i in lo.size():
 		lo[i] = str(lo[i]) if lo[i] != null and Packs.weapons.has(str(lo[i])) else EMPTY
 	return {"uid": 0, "vehicle": str(v.get("id", vid)), "name": str(v.get("name", vid)), "loadout": lo,
-		"pilot_id": "", "condition": [], "build_left": 0}
+		"mounts": HercMounts.make_sanitized(v, []), "pilot_id": "", "condition": [], "build_left": 0}
 
 
 ## `names`: the campaign's pilot name chains (GarageEconomy.make_pilot_names) for the saved crew.
@@ -134,7 +135,8 @@ func make_battle_entry() -> Dictionary:
 
 ## The garage identity a battle Herc carries back in the mission result ({uid, pilot_id, condition}).
 static func make_battle_tag(e: Dictionary) -> Dictionary:
-	return {"uid": int(e.uid), "pilot_id": str(e.get("pilot_id", "")), "condition": (e.get("condition", []) as Array).duplicate()}
+	return {"uid": int(e.uid), "pilot_id": str(e.get("pilot_id", "")), "condition": (e.get("condition", []) as Array).duplicate(),
+		"mounts": (e.get("mounts", []) as Array).duplicate()}
 
 
 ## Hardpoints of entry `e` holding a weapon.
@@ -177,6 +179,13 @@ func make_arming_price(ctx: Dictionary, wid: String) -> int:
 	if not _is_fabricated(ctx, wid) or int(stock.get(CampaignAvailability.base_weapon(wid), 0)) > 0:
 		return 0
 	return GarageEconomy.of_context(ctx).make_weapon_price(wid)
+
+
+## True when `component_id` (HercMounts.FACTORY / EMPTIED / a cloak) may go into component slot `i` of the selected Herc.
+func can_mount(i: int, component_id: int) -> bool:
+	var e := selected_entry()
+	return not e.is_empty() and HercMounts.is_allowed(Packs.vehicle(str(e.vehicle)), i, component_id) \
+		and (e.get("mounts", []) as Array).size() > i
 
 
 ## True when `vid` may be built under `ctx` (offered, affordable and the garage has room).
@@ -241,6 +250,15 @@ func apply_arm(ctx: Dictionary, i: int, wid: String) -> void:
 	_apply_fabricated_stock(ctx, old, wid)
 	CampaignAvailability.apply_arming(ctx, old, wid)
 	e.loadout[i] = wid
+
+
+## Puts component `component_id` in slot `i` of the selected Herc (HercMounts: 0 factory fit, -1 empty); false when it does not fit.
+## Components are not counted stock: the campaign offers every cloak that fits.
+func apply_mount(i: int, component_id: int) -> bool:
+	if not can_mount(i, component_id):
+		return false
+	selected_entry().mounts[i] = component_id
+	return true
 
 
 ## Fabricated weapons are owned units: one taken off joins the armory, one put on comes out of it.
@@ -356,6 +374,7 @@ func _apply_sanitize() -> void:
 
 static func _make_sanitized(e: Dictionary) -> Dictionary:
 	var fixed := make_entry(str(e.vehicle), e.get("loadout", []) if e.get("loadout") is Array else [])
+	fixed.mounts = HercMounts.make_sanitized(Packs.vehicle(str(e.vehicle)), e.get("mounts", []) if e.get("mounts") is Array else [])
 	fixed.uid = int(e.get("uid", 0))
 	fixed.name = str(e.get("name", fixed.name))
 	fixed.pilot_id = str(e.get("pilot_id", ""))

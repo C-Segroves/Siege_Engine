@@ -38,6 +38,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 COPY --from=godot /godot /usr/local/bin/godot
 WORKDIR /app
 COPY game/ /app/game/
+# The server's own project settings (Jolt physics: a soldier's move_and_slide is about 3x cheaper), read at engine start.
+COPY deploy/server_override.cfg /app/game/override.cfg
 # gamedata/ sits next to game/: the engine finds ../gamedata by itself (Assets._find_data_root).
 RUN mkdir -p /app/gamedata /config && chown -R siege:siege /app /config
 USER siege

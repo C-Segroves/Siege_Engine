@@ -13,6 +13,8 @@ static func make_context(settings: Dictionary, profile: OperatorProfile) -> Load
 	var ctx := LoadoutContext.make_for(settings, LoadoutContext.ROLE_PLAYER, profile.unlocks)
 	if ctx.source == LoadoutContext.SOURCE_GARAGE and Session.has_campaign():
 		ctx.availability = Session.availability_context()   # the campaign decides what may be built and armed
+	if ctx.source == LoadoutContext.SOURCE_STASH:
+		ctx.apply_raid_kit(ExtractionProfile.load_for(profile.pilot).kit)
 	return ctx
 
 

@@ -89,6 +89,7 @@ func _build_panes() -> void:
 	options.teams_requested.connect(func() -> void: sheets.open_teams())
 	options.assign_all_requested.connect(func() -> void: MatchFlow.apply_team_choices(TeamAssignment.make_assign_all(Net.roster, Net.settings)))
 	options.shuffle_requested.connect(func() -> void: MatchFlow.apply_team_choices(TeamAssignment.make_shuffle(Net.roster, Net.settings, RandomNumberGenerator.new())))
+	options.training_requested.connect(_open_training)
 	options.save_requested.connect(func() -> void: router.go("saves", {"mode": "save", "return_to": "lobby"}))
 	options.hangar_requested.connect(func() -> void: launcher().open_hangar("lobby"))
 	setup = OperatorSetupBlock.new()
@@ -266,7 +267,15 @@ func apply_settings(new_settings: Dictionary) -> void:
 		return
 	MatchFlow.apply_revalidate_ready(Net.settings, new_settings)
 	MatchFlow.apply_teams_for_settings(Net.settings, new_settings)
+	MatchFlow.apply_campaign_for_settings(Net.settings, new_settings)
 	Net.set_settings(new_settings)
+	MatchFlow.publish_campaign_offer()
+
+
+## Host: the Tribes training missions are single player: the lobby session ends and the training page opens.
+func _open_training(pack: String) -> void:
+	Net.leave()
+	router.replace("training", {"pack": pack})
 
 
 func _on_primary() -> void:

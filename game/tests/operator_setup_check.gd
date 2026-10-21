@@ -35,6 +35,8 @@ func _ready() -> void:
 	await _check_slot_tabs()
 	await _check_raid()
 	await _check_garage_and_bot()
+	await _check_vehicle_store()
+	await _check_component_slots()
 	await _check_narrow()
 	await _check_focus_chain()
 	await _check_keyboard_gamepad_path()
@@ -429,6 +431,135 @@ func _check_stash_side() -> void:
 	_expect(_setup.state.side == "infantry", "the switch wraps to the infantry")
 
 
+## The vehicle side: the store lists only weapons that fit the hardpoints, filters by the selected hardpoint, equips to
+## it and removes from it (mouse and pad), for an ES1 Herc, a Starsiege Herc and a Tribes vehicle.
+func _check_vehicle_store() -> void:
+	print("-- vehicle store:")
+	for pack in ["es1", "starsiege", "tribes"]:
+		var vehicle := _pick_vehicle(pack)
+		if vehicle.is_empty():
+			print("    (no armed vehicle of %s installed: skipped)" % pack)
+			continue
+		await _open(_vs(), "veh " + pack)
+		_slot().apply_vehicle_defaults(str(vehicle.id))
+		_setup.state.apply_side("vehicle")
+		await _frames(SETTLE_FRAMES)
+		await _check_vehicle_pack(pack, vehicle)
+		await _shut()
+
+
+## Starsiege component slots (HercMounts): a row per slot, the store lists what fits it, equip and remove by mouse and pad.
+func _check_component_slots() -> void:
+	print("-- component slots:")
+	var herc := {}
+	for v in Packs.pilotable(["starsiege"]):
+		if HercMounts.has_slots(v):
+			herc = v
+			break
+	if herc.is_empty():
+		print("    (no Starsiege Herc with component slots installed: skipped)")
+		return
+	await _open(_vs(), "mounts")
+	_slot().apply_vehicle_defaults(str(herc.id))
+	_setup.state.apply_side("vehicle")
+	await _frames(SETTLE_FRAMES)
+	var slots := HercMounts.make_slots(herc)
+	var rows := _loadout_rows().filter(func(r: LoadoutRow) -> bool: return r.row.kind == "mount")
+	_expect(rows.size() == slots.size(), "%s: the loadout lists its %d component slots" % [herc.id, slots.size()])
+	(rows[0] as LoadoutRow).pressed.emit()
+	await _frames(SETTLE_FRAMES)
+	var entries := _store_rows()
+	var options := HercMounts.make_options(herc, 0)
+	_expect(entries.size() == options.size() + 2, "the store lists the factory fit, empty and %d cloaks that fit slot 1" % options.size())
+	_expect(entries.all(func(r: StoreRow) -> bool: return r.fit_reason == "" and r.entry.kind == "mount_part"), "every component entry fits")
+	var cloak: StoreRow = entries.filter(func(r: StoreRow) -> bool: return int(r.entry.mount_value) > 0).front()
+	var value := int(cloak.entry.mount_value)
+	cloak.pressed.emit()
+	await _frames(SETTLE_FRAMES)
+	_expect(int(_slot().herc_mounts[0]) == value, "choosing a cloak fits it into slot 1 (herc_mounts)")
+	var row: LoadoutRow = _loadout_rows().filter(func(r: LoadoutRow) -> bool: return r.row.key == "mount:0").front()
+	_expect(_row_texts(row).contains(HercMounts.make_part_name(herc, value)), "the row shows the fitted cloak")
+	row.grab_focus()
+	await _frames()
+	await _send_pad_button(JOY_BUTTON_X)
+	_expect(int(_slot().herc_mounts[0]) == HercMounts.EMPTIED, "pad X empties the slot")
+	_slot().herc_mounts[0] = value
+	var click := InputEventMouseButton.new()
+	click.button_index = MOUSE_BUTTON_RIGHT
+	click.pressed = true
+	(_loadout_rows().filter(func(r: LoadoutRow) -> bool: return r.row.key == "mount:0").front() as LoadoutRow)._gui_input(click)
+	await _frames(SETTLE_FRAMES)
+	_expect(int(_slot().herc_mounts[0]) == HercMounts.EMPTIED, "a right click empties it too")
+	await _shut()
+
+
+func _pick_vehicle(pack: String) -> Dictionary:
+	var fallback := {}
+	for v in Packs.pilotable([pack]):
+		if PackVehicleLoader.has_fixed_loadout(v) or WeaponFit.hardpoint_masks(v).is_empty():
+			fallback = v if fallback.is_empty() else fallback
+			continue
+		return v
+	return fallback
+
+
+func _check_vehicle_pack(pack: String, v: Dictionary) -> void:
+	var masks := WeaponFit.hardpoint_masks(v)
+	var hardpoints := _loadout_rows().filter(func(r: LoadoutRow) -> bool: return r.row.kind == "hardpoint")
+	_expect(hardpoints.size() == masks.size(), "%s %s: the loadout lists its %d hardpoints" % [pack, v.id, masks.size()])
+	_expect(_setup.store.get_category() == "weapons", "%s: the store opens on weapons for the vehicle" % pack)
+	if PackVehicleLoader.has_fixed_loadout(v) or masks.is_empty():
+		_expect(_store_rows().all(func(r: StoreRow) -> bool: return r.fit_reason != "" or r.entry.kind != "herc_weapon"), "%s: a fixed loadout takes no store weapon" % pack)
+		return
+	var weapons := _store_rows()
+	_expect(weapons.size() > 0 and weapons.all(func(r: StoreRow) -> bool: return r.entry.kind == "herc_weapon"), "%s: the store lists %d vehicle weapons only" % [pack, weapons.size()])
+	_expect(weapons.all(func(r: StoreRow) -> bool: return r.fit_reason == ""), "%s: every listed weapon fits some hardpoint" % pack)
+	(hardpoints[0] as LoadoutRow).pressed.emit()
+	await _frames(SETTLE_FRAMES)
+	var mask := int(masks[0])
+	_expect(_setup.state.selected_row == "hardpoint:0", "%s: selecting a hardpoint row selects it" % pack)
+	_expect(_store_rows().all(func(r: StoreRow) -> bool: return WeaponFit.fits_mask(Packs.weapon(UnlockId.ref_of(str(r.entry.id))), mask)), "%s: the store is filtered to hardpoint 1 (%s)" % [pack, WeaponFit.hardpoint_size(v, 0)])
+	await _expect_unfit_marked(v, pack)
+	var pick: StoreRow = _store_rows().filter(func(r: StoreRow) -> bool: return r.entry.state != "not_allowed" and UnlockId.ref_of(str(r.entry.id)) != _slot().herc_loadout[0]).front() if not _store_rows().is_empty() else null
+	if pick == null:
+		return
+	var ref := UnlockId.ref_of(str(pick.entry.id))
+	pick.pressed.emit()
+	await _frames(SETTLE_FRAMES)
+	_expect(_slot().herc_loadout[0] == ref and _find_dialog() == null, "%s: choosing %s mounts it on hardpoint 1, free" % [pack, ref])
+	var row: LoadoutRow = _loadout_rows().filter(func(r: LoadoutRow) -> bool: return r.row.key == "hardpoint:0").front()
+	_expect(_row_texts(row).contains(SlotCheck.make_name("herc_weapon/" + ref)), "%s: the row shows what is mounted" % pack)
+	row.grab_focus()
+	await _frames()
+	await _send_pad_button(JOY_BUTTON_X)
+	_expect(_slot().herc_loadout[0] == "", "%s: pad X removes it from the hardpoint" % pack)
+	_setup.state.apply_select_row("hardpoint:0")
+	await _frames(SETTLE_FRAMES)
+	var again: StoreRow = _store_rows().filter(func(r: StoreRow) -> bool: return r.entry.state != "not_allowed" and r.fit_reason == "").front()
+	var focused := _store_rows().find(again)
+	again.grab_focus()
+	await _frames()
+	await _send_action("ui_accept")
+	_expect(focused >= 0 and _slot().herc_loadout[0] != "", "%s: ui_accept on a store row mounts it by pad or keyboard" % pack)
+	var click := InputEventMouseButton.new()
+	click.button_index = MOUSE_BUTTON_RIGHT
+	click.pressed = true
+	(_loadout_rows().filter(func(r: LoadoutRow) -> bool: return r.row.key == "hardpoint:0").front() as LoadoutRow)._gui_input(click)
+	await _frames(SETTLE_FRAMES)
+	_expect(_slot().herc_loadout[0] == "", "%s: a right click removes it too" % pack)
+
+
+## With the "Fits slot" filter off, a weapon too big for the selected hardpoint is marked "does not fit".
+func _expect_unfit_marked(v: Dictionary, pack: String) -> void:
+	_setup.store._fits.button_pressed = false
+	await _frames(SETTLE_FRAMES)
+	var mask := int(WeaponFit.hardpoint_masks(v)[0])
+	var too_big := _store_rows().filter(func(r: StoreRow) -> bool: return not WeaponFit.fits_mask(Packs.weapon(UnlockId.ref_of(str(r.entry.id))), mask))
+	_expect(too_big.is_empty() or too_big.all(func(r: StoreRow) -> bool: return r.fit_reason != ""), "%s: a weapon too big for the hardpoint is marked does not fit (%d shown)" % [pack, too_big.size()])
+	_setup.store._fits.button_pressed = true
+	await _frames(SETTLE_FRAMES)
+
+
 func _check_garage_and_bot() -> void:
 	print("-- garage and bot cards:")
 	await _open({"mode": "campaign"}, "garage", 0)
@@ -576,6 +707,21 @@ func _take_shots() -> void:
 	await _shot_set("operator_narrow", NARROW_SIZE, _vs(), 0)
 	await _shot_set("operator_raid", DESKTOP_SIZE, {"mode": "extraction"}, 0)
 	await _shot_set("operator_garage", DESKTOP_SIZE, {"mode": "campaign"}, 0)
+	await _shot_components()
+
+
+## The vehicle side of a Starsiege Herc with component slots, slot 1 selected so the store lists the cloaks that fit it.
+func _shot_components() -> void:
+	for v in Packs.pilotable(["starsiege"]):
+		if HercMounts.has_slots(v):
+			await _open(_vs(), "operator_components", 4250, DESKTOP_SIZE, true)
+			_slot().apply_vehicle_defaults(str(v.id))
+			_setup.state.apply_side("vehicle")
+			_setup.state.apply_select_row("mount:0")
+			await _frames(40)
+			await _save("operator_components")
+			await _shut()
+			return
 
 
 func _shot_set(shot_name: String, size: Vector2, settings: Dictionary, credits: int) -> void:
@@ -583,6 +729,13 @@ func _shot_set(shot_name: String, size: Vector2, settings: Dictionary, credits: 
 	await _frames(40)
 	await _save(shot_name)
 	if size.x < Widgets.metric("narrow_width"):
+		_setup.state.apply_side("vehicle")
+		_setup.state.apply_select_row("hardpoint:0")
+		await _frames(20)
+		await _save(shot_name + "_vehicle")
+		_setup.apply_zone(1)
+		await _frames(20)
+		await _save(shot_name + "_vehicle_store")
 		for pane_index in [1, 2]:
 			_setup.apply_zone(pane_index)
 			await _frames(20)
@@ -593,6 +746,8 @@ func _shot_set(shot_name: String, size: Vector2, settings: Dictionary, credits: 
 		await _save(shot_name + "_skins")
 		for side in ["vehicle", "stash"]:
 			_setup.state.apply_side(side)
+			if side == "vehicle":
+				_setup.state.apply_select_row("hardpoint:0")
 			await _frames(30)
 			if _setup.state.side == side:
 				await _save("%s_%s" % [shot_name, side])

@@ -24,6 +24,7 @@ var _guard := SavedGuard.new()
 var _shots := ""
 var _tag := ""
 var _launcher: Launcher
+var _windowed := DisplayServer.get_name() != "headless"
 
 
 func _ready() -> void:
@@ -44,6 +45,7 @@ func _run() -> void:
 	_check_revalidate()
 	_check_results_award()
 	await _check_modes()
+	await _check_mode_picker()
 	await _check_client_view()
 	await _check_big_lobby()
 	await _check_narrow()
@@ -299,18 +301,23 @@ func _check_modes() -> void:
 			var shown := range(n).filter(func(i: int) -> bool: return ring.platforms[i].visible)
 			var empty := shown.filter(func(i: int) -> bool: return ring.make_model_height(i) <= 0.0)
 			_expect(shown.size() == mini(n, 3) and empty.is_empty(), "%s mode: the focus and both neighbours stand on their platforms (shown %s, empty %s)" % [ring_mode, shown, empty])
-			var facing := shown.map(func(i: int) -> float: return ring.make_facing_error(i))
-			_expect(facing.all(func(e: float) -> bool: return e >= 0.0 and e <= 10.0), "%s mode: every shown model faces the camera (degrees off: %s)" % [ring_mode, facing.map(func(e: float) -> String: return "%.1f" % e)])
+			if _windowed:   # the ring camera needs a window
+				var facing := shown.map(func(i: int) -> float: return ring.make_facing_error(i))
+				_expect(facing.all(func(e: float) -> bool: return e >= 0.0 and e <= 10.0), "%s mode: every shown model faces the camera (degrees off: %s)" % [ring_mode, facing.map(func(e: float) -> String: return "%.1f" % e)])
 			_expect(n < 4 or (ring.platforms[n - 1].visible and ring.platforms[1].visible), "%s mode: the first member's neighbours are the last and the second" % ring_mode)
-			var centre := ring.camera.unproject_position(ring.platforms[ring.focus].global_position + Vector3(0, 1.0, 0))
-			var width := float(ring.viewport.size.x)
-			_expect(absf(centre.x - width * 0.5) <= width * 0.05, "%s mode: the focused member stands in the stage's centre (%.0f of %.0f px)" % [ring_mode, centre.x, width])
-			var left := ring.camera.unproject_position(ring.platforms[posmod(ring.focus - 1, n)].global_position)
-			var right := ring.camera.unproject_position(ring.platforms[posmod(ring.focus + 1, n)].global_position)
-			_expect(n < 3 or absf((width * 0.5 - left.x) - (right.x - width * 0.5)) <= width * 0.05, "%s mode: the neighbours stand symmetric (%.0f / %.0f px)" % [ring_mode, left.x, right.x])
+			if _windowed:
+				var centre := ring.camera.unproject_position(ring.platforms[ring.focus].global_position + Vector3(0, 1.0, 0))
+				var width := float(ring.viewport.size.x)
+				_expect(absf(centre.x - width * 0.5) <= width * 0.05, "%s mode: the focused member stands in the stage's centre (%.0f of %.0f px)" % [ring_mode, centre.x, width])
+				var left := ring.camera.unproject_position(ring.platforms[posmod(ring.focus - 1, n)].global_position)
+				var right := ring.camera.unproject_position(ring.platforms[posmod(ring.focus + 1, n)].global_position)
+				_expect(n < 3 or absf((width * 0.5 - left.x) - (right.x - width * 0.5)) <= width * 0.05, "%s mode: the neighbours stand symmetric (%.0f / %.0f px)" % [ring_mode, left.x, right.x])
 		teams.carousel.apply_mode("infantry")
 		await _frames(20)
-		await _check_orbit(teams.carousel)
+		if _windowed:
+			await _check_orbit(teams.carousel)
+		else:
+			print("  (headless: ring camera, facing and orbit assertions skipped; run windowed)")
 		_expect(teams.carousel.prev_button.get_parent() == teams.carousel.ring and teams.carousel.next_button.focus_mode == Control.FOCUS_ALL,
 			"the turn arrows sit on the stage and take focus")
 	var skirmish := await _open_lobby(GameOptionsModel.KIND_VERSUS, true, {InfantryBots.CONFIG_KEY: 3})
@@ -326,6 +333,82 @@ func _check_modes() -> void:
 	await _shot("lobby_campaign_desktop")
 	var coop := await _open_lobby(GameOptionsModel.KIND_CAMPAIGN)
 	_expect(coop.briefing.visible and LobbyWingmen.make_cards(Net.settings).is_empty(), "a co-op campaign: briefing, no wingmen")
+
+
+# ------------------------------------------------------------------ the host's mode picker
+
+## A hosted lobby (a real LAN host: the picker is the host's way to every mode): picking each mode in Game Options shows that
+## mode's options (map, game mode, campaign buttons, Game options sheet rows) and leaves a lobby the host can start.
+func _check_mode_picker() -> void:
+	print("the host's mode picker:")
+	_close_lobby()
+	Net.password = ""
+	var err := Net.host()
+	if err != OK:
+		_expect(false, "the LAN host opened (port %d, error %d)" % [Net.GAME_PORT, err])
+		return
+	Net.set_settings(GameOptionsModel.make_default_settings(GameOptionsModel.KIND_VERSUS))
+	Net.set_my_info("team", Net.make_join_team())
+	Net.set_my_info("vehicle", MatchFlow.DEFAULT_VEHICLE)
+	_launcher = load(LAUNCHER).instantiate()
+	get_tree().root.add_child(_launcher)
+	await _frames()
+	var lobby := _launcher.go("lobby", {}) as LobbyScreen
+	await _frames()
+	var picker := lobby.options.controls.get("mode") as OptionButton
+	var modes := MatchFlow.make_offered_modes()
+	_expect(picker != null and picker.item_count == modes.size() and modes.has("campaign") and modes.has("coop") and modes.has("vs"),
+		"the picker offers versus, co-op, the co-op campaign%s (%d modes)" % [" and the raid" if modes.has("extraction") else "", modes.size()])
+	for kind in modes:
+		picker = lobby.options.controls.get("mode") as OptionButton
+		picker.select(modes.find(kind))
+		picker.item_selected.emit(modes.find(kind))
+		await _frames()
+		_expect(str(Net.settings.mode) == kind, "%s: picked" % kind)
+		_expect(lobby.options.controls.has("options"), "%s: Game options..." % kind)
+		_expect(lobby.options.controls.has("map") != (kind == "campaign"), "%s: the map picker is %s" % [kind, "hidden" if kind == "campaign" else "shown"])
+		_expect(lobby.options.controls.has("game_mode") == (kind == "vs"), "%s: the game mode picker only for versus" % kind)
+		_expect(lobby.options.controls.has("save") == (kind == "campaign"), "%s: Save game / Hangar only for the campaign" % kind)
+		_expect((kind == "campaign") == Session.has_campaign(), "%s: the campaign session %s" % [kind, "runs" if kind == "campaign" else "is set aside"])
+		_expect((kind == "campaign") == lobby.briefing.visible, "%s: the briefing %s" % [kind, "shows" if kind == "campaign" else "is hidden"])
+		await _check_sheet_rows(lobby, kind)
+		_expect(MatchFlow.make_start_block_reason() == "" or Net.make_unready_names().size() > 0, "%s: nothing but readiness blocks the start" % kind)
+		await _shot("lobby_picker_%s" % kind)
+	await _check_versus_game_modes(lobby)
+	_close_lobby()
+
+
+## The Game options sheet of the lobby's mode shows the rows that mode uses (opponents and bots cap, a raid's relations ...).
+func _check_sheet_rows(lobby: LobbyScreen, kind: String) -> void:
+	lobby.sheets.open_options()
+	await _frames()
+	var sheet: GameOptionsSheet = lobby.get_children().filter(func(c: Node) -> bool: return c is GameOptionsSheet).back()
+	var campaign := kind == "campaign"
+	_expect(sheet.rows.ai.visible != campaign and sheet.rows.max_bots.visible != campaign, "%s: opponents and Max bots %s" % [kind, "hidden" if campaign else "shown"])
+	_expect(sheet.rows.relations.visible == (kind == "extraction"), "%s: Faction relations only for a raid" % kind)
+	_expect(sheet.rows.squads.visible == (kind == "extraction"), "%s: Squads only for a raid" % kind)
+	_expect(sheet.rows.score.visible == (kind in ["vs", "coop"]), "%s: the kill / score limit" % kind)
+	sheet.close()
+	await _frames()
+
+
+## Versus: every game mode the map offers can be picked, and a team mode adds the team controls.
+func _check_versus_game_modes(lobby: LobbyScreen) -> void:
+	var picker := lobby.options.controls.get("mode") as OptionButton
+	picker.select(MatchFlow.make_offered_modes().find("vs"))
+	picker.item_selected.emit(MatchFlow.make_offered_modes().find("vs"))
+	await _frames()
+	var ids := GameOptionsModel.make_game_modes(Net.settings).map(func(m: Dictionary) -> String: return str(m.id))
+	_expect(ids.size() >= 2, "versus offers several game modes (%s)" % [ids])
+	for id in ids:
+		var game_picker := lobby.options.controls.get("game_mode") as OptionButton
+		game_picker.select(ids.find(id))
+		game_picker.item_selected.emit(ids.find(id))
+		await _frames()
+		_expect(str(Net.settings.game_mode) == id, "game mode %s picked" % id)
+		_expect(lobby.options.controls.has("teams") == LobbySettings.is_team_match(Net.settings), "game mode %s: team controls match its teams" % id)
+		var cfg := MatchFlow.make_match_config(Net.settings, Packs.pilotable())
+		_expect(str(cfg.get("game_mode", "")) == id, "game mode %s reaches the battle config" % id)
 
 
 ## Right-drag orbits the view round the focused member, the light follows to the viewer's side, a turn of the ring glides

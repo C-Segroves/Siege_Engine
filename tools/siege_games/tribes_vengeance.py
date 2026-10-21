@@ -12,6 +12,7 @@ from siege_games import Step
 
 GAME = {
     'game': 'tribes_vengeance', 'pack': 'tribes_v', 'name': 'Tribes: Vengeance', 'discs': 1, 'supported': True,
+    'main_exe': {'work': 'tribes_vengeance/Mojo.exe'},   # the engine exe, Program/Bin/Mojo.exe (tools/disc_version.py)
     'pack_json': {'name': 'Tribes: Vengeance', 'engine': 'unreal_2_5', 'unit_scale': 1.0, 'world_metres_per_unit': 1.0,
                   'placeholder_shapes': True, 'era': 5},
 }
@@ -25,6 +26,25 @@ def identify(_disc):
 def identify_zip(names):
     lower = {n.lower() for n in names}
     return 1 if all(m in lower for m in ZIP_MEMBERS) else 0
+
+
+def _exe(ctx):
+    """Program/Bin/Mojo.exe (the game's engine executable) into the work folder, for the release record."""
+    import shutil
+    import tempfile
+    import tv_unpack
+    scratch = tempfile.mkdtemp(prefix='tv')
+    try:
+        shutil.copy(tv_unpack.unpack_file(ctx.disc(1).path, scratch, 'Mojo.exe'), _exe_path(ctx))
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def _exe_path(ctx):
+    import os
+    path = ctx.work_path('tribes_vengeance', 'Mojo.exe')
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    return path
 
 
 def _import(ctx):
@@ -45,4 +65,5 @@ def _import(ctx):
 
 
 def steps(_ctx):
-    return [Step('campaign', 'Unpacking and converting Tribes: Vengeance...', 1500, _import)]
+    return [Step('exe', 'Reading the game executable...', 100, _exe),
+            Step('campaign', 'Unpacking and converting Tribes: Vengeance...', 1500, _import)]

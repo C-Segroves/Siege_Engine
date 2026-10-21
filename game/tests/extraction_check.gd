@@ -22,6 +22,7 @@ const SavedCampaignGuard := preload("res://tests/saved_campaign_guard.gd")
 var _pilot := "QA Extraction %d" % OS.get_process_id()
 const MAP := "tribes2:Katabatic"
 const SEED := 4242
+const SHOP_FUNDS := 5000
 const LOOT_ROLLS := 40
 const SETTLE_FRAMES := 20
 const MATE_PEER := 2
@@ -183,7 +184,8 @@ func _check_inventory_limits() -> void:
 func _check_shop_and_profile() -> void:
 	print("2 shop and profile:")
 	var p := ExtractionProfile.load_for(_pilot)
-	_expect(p.money == int(ExtractionRules.data().start_money) and not p.kit.is_empty(), "a new profile: start money and a starter kit")
+	_expect(p.money == EconomyRules.start_credits() and not p.kit.is_empty(), "a new profile: start money and a starter kit")
+	p.money += SHOP_FUNDS   # the start credits do not reach a chaingun and a load of ammunition
 	var price := ExtractionShop.make_buy_price("weapon/tribes:CHAINGUN")
 	var before := p.money
 	_expect(ExtractionShop.apply_buy(p, "weapon/tribes:CHAINGUN") and p.money == before - price

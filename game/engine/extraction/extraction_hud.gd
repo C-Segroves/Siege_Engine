@@ -26,7 +26,7 @@ const BANNER_FONT_SIZE := 40
 const MARKER_SIZE := 6.0
 const CACHE_MARKER_RANGE := 90.0
 const STATE_TEXTS := {"called": "inbound in", "flying": "transport on approach", "landed": "LANDED - board it",
-	"open": "OPEN - hold inside", "departing": "lifting off"}
+	"open": "OPEN - hold inside", "departing": "lifting off", "closed": "CLOSED"}
 
 var director: ExtractionDirector
 var font: Font
@@ -148,7 +148,8 @@ func _draw_markers() -> void:
 	if cam == null or s == null:
 		return
 	for i in director.zones.size():
-		_draw_marker(cam, director.zones[i] + Vector3.UP * 2.0, "EXFIL %s" % ExtractionTransports.make_zone_name(i), ZONE_COLOR, s)
+		var closed := director.is_zone_closed(i)
+		_draw_marker(cam, director.zones[i] + Vector3.UP * 2.0, "EXFIL %s%s" % [ExtractionTransports.make_zone_name(i), " CLOSED" if closed else ""], CONTACT_COLOR if closed else ZONE_COLOR, s)
 	for m in director.tasks.make_markers():
 		_draw_marker(cam, m.pos + Vector3.UP * 3.0, "TASK: %s" % str(m.label).to_upper(), TASK_COLOR, s)
 	for m in director.callins.make_markers():

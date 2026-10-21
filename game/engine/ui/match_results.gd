@@ -8,7 +8,7 @@ extends ScreenRouter
 ## On LAN it follows the session: a match the host starts begins here too, and the host leaving
 ## returns to the front end with that message.
 ##   MatchResults.open_in_place_of(battle, summary)
-## A LAN pilot is paid the credits the match earned him (ResultsAward, EconomyNet) before the page opens; `award` holds
+## A LAN pilot is paid the credits the host's summary awards him (ResultsAward, EconomyNet) before the page opens; `award` holds
 ## what he was paid ({} when nothing) and `credits_after` his new balance.
 
 const SCREENS := {"results": "res://engine/ui/screens/results_screen.gd"}
@@ -44,8 +44,7 @@ func make_screen_paths() -> Dictionary:
 func pay_award() -> void:
 	if not Net.is_online() or Net.dedicated:
 		return
-	var picked: Array = (Net.roster.get(Net.my_id(), {}) as Dictionary).get("goals", [])
-	award = ResultsAward.make(summary, Net.settings, Net.player_name, picked, bool(Session.last_result.get("success", false)))
+	award = ResultsAward.for_pilot(summary, Net.player_name)   # the host made it (BattleSummary); this machine only pays it
 	if award.is_empty():
 		return
 	var economy := EconomyNet.new()

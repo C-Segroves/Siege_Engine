@@ -56,3 +56,9 @@ site, spread so every region has one within reach.
 - Patrols travel between a faction's sites along roads/passes; the horde raids the weakest nearby site.
 - Flag theft triggers the existing flag-response squad.
 - All numbers live in data (map JSON / extraction_rules.json), not code.
+
+## Hidden event: the Cybrid siege
+
+Three buried ark beacon relays (Prow Fortress, Chapel Fortress, Crater Docks), woken in the right order, call a relentless
+Cybrid siege against everyone; the exfils close and a safe area shrinks until nothing survives. Radio fragments hint the
+order. See `docs/design/cybrid_siege.md`.

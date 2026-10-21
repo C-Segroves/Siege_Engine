@@ -59,9 +59,12 @@ engine's physics rate follow the game's net profile, 30 Hz for Earthsiege/Starsi
 ## 3. Run it by hand
 
 ```
+cp deploy/server_override.cfg game/override.cfg    # Jolt physics for the server (the installer and the image do this)
 godot --headless --audio-driver Dummy --path game res://server/dedicated_server.tscn -- --server \
       --config=server.json --data_dir=/srv/siege/gamedata
 ```
+`game/override.cfg` is gitignored and only the server runs with it; without it the server runs on GodotPhysics (the same
+behaviour, more cost per soldier, docs/DEDICATED_SERVER_SCALING.md section 8.5.4).
 It prints `SERVER READY ...`. Check `curl http://127.0.0.1:47702/matches`.
 
 ## 4. LAN profile

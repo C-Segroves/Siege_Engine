@@ -45,6 +45,8 @@ var pilot: PlayerPilot
 var infantry: BattleInfantry
 var bot_sleep: BotSleep
 var occupancy: OccupancyDirector
+## The host's per-pilot match statistics (assists, vehicle kills, damage ...) behind the results and the credits award.
+var stats := BattleStats.new(self)
 ## A client's far bots: nodes dropped while FAR, drawn as proxies (null on a host and in single player).
 var far_units: BattleFarUnits
 ## The extraction raid (config mode "extraction"; null in other modes).
@@ -244,6 +246,8 @@ func build_unit(spec: Dictionary) -> Herc:
 		BattleInfantry.apply_parked(h)
 	occupancy.register(h, spec)
 	h.destroyed.connect(_rules.on_destroyed)
+	if multiplayer.is_server():
+		stats.watch(h)
 	if h is Infantry and multiplayer.is_server():
 		h.destroyed.connect(func(s: Herc, _killer: Node) -> void: infantry.on_soldier_destroyed(s as Infantry))
 	if spawner.is_local_player(h, spec):
@@ -346,6 +350,8 @@ func _physics_process(delta: float) -> void:
 	if multiplayer.is_server():
 		_rules.update(delta)
 		infantry.update(delta)
+		if not _over:
+			stats.update(delta)
 
 
 # ------------------------------------------------------------------ effects

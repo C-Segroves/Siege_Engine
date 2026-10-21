@@ -1,12 +1,20 @@
 extends RoutedScreen
-## Library home: import discs, switch each game's content on/off, soundtracks, and play: the campaigns
-## (Continue / New campaign / Load game open the launcher's campaign pages), Host / Join a LAN game, co-op (vs
-## Cybrids, campaign), skirmish and extraction (the standard lobby, offline), the original Earthsiege.
+## Library home, in three tabs (TabPages). Play: the campaigns (Continue / New campaign / Load game open the launcher's
+## campaign pages), Host LAN game (the standard lobby: the host picks co-op, the campaign, skirmish, training, extraction or
+## any versus game mode there; alone it is a solo game against bots) and Join. Your library: import discs, switch each
+## game's content on/off, and soundtracks. Options & tools: the shape viewer, Options, Tested game versions. The tab last
+## shown is kept while the app runs; with nothing imported the library tab opens first.
 
 const SHAPE_VIEWER := "res://tools/shape_viewer.tscn"
 const PACK_GRID_COLUMNS := 3
 const FILE_DIALOG_RATIO := 0.7
 const PERCENT := 100.0
+const TAB_PLAY := "play"
+const TAB_LIBRARY := "library"
+const TAB_TOOLS := "tools"
+const HOST_TEXT := "Host LAN game"
+
+static var _last_tab := ""
 
 var _bar: ProgressBar
 
@@ -16,13 +24,33 @@ func open(_args: Dictionary) -> void:
 	MenuMusic.play_app_hub()
 	set_back("Quit", _ask_quit)
 	var can_play := not Packs.pilotable().is_empty()
-	set_primary("Arena / versus", func() -> void: _library().open_launcher("arena")).disabled = not can_play
-	_add_import_section()
-	_add_packs_section()
-	_add_soundtrack_section()
-	_add_campaign_section()
-	_add_play_section(can_play)
+	var primary := set_primary(HOST_TEXT, func() -> void: _library().open_launcher("host"))
+	primary.disabled = not can_play or WebPlatform.is_active()
+	var tabs := TabPages.new()
+	content.add_child(tabs)
+	var play := tabs.add_page(TAB_PLAY, "Play")
+	var library := tabs.add_page(TAB_LIBRARY, "Your library")
+	var tools := tabs.add_page(TAB_TOOLS, "Options & tools")
+	_add_campaign_section(play)
+	_add_play_section(play, can_play)
+	_add_import_section(library)
+	_add_packs_section(library)
+	_add_soundtrack_section(library)
+	_add_tools_section(tools)
+	tabs.tab_changed.connect(func(id: String) -> void: _last_tab = id)
+	tabs.apply_tab(make_start_tab())
 	_follow_imports()
+
+
+## The tab to open on: automation's `--tab=play|library|tools`, else the last one shown, else Play, or Your library while
+## nothing is imported.
+static func make_start_tab() -> String:
+	var asked := ScreenRouter.arg_value("tab")
+	if asked != "":
+		return asked
+	if _last_tab != "":
+		return _last_tab
+	return TAB_LIBRARY if Packs.packs.is_empty() else TAB_PLAY
 
 
 func _library() -> Library:
@@ -35,8 +63,8 @@ func _ask_quit() -> void:
 
 # ------------------------------------------------------------------ import
 
-func _add_import_section() -> void:
-	content.add_child(Widgets.section("Import"))
+func _add_import_section(page: VBoxContainer) -> void:
+	page.add_child(Widgets.section("Import"))
 	var pick := Widgets.button("Import disc (.iso) ...", _pick_discs)
 	pick.disabled = not ImportQueue.is_available()
 	var hint := "Tip: drag .iso files onto this window. Multi-disc games: import all discs together."
@@ -44,10 +72,10 @@ func _add_import_section() -> void:
 		hint = WebPlatform.NO_IMPORT_TEXT
 	elif not ImportQueue.is_available():
 		hint = "The importer was not found next to the app."
-	content.add_child(Widgets.row([pick, Widgets.paragraph(hint, "DimLabel")]))
+	page.add_child(Widgets.row([pick, Widgets.paragraph(hint, "DimLabel")]))
 	_bar = ProgressBar.new()
 	_bar.visible = _library().imports.is_busy()
-	content.add_child(_bar)
+	page.add_child(_bar)
 
 
 func _follow_imports() -> void:
@@ -85,16 +113,16 @@ func _make_file_dialog(mode: FileDialog.FileMode) -> FileDialog:
 
 # ------------------------------------------------------------------ packs
 
-func _add_packs_section() -> void:
+func _add_packs_section(page: VBoxContainer) -> void:
 	var packs := Packs.packs.keys()
-	var heading := "Your library" if not packs.is_empty() else "Your library is empty - import a disc to begin."
-	content.add_child(Widgets.section(heading))
+	var heading := "Games" if not packs.is_empty() else "Your library is empty - import a disc to begin."
+	page.add_child(Widgets.section(heading))
 	for p in packs:
-		_add_pack_card(p)
+		_add_pack_card(page, p)
 
 
-func _add_pack_card(pack: String) -> void:
-	var card := Widgets.card(content)
+func _add_pack_card(page: VBoxContainer, pack: String) -> void:
+	var card := Widgets.card(page)
 	var title := Widgets.label("%s   (%s)" % [Packs.pack_name(pack), pack])
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var remove := Widgets.small_button("Remove", func() -> void: _ask_remove(pack), Widgets.DANGER)
@@ -135,10 +163,10 @@ func _remove(pack: String) -> void:
 
 # ------------------------------------------------------------------ soundtracks
 
-func _add_soundtrack_section() -> void:
-	content.add_child(Widgets.section("Soundtracks"))
+func _add_soundtrack_section(page: VBoxContainer) -> void:
+	page.add_child(Widgets.section("Soundtracks"))
 	var flow := HFlowContainer.new()
-	content.add_child(flow)
+	page.add_child(flow)
 	var add := Widgets.small_button("Add soundtrack folder ...", _pick_soundtrack_folder)
 	add.disabled = not ImportQueue.is_available()
 	flow.add_child(add)
@@ -147,7 +175,7 @@ func _add_soundtrack_section() -> void:
 		var text := "%s (%d)" % [all[p].name, all[p].tracks.size()]
 		flow.add_child(Widgets.small_button(text, func() -> void: router.go("jukebox", {"pack": p})))
 	if all.is_empty():
-		content.add_child(Widgets.label("No music yet - add a folder of ripped soundtrack files (MP3/FLAC/WAV).", "DimLabel"))
+		page.add_child(Widgets.label("No music yet - add a folder of ripped soundtrack files (MP3/FLAC/WAV).", "DimLabel"))
 
 
 func _pick_soundtrack_folder() -> void:
@@ -158,50 +186,46 @@ func _pick_soundtrack_folder() -> void:
 
 # ------------------------------------------------------------------ play
 
-func _add_campaign_section() -> void:
-	content.add_child(Widgets.section("Campaign"))
+func _add_campaign_section(page: VBoxContainer) -> void:
+	page.add_child(Widgets.section("Campaign"))
 	var newest := SaveGames.find_newest_continuable()
 	if not newest.is_empty():
 		var cont := Widgets.button("Continue campaign", func() -> void: _library().open_launcher("continue"))
 		cont.tooltip_text = SaveGames.make_row_text(newest)
-		content.add_child(cont)
+		page.add_child(cont)
 	var any_campaign := MatchFlow.make_new_campaign_choices().any(func(c: Dictionary) -> bool: return bool(c.playable))
 	var new_campaign := Widgets.button("New campaign", func() -> void: _library().open_launcher("new_campaign"))
 	new_campaign.disabled = not any_campaign
-	content.add_child(new_campaign)
-	content.add_child(Widgets.button("Load game", func() -> void: _library().open_launcher("load")))
+	page.add_child(new_campaign)
+	page.add_child(Widgets.button("Load game", func() -> void: _library().open_launcher("load")))
 
 
-func _add_play_section(can_play: bool) -> void:
-	content.add_child(Widgets.section("Play"))
-	var host := Widgets.button("Host LAN game", func() -> void: _library().open_launcher("host"))
+## Host LAN game opens the standard lobby, where the host picks the mode (every versus game mode, co-op, the co-op campaign,
+## extraction, training), the map and the bots; with nobody joining it is a solo game against bots. Join opens the LAN browser.
+func _add_play_section(page: VBoxContainer, can_play: bool) -> void:
+	page.add_child(Widgets.section("Play"))
+	var host := Widgets.button(HOST_TEXT, func() -> void: _library().open_launcher("host"))
 	host.disabled = not can_play
-	content.add_child(host)
+	page.add_child(host)
 	var join := Widgets.button("Join online game" if WebPlatform.is_active() else "Join LAN game", func() -> void: _library().open_launcher(Launcher.JOIN_START_MODE))
 	join.disabled = not can_play
-	content.add_child(join)
-	var coop := Widgets.button("Co-op missions (LAN)", func() -> void: _library().open_launcher("coop"))
-	coop.disabled = not can_play
-	content.add_child(coop)
-	var coop_campaign := Widgets.button("Co-op campaign (LAN)", func() -> void: _library().open_launcher("coop_campaign"))
-	coop_campaign.disabled = not can_play
-	content.add_child(coop_campaign)
+	page.add_child(join)
 	if WebPlatform.is_active():
-		_disable_lan_buttons([host, coop, coop_campaign])
-	var more := Widgets.button("Skirmish, training, extraction ...", func() -> void: _library().open_launcher(Launcher.MENU_START_MODE))
-	more.disabled = not can_play
-	content.add_child(more)
+		_disable_lan_buttons(page, [host])
+
+
+func _add_tools_section(page: VBoxContainer) -> void:
+	page.add_child(Widgets.section("Tools"))
 	var viewer := Widgets.button("Shape viewer", func() -> void: get_tree().change_scene_to_file(SHAPE_VIEWER))
 	viewer.disabled = Packs.packs.is_empty()
-	content.add_child(viewer)
-	content.add_child(Widgets.button("Options", func() -> void: router.go("options", {"home": "home"})))
-	content.add_child(Widgets.button("Tested game versions", func() -> void: router.go("versions")))
-
+	page.add_child(viewer)
+	page.add_child(Widgets.button("Options", func() -> void: router.go("options", {"home": "home"})))
+	page.add_child(Widgets.button("Tested game versions", func() -> void: router.go("versions")))
 
 
 ## Browser build: no LAN play (WebPlatform); says why next to the buttons.
-func _disable_lan_buttons(buttons: Array) -> void:
+func _disable_lan_buttons(page: VBoxContainer, buttons: Array) -> void:
 	for b: Button in buttons:
 		b.disabled = true
 		b.tooltip_text = WebPlatform.NO_LAN_TEXT
-	content.add_child(Widgets.paragraph(WebPlatform.NO_LAN_TEXT, "DimLabel"))
+	page.add_child(Widgets.paragraph(WebPlatform.NO_LAN_TEXT, "DimLabel"))

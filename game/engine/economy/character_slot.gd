@@ -19,6 +19,8 @@ var vehicle := ""
 var herc_skin := ""
 var infantry := {"weapons": [], "ammo": {}, "gear": {}, "pack": ""}
 var herc_loadout: Array = []
+## The component per free slot of a Starsiege Herc (HercMounts: 0 factory fit, -1 emptied, else a component id).
+var herc_mounts: Array = []
 
 
 ## A new slot `i`: the free armour, its default look and kit, the starter vehicle.
@@ -66,6 +68,7 @@ func apply_vehicle_defaults(vehicle_id: String) -> void:
 	vehicle = vehicle_id
 	herc_skin = ""
 	herc_loadout = []
+	herc_mounts = HercMounts.make_sanitized(Packs.vehicle(vehicle_id), [])
 	var v := Packs.vehicle(vehicle_id)
 	if not v.is_empty():
 		for w in Packs.default_loadout(v):
@@ -83,7 +86,7 @@ func is_complete() -> bool:
 ## The roster keys of the build `ctx` allows (the legacy keys the battle reads, plus the compact "slot" snapshot).
 func make_roster_fields(ctx: LoadoutContext) -> Dictionary:
 	var built: CharacterSlot = make_resolved(ctx, ctx.unlocks).slot
-	return {"vehicle": built.vehicle, "loadout": built.herc_loadout.duplicate(), PlayerProfile.ARMOR_KEY: built.armor,
+	return {"vehicle": built.vehicle, "loadout": built.herc_loadout.duplicate(), "mounts": built.make_mounts(), PlayerProfile.ARMOR_KEY: built.armor,
 		PlayerProfile.BODY_KEY: built.body, PlayerProfile.SKIN_KEY: built.skin, PlayerProfile.HERC_SKIN_KEY: built.herc_skin,
 		"slot": built.make_roster_snapshot()}
 
@@ -92,7 +95,13 @@ func make_roster_fields(ctx: LoadoutContext) -> Dictionary:
 func make_roster_snapshot() -> Dictionary:
 	return {"i": index, "a": armor, "b": body, "s": skin, "v": vehicle, "hs": herc_skin,
 		"w": (infantry.weapons as Array).duplicate(), "am": (infantry.ammo as Dictionary).duplicate(),
-		"g": (infantry.gear as Dictionary).duplicate(), "p": str(infantry.pack), "hl": herc_loadout.duplicate()}
+		"g": (infantry.gear as Dictionary).duplicate(), "p": str(infantry.pack), "hl": herc_loadout.duplicate(),
+		"hm": make_mounts()}
+
+
+## The component slots of the preferred vehicle filled from `herc_mounts` (factory fit where nothing was chosen).
+func make_mounts() -> Array:
+	return HercMounts.make_sanitized(Packs.vehicle(vehicle), herc_mounts)
 
 
 static func make_from_snapshot(d: Dictionary) -> CharacterSlot:
@@ -113,6 +122,7 @@ func apply_snapshot(d: Dictionary) -> void:
 	infantry = {"weapons": make_strings(d.get("w", [])), "ammo": make_counts(d.get("am", {})), "gear": make_counts(d.get("g", {})),
 		"pack": str(d.get("p", ""))}
 	herc_loadout = make_strings(d.get("hl", []))
+	herc_mounts = make_ints(d.get("hm", []))
 
 
 ## What `ctx` forbids or the operator does not own: [{part, id, text}]. `part` names the slot field.
@@ -138,7 +148,7 @@ func to_dict() -> Dictionary:
 	return {"index": index, "label": label, "pack": pack, "armor": armor, "body": body, "skin": skin, "vehicle": vehicle,
 		"herc_skin": herc_skin, "infantry": {"weapons": (infantry.weapons as Array).duplicate(),
 		"ammo": (infantry.ammo as Dictionary).duplicate(), "gear": (infantry.gear as Dictionary).duplicate(),
-		"pack": str(infantry.pack)}, "herc_loadout": herc_loadout.duplicate()}
+		"pack": str(infantry.pack)}, "herc_loadout": herc_loadout.duplicate(), "herc_mounts": herc_mounts.duplicate()}
 
 
 func apply_dict(d: Dictionary) -> void:
@@ -154,6 +164,7 @@ func apply_dict(d: Dictionary) -> void:
 	infantry = {"weapons": make_strings(inf.get("weapons", [])), "ammo": make_counts(inf.get("ammo", {})),
 		"gear": make_counts(inf.get("gear", {})), "pack": str(inf.get("pack", ""))}
 	herc_loadout = make_strings(d.get("herc_loadout", []))
+	herc_mounts = make_ints(d.get("herc_mounts", []))
 
 
 ## JSON arrays hold nulls and numbers where strings were saved: always strings.
@@ -162,6 +173,15 @@ static func make_strings(list: Variant) -> Array:
 	if list is Array:
 		for x in list:
 			out.append(str(x) if x != null else "")
+	return out
+
+
+## JSON numbers come back as floats: component ids are ints.
+static func make_ints(list: Variant) -> Array:
+	var out := []
+	if list is Array:
+		for x in list:
+			out.append(int(x) if x != null else 0)
 	return out
 
 

@@ -11,6 +11,14 @@ const STEP := 1.0 / 30.0
 const RUN_STEPS := 60
 const WALL_AT := 12.0
 const COST_STEPS := 1000
+const RAMP_ANGLE := deg_to_rad(40.0)
+## Steeper than he can stand on (the armour's floor angle): he must skid down it, not fall through it.
+const STEEP_ANGLE := deg_to_rad(65.0)
+const STEEP_SPEED := 8.0
+const RAMP_LIFT := 60.0
+const RAMP_RUN_SPEED := 30.0
+## How far above the slope he starts: closer than the slope climbs in one step, so the old probe began underneath it.
+const RAMP_SKIM := 0.2
 
 var _failures := 0
 var _battle: Battle
@@ -23,6 +31,8 @@ func _ready() -> void:
 	_check_follows_ground()
 	await _check_wall()
 	await _check_jump_and_landing()
+	await _check_fast_fall_onto_slope(RAMP_ANGLE, RAMP_RUN_SPEED)
+	await _check_fast_fall_onto_slope(STEEP_ANGLE, STEEP_SPEED)
 	await _check_promotion()
 	_report_cost()
 	print("infantry_cheap_step_check: %s (%d failures)" % ["OK" if _failures == 0 else "FAILED", _failures])
@@ -121,6 +131,40 @@ func _check_jump_and_landing() -> void:
 	_expect(peak > base + 0.8, "he rose %.1f m" % (peak - base))
 	_expect(_soldier.cheap_floor and absf(_ground_offset()) < 0.35, "he landed on the ground")
 	await _check_fall_damage()
+
+
+## A soldier skiing fast through the air into a 40 degree slope lands on it instead of passing through the terrain and
+## falling out of the world (Varuna's Fall: the ray down started only PROBE_UP above his feet).
+func _check_fast_fall_onto_slope(angle: float, speed: float) -> void:
+	print("fall onto a %d degree slope at %.0f m/s:" % [rad_to_deg(angle), speed])
+	_place(Vector3(250.0, 0.0, 250.0))
+	var centre := _soldier.global_position + Vector3(0.0, RAMP_LIFT, 0.0)
+	var ramp := StaticBody3D.new()
+	var box := CollisionShape3D.new()
+	var shape := BoxShape3D.new()
+	shape.size = Vector3(120.0, 2.0, 40.0)
+	box.shape = shape
+	ramp.add_child(box)
+	_battle.add_child(ramp)
+	ramp.global_position = centre
+	ramp.rotation.z = angle
+	await get_tree().physics_frame
+	var start := centre + Vector3(-20.0, 0.0, 0.0)
+	start.y = _ramp_surface(centre, start.x, angle) + RAMP_SKIM
+	_soldier.global_position = start
+	_soldier.cheap_floor = false
+	_soldier.velocity = Vector3(speed, 0.0, 0.0)
+	var lowest := INF
+	for i in RUN_STEPS:
+		_step(1)
+		lowest = minf(lowest, _soldier.global_position.y - _ramp_surface(centre, _soldier.global_position.x, angle))
+	_expect(lowest > -0.5, "he never sank below the slope (lowest %.2f m above it)" % lowest)
+	_expect(_soldier.alive, "and is still alive")
+	ramp.queue_free()
+
+
+static func _ramp_surface(centre: Vector3, x: float, angle: float) -> float:
+	return centre.y + tan(angle) * (x - centre.x) + 1.0 / cos(angle)
 
 
 ## Dropped from high above he lands hard: the armour's fall rule hurts him as move_and_slide would.

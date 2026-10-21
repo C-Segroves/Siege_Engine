@@ -2,7 +2,7 @@ class_name BriefingSource
 extends RefCounted
 ## What the lobby's right pane shows (docs/design/lobby_loadout_economy.md section 5, Options A and B): the task list of
 ## goals (every mode with pay or a raid), or the campaign briefing (mission heading, text, objectives, the campaign's
-## movies and talking heads, the mission map when there is one). The briefing of a campaign host comes from its Session;
+## movies and talking heads, the mission map, or a note that there is none). The briefing of a campaign host comes from its Session;
 ## a co-op client reads the copy the host published in the lobby settings (MatchFlow.make_campaign_offer).
 
 const KIND_GOALS := "goals"
@@ -27,7 +27,7 @@ static func make_briefing(settings: Dictionary) -> Dictionary:
 		var texts := Session.briefing()
 		return {"heading": MatchFlow.make_mission_heading(), "text": str(texts.get("briefing", "")),
 			"objectives": _make_strings(texts.get("objectives", [])), "movies": make_movies(), "talks": make_talks(),
-			"map": make_map_texture()}
+			"map": make_map_texture(Session.current_mission())}
 	var offer: Dictionary = settings.get(MatchFlow.CAMPAIGN_OFFER, {}) if settings.get(MatchFlow.CAMPAIGN_OFFER) is Dictionary else {}
 	var shown: Dictionary = offer.get("briefing", {}) if offer.get("briefing") is Dictionary else {}
 	return {"heading": str(offer.get("heading", "")), "text": str(shown.get("text", "")),
@@ -43,10 +43,10 @@ static func make_talks() -> Array:
 	return CampaignPresentation.make_talks(Session.campaign, CampaignPresentation.MOMENT_BRIEFING, {"mission": Session.current_mission()})
 
 
-## The top-down picture of the mission's area. A lobby has no battle world to draw it from (CommandMapBackground needs
-## one), so there is none yet: the pane leaves the map out until a mission carries a preview image.
-static func make_map_texture() -> Texture2D:
-	return null
+## The top-down picture of the mission's area, null when it has none (BriefingMap draws it from the map file; a lobby
+## has no battle world for CommandMapBackground).
+static func make_map_texture(mission: Dictionary) -> Texture2D:
+	return BriefingMap.make_texture(mission)
 
 
 static func _make_strings(list: Variant) -> Array:

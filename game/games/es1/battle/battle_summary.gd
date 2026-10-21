@@ -4,7 +4,8 @@ extends RefCounted
 ## peer: the headline, the winner, the time, per-pilot kills / deaths / score, a mission's salvage
 ## and whether a rematch is offered.
 ##   {mode, headline, winner, text, seconds, pilots: [{name, vehicle, team, kills, deaths, score,
-##    player}], salvage: [lines], losses: [names], campaign, aborted, rematch, rematch_config, battle_scene}
+##    player, + the stats of BattleStats: bot_kills, vehicle_kills, assists, damage, seconds_alive, objectives,
+##    flag_captures, extractions, survived}], awards: {pilot name: credits award}, salvage: [lines], losses: [names], campaign, aborted, rematch, rematch_config, battle_scene}
 ## Missions list only the pilots (the mission's own units are counted as "enemies destroyed").
 ## A campaign mission's salvage lists the tonnage ("Salvage: 42 t") and the recovered weapons; its
 ## losses are the garage Hercs (the player's, wingmen) destroyed.
@@ -26,10 +27,10 @@ const DEFAULT_BATTLE_SCENE := "res://games/es1/battle.tscn"
 static func make(battle: Battle, outcome: Dictionary) -> Dictionary:
 	var mode := str(battle.config.get("mode", "skirmish"))
 	var is_mission := mode == "mission"
-	return {
+	var summary := {
 		"mode": mode, "headline": make_headline(mode, battle.result, outcome),
 		"winner": str(outcome.get("winner", "")), "text": str(outcome.get("text", "")),
-		"seconds": battle.match_seconds(), "pilots": make_pilot_rows(battle.vehicles, is_mission),
+		"seconds": battle.match_seconds(), "pilots": make_pilot_rows(battle.vehicles, is_mission, battle.stats),
 		"enemies_destroyed": count_destroyed_enemies(battle.vehicles) if is_mission else 0,
 		"salvage": make_salvage_names(battle.result), "losses": make_loss_names(battle.vehicles), "campaign": is_mission,
 		"aborted": bool(outcome.get("aborted", false)),
@@ -37,6 +38,16 @@ static func make(battle: Battle, outcome: Dictionary) -> Dictionary:
 		"rematch_config": battle.initial_config.duplicate(true) if REMATCH_MODES.has(mode) else {},
 		"battle_scene": battle.scene_file_path if battle.scene_file_path != "" else DEFAULT_BATTLE_SCENE,
 	}
+	summary["awards"] = ResultsAward.make_all(summary, Net.settings, make_picked_goals(), bool(battle.result.get("success", false)))
+	return summary
+
+
+## The goal ids every pilot picked in the lobby, {pilot name: [ids]}, from the host's roster (Net.roster).
+static func make_picked_goals() -> Dictionary:
+	var picked := {}
+	for entry in Net.roster.values():
+		picked[str(entry.get("name", ""))] = entry.get("goals", []) if entry.get("goals") is Array else []
+	return picked
 
 
 static func make_headline(mode: String, result: Dictionary, outcome: Dictionary) -> String:
@@ -50,7 +61,7 @@ static func make_headline(mode: String, result: Dictionary, outcome: Dictionary)
 
 
 ## One row per pilot, best score first. A mission lists the player-flown vehicles only.
-static func make_pilot_rows(vehicles: Dictionary, players_only: bool) -> Array:
+static func make_pilot_rows(vehicles: Dictionary, players_only: bool, stats: BattleStats) -> Array:
 	var rows := []
 	for id in vehicles:
 		var h: Herc = vehicles[id]
@@ -61,8 +72,11 @@ static func make_pilot_rows(vehicles: Dictionary, players_only: bool) -> Array:
 			continue
 		if is_player and not _is_pilot_row(h, vehicles):
 			continue
-		rows.append({"name": h.display_name, "vehicle": str(h.def.get("name", h.vehicle_id)), "team": h.team,
-			"kills": h.kills, "deaths": h.deaths, "score": make_score(h.kills, h.deaths), "player": is_player})
+		var row := {"name": h.display_name, "vehicle": str(h.def.get("name", h.vehicle_id)), "team": h.team,
+			"kills": h.kills, "deaths": h.deaths, "score": make_score(h.kills, h.deaths), "player": is_player,
+			"survived": h.alive}
+		row.merge(stats.make_stats(h.display_name) if is_player else {})
+		rows.append(row)
 	rows.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a.score > b.score)
 	return rows
 

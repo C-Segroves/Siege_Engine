@@ -337,9 +337,9 @@ func _expect_back(launcher: Launcher, from: String, expected: String) -> void:
 
 
 ## Every Back path of the menu map: Back returns to the screen the player came from; from a page the library
-## opened (Arena / versus, Host, Join, campaign pages, the launcher's own menu) that is the library.
+## opened (Host, Join, campaign pages, the launcher's own menu) that is the library.
 func _check_back_paths() -> void:
-	for entry in [["arena", "lobby"], ["host", "lobby"], ["coop", "lobby"], ["coop_campaign", "lobby"],
+	for entry in [["host", "lobby"],
 			["join", "browser"], ["new_campaign", "new_campaign"], ["load", "saves"], ["menu", "menu"]]:
 		var launcher := await _open_launcher_scene(entry[0])
 		_expect(launcher.current_name == entry[1], "library %s opens %s (%s)" % [entry[0], entry[1], launcher.current_name])

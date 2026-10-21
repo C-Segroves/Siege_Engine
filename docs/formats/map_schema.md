@@ -55,6 +55,10 @@ engine frame (or a 3x3 basis "basis": [[...],[...],[...]] in engine frame when n
       "source": "SNOW intensity=1 wind=(0 0 -35) rain=0"
     }
   },
+  "point_lights": [                   // optional placed lights (Tribes: Vengeance), engine/map_lights.gd: a pool of
+                                      // omni lights follows the ones nearest the camera
+    {"pos": [x, y, z], "color": [r, g, b] /* fractions */, "range": 20.0 /* metres */, "type": 1 /* Unreal LightType */}
+  ],
   "interiors": [                      // buildings, exported as shapes (ES1 shape JSON schema)
     {"shape": "tribes:int_bbase1", "pos": [x, y, z], "yaw": 0, "pitch": 0, "roll": 0, "scale": 1,
      "collide": true}

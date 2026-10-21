@@ -20,6 +20,8 @@ const STATUS_DEAD := "dead"
 const STATUS_LEFT := "left"
 const NOTIFY_SECONDS := 4.0
 const STATE_SYNC_SECONDS := 0.25
+## The host's day clock goes out this often (every peer's sky runs on its own between the updates).
+const DAY_SYNC_SECONDS := 5.0
 const DROP_MERGE_RADIUS := 2.5
 ## A drop is probed for its floor from this far above the point it fell from (metres; a soldier's feet sink a little).
 const DROP_PROBE_LIFT := 0.5
@@ -27,6 +29,8 @@ const DROP_PROBE_LIFT := 0.5
 const FLOOR_PROBE_HEIGHT := 60.0
 const STATIC_LAYERS := 0xFFFFFFFF
 const SCATTER_SPREAD := 0.8
+## The siege's own random stream (CybridSiege) is the raid seed xor this, so it never shifts the raid's other rolls.
+const SIEGE_SEED_SALT := 0x5EED51E6
 
 var battle: Battle
 var built := {}
@@ -59,12 +63,15 @@ var station: ExtractionStation
 var tasks: RaidTasks
 ## The call-ins and the raid points (engine/extraction/callin; every peer).
 var callins: CallinDirector
+## Varuna's Fall easter egg, the Cybrid siege (engine/extraction/siege; every peer; dormant on other maps).
+var siege: CybridSiege
 ## Host: peer -> the armour he wore in (dropped on death unless free) and his insured slot [item id, units].
 var worn_armor := {}
 var insured := {}
 var _next_container := 1
 var _reload_clock := MissionClock.new()
 var _sync_clock := MissionClock.new()
+var _day_sync_clock := MissionClock.new()
 ## Ends the raid end_delay_s after the last player left it (the verdict is handed over once, then the delay runs).
 var _ender := MissionEnder.new(_end_raid, func() -> bool: return false)
 var _outcomes := {}       # peer -> text
@@ -96,6 +103,8 @@ func _ready() -> void:
 	add_child(tasks)
 	callins = CallinDirector.new(self)
 	add_child(callins)
+	siege = CybridSiege.new(self)
+	add_child(siege)
 	_apply_exit_guard()
 	_commit_local_kit()
 
@@ -125,7 +134,12 @@ func make_objective_lines() -> Array:
 		{"text": "Call an exfil transport (%s)" % OccupancyHint.make_key_text("exfil_call"), "done": not exfil_states.is_empty() or extracted},
 		{"text": "Reach the extraction zone and get out alive", "done": extracted},
 	]
-	return lines + tasks.make_objective_lines()
+	return lines + (siege.make_objective_lines() if siege != null else []) + tasks.make_objective_lines()
+
+
+## True when the host closed exfil zone `zone` (the siege; every peer reads it from the synced exfil states).
+func is_zone_closed(zone: int) -> bool:
+	return exfil_states.any(func(e: Dictionary) -> bool: return int(e.zone) == zone and str(e.state) == ExtractionTransports.STATE_CLOSED)
 
 
 ## The local soldier steps onto an inventory station (TribesStations.EXTRACTION_SHOP_METHOD): the supply panel.
@@ -228,6 +242,7 @@ func start_host() -> void:
 	_send_all("_setup_raid", [{"containers": records, "zones": map.zones, "areas": map.areas,
 		"teams": faction_teams, "relations": TeamRelations.make_state(), "owners": make_base_owners()}])
 	tasks.start_host(squads.placed_areas)
+	siege.start_host(int(rng.seed) ^ SIEGE_SEED_SALT)
 	for peer in battle.config.get("roster", {}):
 		_start_player(int(peer))
 	callins.points.request_reports()
@@ -432,7 +447,7 @@ func _request_drop(item_id: String, units: int) -> void:
 		_apply_drop(multiplayer.get_remote_sender_id(), item_id, units)
 
 
-@rpc# ------------------------------------------------------------------ host: what players do
+# ------------------------------------------------------------------ host: what players do
 
 ## Host: `peer` loots the nearest container: money and every item that fits.
 func _apply_pickup(peer: int) -> void:
@@ -448,6 +463,7 @@ func _apply_pickup(peer: int) -> void:
 	if c.money > 0:
 		taken.append(ExtractionRules.make_money_text(c.money))
 	var left := []
+	siege.apply_stacks_taken(peer, c.stacks)
 	for s in c.stacks:
 		var n := inv.apply_add(str(s[0]), int(s[1]))
 		if n > 0:
@@ -567,6 +583,7 @@ func apply_extract(peer: int) -> void:
 		return
 	var soldier := battle.occupancy.soldier_of(peer)
 	var inv: ExtractionInventory = inventories[peer]
+	_note_extraction(soldier)
 	callins.apply_peer_extracted(peer)
 	var carried := make_carried_with_armor(peer)
 	var pay := tasks.make_payout(peer, carried)
@@ -574,6 +591,7 @@ func apply_extract(peer: int) -> void:
 	var money := inv.money + pay
 	if pay > 0:
 		notify(peer, "Tasks done: %s paid." % ExtractionRules.make_money_text(pay))
+	money += _make_siege_bonus(peer, stacks, money)
 	var vehicle := battle.occupancy.vehicle_of(peer)
 	if vehicle:
 		VehicleOccupancy.of(vehicle).apply_leave(peer)
@@ -581,6 +599,26 @@ func apply_extract(peer: int) -> void:
 		revive.apply_forget(soldier.net_id)
 		_send_all("_retire_soldier", [soldier.net_id])
 	_finish_player(peer, STATUS_EXTRACTED, stacks, money)
+
+
+## BattleStats counts every extraction (host; the credits award and the goal board read it).
+func _note_extraction(soldier: Infantry) -> void:
+	if soldier == null:
+		return
+	var key := battle.stats.make_pilot_key(soldier)
+	if key != "":
+		battle.stats.note_extraction(key)
+
+
+## The siege's bonus for a haul of `stacks` and `money` (0 outside the siege); tells the player.
+func _make_siege_bonus(peer: int, stacks: Array, money: int) -> int:
+	var haul := ExtractionInventory.new()
+	haul.apply_merge(stacks)
+	haul.money = money
+	var bonus := siege.make_extraction_bonus(haul.make_value())
+	if bonus > 0:
+		notify(peer, str(CybridRules.section("exfil").get("bonus", {}).get("line", "%s")) % ExtractionRules.make_money_text(bonus))
+	return bonus
 
 
 func _finish_player(peer: int, result: String, stacks: Array, money: int) -> void:
@@ -707,6 +745,8 @@ func _physics_process(delta: float) -> void:
 		_reload_all()
 	if _sync_clock.make_step(delta, STATE_SYNC_SECONDS) > 0.0:
 		_send_all("_exfil_update", [transports.make_states()])
+	if site_spawner != null and _day_sync_clock.make_step(delta, DAY_SYNC_SECONDS) > 0.0:
+		_send_all("_day_update", [site_spawner.clock_s])
 	_check_end(delta)
 
 
@@ -722,6 +762,13 @@ func _reload_all() -> void:
 		var soldier := battle.occupancy.soldier_of(int(peer))
 		if soldier and soldier.alive and ExtractionLoadout.apply_reload(soldier, inventories[peer]):
 			send_inventory(int(peer))
+
+
+@rpc("authority", "unreliable", "call_local")
+func _day_update(clock_s: float) -> void:
+	var cycle := get_tree().get_first_node_in_group(DayCycleLight.GROUP) as DayCycleLight
+	if cycle != null:
+		cycle.apply_clock(clock_s)
 
 
 @rpc("authority", "unreliable", "call_local")

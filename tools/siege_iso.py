@@ -200,6 +200,9 @@ class ZipSource:
     def exists(self, _rel):
         return False
 
+    def mastered(self):
+        return ''
+
 
 def open_source(path):
     """A siege_iso.Disc for a disc image, a ZipSource for a .zip."""

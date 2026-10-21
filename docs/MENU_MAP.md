@@ -15,7 +15,7 @@ There is one navigation stack per router: `ScreenRouter.go / back / replace / go
   - `Launcher.go_main_menu` goes there.
   - Back with nothing remembered also goes there (`Launcher.back_from_root`).
 
-So Back always returns to the screen you came from. From any page the library opened (Arena / versus, Host, Join,
+So Back always returns to the screen you came from. From any page the library opened (Host, Join,
 campaign pages, the launcher menu) that is the library.
 
 Tests: `tests/ui_nav_check.gd` covers every path below (`_check_back_paths`, `_check_launcher_routes`,

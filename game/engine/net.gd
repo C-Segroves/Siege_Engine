@@ -35,7 +35,7 @@ const NO_TEAM := -1
 ## "slot" is the compact character slot snapshot (CharacterSlot.make_roster_snapshot), "goals" / "team_goals" the picked
 ## lobby goals, "wingmen" the campaign wingmen's specs (docs/design/lobby_loadout_economy.md section 7.1).
 const ROSTER_KEYS := ["vehicle", "team", "ready", "loadout", "name", "kit", "infantry_armor", "infantry_body",
-	"infantry_skin", "herc_skin", "slot", "goals", "team_goals", "wingmen"]
+	"infantry_skin", "herc_skin", "mounts", "slot", "goals", "team_goals", "wingmen"]
 ## Roster pushes closer together than this are merged into one (the first goes out at once, the rest as one later).
 const ROSTER_PUSH_INTERVAL_S := 0.2
 

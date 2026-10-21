@@ -263,6 +263,7 @@ setup_game_server() {
 		install -m 640 -g "$SERVICE_USER" "$REPO_DIR/deploy/server.json.example" "$GAME_SERVER_CONFIG"
 		log "created $GAME_SERVER_CONFIG from the example - edit it (name, map, mode, password)"
 	fi
+	install -m 644 "$REPO_DIR/deploy/server_override.cfg" "$REPO_DIR/game/override.cfg"   # Jolt physics for the server only
 	render "$REPO_DIR/deploy/nginx-game.conf.template" "$snippet"
 	render "$REPO_DIR/deploy/systemd/siege-server.service.template" /etc/systemd/system/siege-server.service
 	systemctl daemon-reload
