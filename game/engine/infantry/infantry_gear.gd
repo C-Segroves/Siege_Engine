@@ -6,10 +6,13 @@ extends RefCounted
 ## Hand items, id "<pack>:<KEY>" (tribes:GRENADE, tribes2:MINE ...):
 ##   kind grenade | concussion (a fuse) or mine (proximity, armed once at rest), damage (ES points), radius,
 ##   damage_type, mass, elasticity, friction, fuse_s, proximity, arm_s, kick (impulse), throw_speed (T1);
-##   kind repair_kit: repair (ES points); "mapped": false = recorded only (beacons, flares, cameras).
+##   kind repair_kit: repair (ES points), repair_s (seconds it takes to heal: T1 repairDamage is instant = 0, T2 applyRepair
+##   heals repairRate per tick); "mapped": false = recorded only (beacons, flares, cameras).
 ## Packs: effect energy (recharge_bonus_per_s) | repair (repair_per_s, energy_per_s) | shield
 ##   (energy_per_damage, energy_per_s, weak_types) | jammer (jam_radius, energy_per_s) | ammo (extra_rounds)
 ##   | cloak (cloak_profile: a CloakProfile id, engine/stealth) | unmapped (satchel); "toggled": pack_use turns it on and off.
+## Every pack record also names its use_sound (heard when it is switched on); "sounds" of the file: kit (a repair kit
+## used), pack_fail (a refused use), pack_use (a pack with no sound of its own).
 ## Throw rules per pack ("throw"): T1 GameBase::throw strength, T2 HandInventory::onUse impulse.
 ## Seats per vehicle id: [{seat, role (pilot / gunner / armed / passenger), node (seat node in the shape)}].
 
@@ -22,6 +25,7 @@ const THROWN_KINDS := ["grenade", "concussion", "mine"]
 static var _items := {}       # id -> record
 static var _packs := {}       # id -> record
 static var _throw := {}       # pack -> throw rules
+static var _sounds := {}      # pack -> {kit, pack_fail, pack_use}
 static var _seats := {}       # vehicle id -> [seat records]
 static var _loaded := false
 
@@ -74,6 +78,12 @@ static func is_thrown(record: Dictionary) -> bool:
 	return bool(record.get("mapped", false)) and str(record.get("kind", "")) in THROWN_KINDS
 
 
+## The Sfx stem of use sound `key` (kit, pack_fail, pack_use) of game `pack_name` ("" when none is installed).
+static func sound(pack_name: String, key: String) -> String:
+	_ensure_loaded()
+	return str((_sounds.get(pack_name, {}) as Dictionary).get(key, ""))
+
+
 static func throw_rules(pack_name: String) -> Dictionary:
 	_ensure_loaded()
 	return _throw.get(pack_name, {})
@@ -89,6 +99,7 @@ static func reload() -> void:
 	_items.clear()
 	_packs.clear()
 	_throw.clear()
+	_sounds.clear()
 	_seats.clear()
 	_loaded = false
 
@@ -103,6 +114,7 @@ static func _ensure_loaded() -> void:
 			_index(gear.get("items", []), _items)
 			_index(gear.get("packs", []), _packs)
 			_throw[pack_name] = gear.get("throw", {})
+			_sounds[pack_name] = gear.get("sounds", {})
 		var seats = Assets.load_json(SEATS_FILE, pack_name)
 		if seats is Dictionary:
 			_seats.merge(seats.get("vehicles", {}), true)

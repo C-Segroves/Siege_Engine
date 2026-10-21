@@ -232,7 +232,18 @@ static func _add_armors() -> void:
 ## True for the rules' standard-issue weapons (free_weapons: the Tribes 1 Blaster, playtest X5): price 0, given to a
 ## raider who brings no weapon, never rolled as loot nor left in a bag.
 static func is_free_weapon(weapon_id: String) -> bool:
-	return (ExtractionRules.data().get("free_weapons", []) as Array).has(weapon_id)
+	return weapon_id != "" and weapon_id == make_free_weapon_id()
+
+
+## The one standard-issue weapon of this install: the first of the rules' free_weapons, else of free_weapon_fallbacks
+## (the nearest free energy sidearm of another game), that is an installed hand weapon ("" = none).
+static func make_free_weapon_id() -> String:
+	var rules := ExtractionRules.data()
+	for wid in (rules.get("free_weapons", []) as Array) + (rules.get("free_weapon_fallbacks", []) as Array):
+		var w: Dictionary = Packs.weapons.get(str(wid), {})
+		if not w.is_empty() and str(w.get("category", "")) == "infantry" and Packs.is_enabled(str(w.pack), "infantry_weapons"):
+			return str(wid)
+	return ""
 
 
 ## The rules' raid tuning of hand weapon `weapon_id` ({} = none): {damage_scale, refire_scale, price}.

@@ -29,6 +29,11 @@ static func make_row_key_of_part(part: String) -> String:
 	return "armour" if part == "armor" else part
 
 
+## The catalog id a row key names ("gear:tribes:GRENADE" -> "tribes:GRENADE"; ids hold a colon themselves).
+static func make_row_ref(row_key: String) -> String:
+	return row_key.substr(row_key.find(":") + 1)
+
+
 ## Why a hardpoint cannot be changed here.
 static func make_hardpoint_locked_text(ctx: LoadoutContext) -> String:
 	if ctx.source == LoadoutContext.SOURCE_STASH:

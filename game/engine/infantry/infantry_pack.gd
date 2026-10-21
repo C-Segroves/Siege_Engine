@@ -28,6 +28,8 @@ static func apply_frame(soldier: Infantry, delta: float) -> void:
 	var kit := soldier.kit
 	var p := InfantryGear.pack(kit.pack_id)
 	apply_cloak_profile(soldier)
+	if not soldier.is_puppet:
+		apply_repair(soldier, kit.take_heal(delta))   # a used repair kit heals over its duration
 	if kit.pack_active and soldier.capacitor < float(p.get("min_energy", 0.0)):
 		kit.pack_active = false
 	if kit.pack_active:
@@ -51,6 +53,8 @@ static func apply_cloak_profile(soldier: Infantry) -> void:
 
 ## Adds `amount` health (never above the armour's).
 static func apply_repair(soldier: Infantry, amount: float) -> void:
+	if amount <= 0.0:
+		return
 	var c: Dictionary = soldier.components[0]
 	c.hp = minf(float(c.max), float(c.hp) + amount)
 	soldier.integrity = HercDamage.integrity_of(soldier.components)

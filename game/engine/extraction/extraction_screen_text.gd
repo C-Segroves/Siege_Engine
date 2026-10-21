@@ -13,7 +13,7 @@ static func make_kit_summary(profile: ExtractionProfile) -> String:
 static func make_insured_text(profile: ExtractionProfile) -> String:
 	var id := profile.make_insured_id()
 	if id == "":
-		return "Insured slot: empty  -  insure one kit item (one slot of it) or your paid armour to keep it if you die"
+		return "Insured slot: empty  -  pick one kit item (one slot of it) or your paid armour under Insured in the Loadout list to keep it if you die"
 	return "Insured slot: %s  (kept if you die)" % ExtractionItems.make_stack_text(id, int(profile.insured[1]))
 
 
@@ -29,5 +29,7 @@ static func make_armor_name(armor_id: String) -> String:
 
 ## "6 kg  -  sells for 150 cr".
 static func make_item_detail(id: String, units: int) -> String:
+	if ExtractionItems.is_standard_issue(id):
+		return "%.1f kg  -  standard issue: free, never lost" % (float(ExtractionItems.item(id).get("kg", 0.0)) * units)
 	return "%.1f kg  -  sells for %s" % [float(ExtractionItems.item(id).get("kg", 0.0)) * units,
 		ExtractionRules.make_money_text(ExtractionItems.make_sell_price(id, units))]

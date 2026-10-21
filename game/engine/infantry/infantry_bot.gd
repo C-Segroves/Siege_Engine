@@ -10,6 +10,9 @@ extends Node
 ##   BOARD   light armour, no enemy near: walk to an EMPTY vehicle of its team whose pilot seat it may take
 ##           (BoardingRules: hatch for non-Tribes vehicles, touch for Tribes ones) - the vehicle's AI pilot
 ##           drives / flies it (InfantryBots); it gets out when the vehicle is crippled;
+##   REPAIR  a guard soldier (guard_radius > 0, a faction's squad) with nobody to fight: walk to the nearest
+##           damaged or downed base object of its own side - generators first, one soldier per object - and repair it
+##           at the object repair rate (TribesBase.find_job_for; BaseRepairRules faction_repair);
 ##   in a passenger seat it fires within the seat's arc, in a gunner seat it works the turret.
 ## Terrain: it follows a walkable path to its goal (InfantryBotRoute over BattleNavigation: into and out of bases),
 ## else runs straight at it, jumps and jets over what blocks its way (a knee-high probe ahead),
@@ -23,7 +26,7 @@ extends Node
 ##           any fight; otherwise once no enemy is within FIGHT_RANGE), hold there when asked, shoot the
 ##           objective's target (an objective to destroy, a carrier to hunt).
 
-enum Task { ROAM, FIGHT, COVER, REFILL, BOARD, OBJECTIVE }
+enum Task { ROAM, FIGHT, COVER, REFILL, BOARD, OBJECTIVE, REPAIR }
 
 const THINK_SECONDS := 0.2   # NEAR and MID decide at 5 Hz (BotSleep tiers); FAR walks at the director's tick
 ## MID tier: the target is searched on every MID_SEARCH_EVERY-th decision (a basic threat assessment in between).
@@ -49,6 +52,8 @@ const STATION_SEARCH := 400.0
 const COVER_SAMPLES := 8
 const COVER_DISTANCE := 12.0
 const ARRIVE := 2.0
+## A repairing bot stands still once the object is within this share of the repair reach.
+const REPAIR_STAND_SHARE := 0.8
 ## Obstacle probe: knee height, this far ahead (m).
 const KNEE := 0.6
 const PROBE_AHEAD := 2.5
@@ -92,6 +97,7 @@ var guard_point := Vector3.ZERO
 var guard_radius := 0.0
 var _station := -1
 var _vehicle_goal: Herc
+var _repair_job: TribesBaseObject
 var _think := 0.0
 ## BotSleep tier: 0 NEAR (full logic and rays), 1 MID (simplified: no probes, thinned target search), 2 FAR (linear walk).
 var ai_lod := 0
@@ -137,6 +143,7 @@ func _physics_process(delta: float) -> void:
 		return
 	_aim_and_fire()
 	_move(delta)
+	_apply_repair_work(delta)
 
 
 # ------------------------------------------------------------------ deciding
@@ -174,6 +181,7 @@ func apply_far_step(dt: float) -> void:
 	if _think <= 0.0:
 		_think = FAR_THINK_SECONDS
 		_reconsider()
+	_apply_repair_work(dt)
 	var budget := soldier.max_speed * FAR_SPEED_SHARE * dt
 	var at := soldier.global_position
 	var flat := Vector3.ZERO
@@ -212,6 +220,12 @@ func _choose_task(d: float) -> void:
 	elif target and d < FIGHT_RANGE:
 		task = Task.FIGHT
 		goal = _make_fight_point(d)
+	elif _choose_repair():
+		task = Task.REPAIR
+		var at := _repair_job.global_position
+		goal = Vector3(at.x, soldier.global_position.y, at.z)      # walks up beside it (no jetting up to a generator on a pad)
+		if TribesBase.make_reach_distance(soldier, _repair_job) <= float(BaseRepairRules.faction().get("reach_m", 4.5)) * REPAIR_STAND_SHARE:
+			goal = soldier.global_position                          # in reach: stands and works
 	elif not objective.is_empty():
 		_apply_objective_task()
 	elif _choose_vehicle(d):
@@ -222,6 +236,38 @@ func _choose_task(d: float) -> void:
 		var far := _find_target(INF) if guard_radius <= 0.0 else null
 		goal = far.global_position if far else _make_wander_goal()
 		task = Task.ROAM
+
+
+## A guard soldier's repair duty: keeps its job while the object is still damaged, else asks the base for a new one.
+func _choose_repair() -> bool:
+	if guard_radius <= 0.0:
+		return false
+	var base := TribesBase.of(battle())
+	if base == null:
+		return false
+	if _repair_job == null or not is_instance_valid(_repair_job) or _repair_job.is_fully_repaired():
+		_repair_job = base.find_job_for(soldier, bot_id,
+			func(o: TribesBaseObject) -> bool: return _progress.is_unreachable(InfantryBotProgress.make_repair_key(o)))
+	else:
+		base.apply_job_claim(_repair_job, bot_id)
+	if _repair_job == null and soldier.has_meta(TribesBase.META_REPAIR_JOB):
+		soldier.remove_meta(TribesBase.META_REPAIR_JOB)
+	return _repair_job != null
+
+
+## Within reach of its job (the object's surface): repairs it at the base's object repair rate.
+func _apply_repair_work(delta: float) -> void:
+	var base := TribesBase.of(battle())
+	var working := task == Task.REPAIR and base != null and _repair_job != null and is_instance_valid(_repair_job) \
+		and not _repair_job.is_fully_repaired() \
+		and TribesBase.make_reach_distance(soldier, _repair_job) <= float(BaseRepairRules.faction().get("reach_m", 4.0))
+	if working:
+		soldier.set_meta(TribesBase.META_REPAIR_JOB, _repair_job)
+		base.apply_job_claim(_repair_job, bot_id)
+		base.apply_object_repair(_repair_job, soldier.team,
+			float(base.repair.get("per_s", 0.0)) * float(BaseRepairRules.faction().get("per_s_scale", 1.0)) * delta)
+	elif soldier.has_meta(TribesBase.META_REPAIR_JOB):
+		soldier.remove_meta(TribesBase.META_REPAIR_JOB)
 
 
 func _apply_objective_task() -> void:
@@ -527,11 +573,17 @@ func _apply_progress(delta: float) -> void:
 		key = InfantryBotProgress.make_station_key(_station)
 	elif task == Task.BOARD and is_instance_valid(_vehicle_goal):
 		key = InfantryBotProgress.make_vehicle_key(_vehicle_goal)
+	elif task == Task.REPAIR and is_instance_valid(_repair_job):
+		key = InfantryBotProgress.make_repair_key(_repair_job)
+		if TribesBase.make_reach_distance(soldier, _repair_job) <= float(BaseRepairRules.faction().get("reach_m", 4.0)):
+			return   # at work
 	if key == "" or soldier.global_position.distance_to(goal) <= ARRIVE * 2.0:
 		return   # there (standing on the station): no progress to make
 	_progress.apply_sample(key, soldier.global_position.distance_to(goal), delta)
 	if _progress.is_unreachable(key):
 		_think = 0.0
+		if task == Task.REPAIR:
+			_repair_job = null
 
 
 func _apply_jet(delta: float, wanted: bool) -> void:

@@ -26,3 +26,22 @@ static func make_slot_weapons(entry: Dictionary, armor_id: String) -> Array:
 		if not wdef.is_empty() and wdef.get("category", "") == "infantry" and InfantryCatalog.allows_weapon(armor_id, str(w)) and not out.has(w):
 			out.append(w)
 	return out
+
+
+## The kit the pilot's slot of armour `armor_id` spawns with besides weapons: {pack, grenade, counts} (backpack id, the
+## grenade type he carries, hand item id -> count; applied by InfantryKit.apply_slot). Empty without a slot of this armour.
+static func make_kit(entry: Dictionary, armor_id: String) -> Dictionary:
+	if not entry.get("slot") is Dictionary or str((entry.slot as Dictionary).get("a", "")) != armor_id:
+		return {}
+	var armor := InfantryCatalog.armor(armor_id)
+	var slot: Dictionary = entry.slot
+	var counts := {}
+	var grenade := ""
+	var carried: Dictionary = CharacterSlot.make_counts(slot.get("g", {}))
+	for id in carried:
+		var n := int(carried[id])
+		if n > 0 and (armor.get("hand_items", {}) as Dictionary).has(str(id)):
+			counts[str(id)] = n
+			if InfantryGear.grenades_of(armor).has(str(id)) and grenade == "":
+				grenade = str(id)
+	return {"pack": str(slot.get("p", "")), "grenade": grenade, "counts": counts}

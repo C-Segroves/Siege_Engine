@@ -6,7 +6,7 @@ extends Node
 ##   setup.closed.connect(func(changed: bool) -> void: ...)     # the lobby announces the slot again when `changed`
 ## Top: the three character slots as tabs and the credits. Left: the loadout rows of the open slot (infantry or vehicle;
 ## the kit and stash in a raid). Centre: the model, the card of the part last added or hovered, the side switch. Right:
-## the store and the look pickers. Under 900 px (Siege/narrow_width) the three columns become three panes with tabs.
+## the store and the look pickers. Under 1000 px (PANES_BELOW) the three columns become three panes with tabs.
 ## Every change is saved at once. Keys and pad: ui_* move, ui_accept equips / buys, menu_secondary (right click, X)
 ## removes, menu_tab_prev/next (LB/RB) slots or store categories, menu_zone_prev/next (LT/RT) loadout / store / look,
 ## menu_switch_kind (View) infantry / vehicle, menu_info (Y) pins the detail plate, menu_back (B) closes.
@@ -22,6 +22,9 @@ const LEFT_WIDTH_RATIO := 3.0
 const CENTRE_WIDTH_RATIO := 3.2
 const RIGHT_WIDTH_RATIO := 4.4
 const LOOK_MIN_HEIGHT := 150
+## Below this sheet width the three columns become panes. Wider than Siege/narrow_width: at 900 px the store column
+## had no room left for its list under the wrapped tabs and filters.
+const PANES_BELOW := 1000
 const SHEET_STATUS_DEFAULT := "Remove: right click / X"
 const RAID_STATUS := "A raid risks your paid look and kit. Re-buy: 100 cr."
 
@@ -97,7 +100,7 @@ func _build(parent: Control, ctx: LoadoutContext, slot_index: int, p_profile: Op
 	_build_chrome()
 	_connect_state()
 	var width := parent.size.x if parent.size.x > 0.0 else parent.get_viewport_rect().size.x
-	_apply_layout(width < Widgets.metric("narrow_width"))
+	_apply_layout(width < PANES_BELOW)
 	_refresh_all()
 	sheet.resized.connect(_on_sheet_resized)
 	sheet.closed.connect(_on_sheet_closed)
@@ -169,7 +172,7 @@ func _connect_state() -> void:
 # ------------------------------------------------------------------ layout
 
 func _on_sheet_resized() -> void:
-	var narrow := sheet.size.x < Widgets.metric("narrow_width")
+	var narrow := sheet.size.x < PANES_BELOW
 	if narrow != is_narrow and sheet.size.x > 0.0:
 		_apply_layout(narrow)
 

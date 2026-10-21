@@ -187,6 +187,7 @@ func _check_owned_mode() -> void:
 	_expect(rows.size() >= 3 and (rows[0] as LoadoutRow).row.key == "armour" and (rows[0] as LoadoutRow).row.locked, "the list starts with the fixed armour row (%d rows)" % rows.size())
 	await _check_free_weapons()
 	await _check_remove_and_equip()
+	await _check_gear_fill_keys()
 	await _check_hover_and_tooltip()
 	await _shut()
 
@@ -199,6 +200,23 @@ func _check_free_weapons() -> void:
 	_expect(priced.is_empty(), "O2: no weapon shows a price outside extraction")
 	await _show_category("ammo")
 	_expect(_store_rows().all(func(r: StoreRow) -> bool: return not _row_texts(r).contains(" cr")), "O2: no ammunition shows a price")
+
+
+## Fill and adjust on a gear row keep the whole "pack:ID" item key (a get_slice(":", 1) once cut it to the pack name).
+func _check_gear_fill_keys() -> void:
+	_expect(OperatorText.make_row_ref("gear:tribes:GRENADE") == "tribes:GRENADE", "a row key keeps the item's pack prefix")
+	var gear_rows: Array = _setup.state.make_rows().filter(func(r: Dictionary) -> bool: return r.kind == "gear" and int(r.ammo_max) > 0)
+	if gear_rows.is_empty():
+		return
+	var key := str(gear_rows[0].key)
+	var ref := OperatorText.make_row_ref(key)
+	_setup.state.apply_fill(key)
+	await _frames()
+	var gear: Dictionary = _slot().infantry.gear
+	_expect(int(gear.get(ref, 0)) > 0 and gear.keys().all(func(k) -> bool: return str(k).contains(":")), "fill stores the full item id %s (%s)" % [ref, gear.keys()])
+	_setup.state.apply_adjust(key, -1)
+	await _frames()
+	_expect(_slot().infantry.gear.keys().all(func(k) -> bool: return str(k).contains(":")), "adjust keeps full item ids (%s)" % [_slot().infantry.gear.keys()])
 
 
 func _check_remove_and_equip() -> void:
@@ -400,10 +418,49 @@ func _check_raid() -> void:
 			dialog.confirm_button.pressed.emit()
 			await _frames(SETTLE_FRAMES)
 		_expect(_slot().armor == "tribes:MEDIUM", "the bought armour is worn")
-		var armour_row: LoadoutRow = _loadout_rows()[0]
-		_expect(_row_texts(armour_row).contains("AT RISK"), "the worn paid armour is marked AT RISK (%s)" % _row_texts(armour_row))
+		var armour_row: KitRow = _setup.list.find_kit_row("armour")
+		var badges := armour_row.find_children("*", "Label", true, false).map(func(l: Label) -> String: return l.text)
+		_expect(badges.has("AT RISK"), "the worn paid armour is marked AT RISK (%s)" % [badges])
+	await _check_raid_dropdowns()
 	await _check_stash_side()
 	await _shut()
+
+
+## In a raid the infantry rows are drop-downs; a choice moves stock and equals the spawn kit; the stash tab has no buttons that move stacks.
+func _check_raid_dropdowns() -> void:
+	print("-- raid drop-downs:")
+	var kit_rows: Array = _setup.list.make_rows().filter(func(c: Control) -> bool: return c is OptionButton)
+	_expect(kit_rows.size() >= 3, "the raid loadout rows are drop-downs (%d)" % kit_rows.size())
+	var profile: ExtractionProfile = _setup.state.extraction
+	var armor_id := profile.kit_armor
+	var row: KitRow = _setup.list.find_kit_row("weapon:1")
+	if row != null:
+		var pick := -1
+		for i in row.option.item_count:
+			if str(row.option.get_item_metadata(i)) != "" and str(row.option.get_item_metadata(i)) != row.make_choice():
+				pick = i
+		if pick >= 0:
+			var wid := str(row.option.get_item_metadata(pick))
+			profile.stash.apply_add_unchecked(ExtractionItems.make_id("weapon", wid), 1)
+			_setup.state.apply_changed()
+			await _frames(SETTLE_FRAMES)
+			row = _setup.list.find_kit_row("weapon:1")
+			for i in row.option.item_count:
+				if str(row.option.get_item_metadata(i)) == wid:
+					row.option.select(i)
+					row.option.item_selected.emit(i)
+			await _frames(SETTLE_FRAMES)
+			_expect(ExtractionLoadout.make_raid_weapons(armor_id, profile.kit).has(wid), "the drop-down choice %s is in the spawn kit" % wid)
+			var shown: Array = []
+			for r in _setup.state.make_rows():
+				if r.kind == "weapon" and str(r.current) != "":
+					shown.append(str(r.current))
+			_expect(shown == ExtractionLoadout.make_raid_weapons(armor_id, profile.kit), "the rows equal the spawn weapons")
+	await _check_raid_stock_choices()
+	await _send_action("menu_switch_kind")
+	await _send_action("menu_switch_kind")
+	_expect(_setup.stash.visible and _setup.stash.find_children("*", "Button", true, false).all(func(b: Node) -> bool: return not (b as Button).text.begins_with("To ")), "the stash tab has no To kit / To stash buttons")
+	await _send_action("menu_switch_kind")   # back to the infantry side
 
 
 func _check_stash_side() -> void:
@@ -582,7 +639,7 @@ func _check_garage_and_bot() -> void:
 func _check_narrow() -> void:
 	print("-- narrow layout:")
 	await _open(_vs(), "narrow", RICH, NARROW_SIZE)
-	_expect(_setup.is_narrow and _setup.pane == 0, "under 900 px the three columns become panes")
+	_expect(_setup.is_narrow and _setup.pane == 0, "under 1000 px the three columns become panes")
 	_expect(_setup.store.is_visible_in_tree() == false and _setup.list.is_visible_in_tree(), "only the loadout pane shows first")
 	await _send_pad_axis(JOY_AXIS_TRIGGER_RIGHT, 1.0)
 	_expect(_setup.pane == 1 and _setup.store.is_visible_in_tree() and not _setup.list.is_visible_in_tree(), "RT (menu_zone_next) opens the store pane")
@@ -706,6 +763,7 @@ func _take_shots() -> void:
 	await _shot_set("operator_desktop", DESKTOP_SIZE, _vs(), 0)
 	await _shot_set("operator_narrow", NARROW_SIZE, _vs(), 0)
 	await _shot_set("operator_raid", DESKTOP_SIZE, {"mode": "extraction"}, 0)
+	await _shot_set("operator_raid_narrow", Vector2(900, 720), {"mode": "extraction"}, 0)
 	await _shot_set("operator_garage", DESKTOP_SIZE, {"mode": "campaign"}, 0)
 	await _shot_components()
 
@@ -728,7 +786,7 @@ func _shot_set(shot_name: String, size: Vector2, settings: Dictionary, credits: 
 	await _open(settings, shot_name, credits if credits > 0 else 4250, size, true)
 	await _frames(40)
 	await _save(shot_name)
-	if size.x < Widgets.metric("narrow_width"):
+	if size.x < OperatorSetup.PANES_BELOW:
 		_setup.state.apply_side("vehicle")
 		_setup.state.apply_select_row("hardpoint:0")
 		await _frames(20)
@@ -740,6 +798,11 @@ func _shot_set(shot_name: String, size: Vector2, settings: Dictionary, credits: 
 			_setup.apply_zone(pane_index)
 			await _frames(20)
 			await _save("%s_pane%d" % [shot_name, pane_index])
+		_setup.apply_zone(0)
+		_setup.state.apply_side("stash")
+		await _frames(20)
+		if _setup.state.side == "stash":
+			await _save(shot_name + "_stash")
 	else:
 		await _show_category("skins")
 		await _frames(20)
@@ -760,3 +823,42 @@ func _save(shot_name: String) -> void:
 	var path := _out.path_join("%s.png" % shot_name)
 	get_viewport().get_texture().get_image().save_png(path)
 	print("   ", path)
+
+
+## Ammunition, a hand item, the pack and the insured slot are drop-downs too: each choice lands in the kit the spawn reads.
+func _check_raid_stock_choices() -> void:
+	var profile: ExtractionProfile = _setup.state.extraction
+	var armor_id := profile.kit_armor
+	var ammo_rows: Array = _setup.state.make_rows().filter(func(r: Dictionary) -> bool: return r.kind == "ammo")
+	if not ammo_rows.is_empty():
+		var key := str(ammo_rows[0].key)
+		_choose(key, "0")
+		await _frames(SETTLE_FRAMES)
+		_expect(profile.kit.count(ExtractionItems.make_id("ammo", OperatorText.make_row_ref(key))) == 0, "choosing no rounds empties the ammunition from the kit")
+	var packs := InfantryGear.packs_of(InfantryCatalog.armor(armor_id))
+	if not packs.is_empty():
+		profile.stash.apply_add_unchecked(ExtractionItems.make_id("pack", str(packs[0])), 1)
+		_setup.state.apply_changed()
+		await _frames(SETTLE_FRAMES)
+		_choose("pack", str(packs[0]))
+		await _frames(SETTLE_FRAMES)
+		_expect(ExtractionLoadout.make_kit_pack(armor_id, profile.kit) == str(packs[0]), "the pack drop-down puts the pack in the spawn kit")
+		_expect(_setup.list.find_kit_row("pack").make_choice() == str(packs[0]), "and the row shows it")
+	var insured_row := _setup.list.find_kit_row("insured")
+	_expect(insured_row != null and insured_row.option.item_count >= 2, "an insured slot drop-down lists the kit stacks")
+	if insured_row != null and insured_row.option.item_count >= 2:
+		var wanted := str(insured_row.option.get_item_metadata(1))
+		_choose("insured", wanted)
+		await _frames(SETTLE_FRAMES)
+		_expect(profile.make_insured_id() == wanted, "choosing insures it")
+	_expect(_setup.state.make_fit().kg == profile.kit.make_used_kg(), "the fit line weighs the kit")
+
+
+## Picks choice `choice` in the drop-down of row `row_key` as a click would.
+func _choose(row_key: String, choice: String) -> void:
+	var row := _setup.list.find_kit_row(row_key)
+	for i in row.option.item_count:
+		if str(row.option.get_item_metadata(i)) == choice:
+			row.option.select(i)
+			row.option.item_selected.emit(i)
+			return

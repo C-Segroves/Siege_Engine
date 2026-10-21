@@ -149,6 +149,24 @@ func apply_move_to_stash(id: String, units: int) -> int:
 	return n
 
 
+## Makes the kit hold `wanted` units of `id`: the difference comes from the stash (as far as it has and the kit has
+## room) or goes back to it. Standard-issue items are never stashed. Returns how many the kit holds afterwards.
+func apply_set_kit_count(id: String, wanted: int) -> int:
+	var have := kit.count(id)
+	if wanted > have:
+		var supply := 1000000 if ExtractionItems.is_standard_issue(id) else stash.count(id)
+		var n := kit.apply_add(id, mini(wanted - have, supply))
+		if not ExtractionItems.is_standard_issue(id):
+			stash.apply_take(id, n)
+	elif wanted < have:
+		if ExtractionItems.is_standard_issue(id):
+			kit.apply_take(id, have - wanted)
+			_apply_insured_fit()
+		else:
+			apply_move_to_stash(id, have - wanted)
+	return kit.count(id)
+
+
 ## Moves the last raid's kit back from the stash, as much as the stash still holds, and insures what it insured.
 func apply_refill_last_kit() -> void:
 	if str(last_kit.get("armor", "")) != "":

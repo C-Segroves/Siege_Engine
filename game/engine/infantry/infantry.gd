@@ -68,6 +68,8 @@ var skin_id := ""
 var spawn_armor_id := ""
 ## The weapons he comes back with (his slot's, else the armour's default_loadout).
 var spawn_loadout: Array = []
+## The backpack, grenade type and hand items he comes back with (SpawnLoadout.make_kit; empty = the armour's defaults).
+var spawn_kit := {}
 ## func(soldier: Infantry, attacker: Node) -> bool: returns true when it took the lethal hit itself, e.g. the
 ## extraction mode's downed state; the soldier then does not die. Called on the host only (puppets take no hits).
 var lethal_hit_guard := Callable()
@@ -618,6 +620,8 @@ func respawn(xf: Transform3D) -> void:
 		_rebuild_body()
 	super.respawn(xf)
 	kit.apply_spawn(armor)
+	if again == spawn_armor_id:
+		kit.apply_slot(armor, spawn_kit)
 	InfantryPack.apply_cloak_profile(self)
 	cloak.apply_forced(cloak.profile.respawn_cloak_s)
 	equip(spawn_loadout if not spawn_loadout.is_empty() and again == spawn_armor_id else armor.get("default_loadout", []))

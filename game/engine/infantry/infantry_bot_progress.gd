@@ -42,5 +42,9 @@ static func make_station_key(index: int) -> String:
 	return "station:%d" % index
 
 
+static func make_repair_key(obj: Node) -> String:
+	return "repair:%d" % obj.get_instance_id()
+
+
 static func make_vehicle_key(vehicle: Herc) -> String:
 	return "vehicle:%d" % vehicle.net_id

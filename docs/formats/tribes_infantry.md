@@ -201,8 +201,16 @@ See CODING_STANDARDS.md section 2 (binding context `infantry`).
 | F | `seat_next` (in a vehicle) |
 | G (hold, release) | `grenade_throw` |
 | B (hold, release) | `mine_drop` |
-| R | `pack_use`: switch a toggled pack (shield, repair, jammer); with nothing to switch, a mode's reload (`InfantryGearDirector.reload_hook`: the extraction mode loads carried ammo at once) |
-| H | `repair_kit_use` |
+| R, P | `pack_use`: switch a toggled pack (shield, repair, jammer, cloak) or place a deploy pack; with nothing to switch, a mode's reload (`InfantryGearDirector.reload_hook`: the extraction mode loads carried ammo at once). R is Tribes 2's useBackpack (controlDefaults.cs), P Tribes 1's `use("BackPack")` (config.cs) |
+| H | `repair_kit_use` (Tribes 1's `use("Repair Kit")`; Tribes 2's own Q is the next weapon here, so it stays `weapon_next`) |
+
+The other originals' keys that do not clash are kept: G grenade (both), B mine (Tribes 2; Tribes 1 uses M, which is the missile camera here), beacons are not modelled. Every press is answered: a line over the health bar
+(green for what happened, amber for a refusal: "Shield Pack ON", "No Repair Kit left", "Health is full - Repair Kit
+kept", "Shield Pack: not enough energy", "No backpack worn ..."), a sound (the pack's own: shield_on, repair, jammer_on,
+cloak_on ...; the originals' failpack / misc.error for a refusal; health_patch / Pku_hlth for a kit, written to
+`infantry_gear.json` "sounds" and each pack's `use_sound` by tools/export_tribes_gear.py), a green wash for a kit, and the
+HUD kit line shows each item with its key and count ("[G] Grenade 5  [H] Repair Kit 1  [R] Shield Pack ON").
+The line is `InfantryGearDirector.notice_text`, told to the pressing player only (`report`).
 
 ## 3. Starting on foot: mode defaults (decided while the user was away; please review)
 
@@ -220,7 +228,10 @@ Other defaults:
 - **The player's choice.** The roster entry's `infantry_armor`, `infantry_body` and `infantry_skin` (the match
   screens offer `InfantryCatalog.make_armors / make_bodies / make_skins`) become the soldier spec's `armor`,
   `body_shape` and `skin`; he spawns and respawns in that armour (else light), and a station's new armour keeps the
-  kind of body (female, Bioderm).
+  kind of body (female, Bioderm). The roster's loadout slot also gives the kit (`SpawnLoadout.make_kit`: the slot's
+  backpack, grenade type and hand-item counts up to the armour's limits, `InfantryKit.apply_slot`), on the spawn and
+  again on every respawn in that armour; before this a backpack chosen in the loadout never reached the battle and R
+  had nothing to switch.
 - **AI.** AI pilots stay in their vehicles. AI soldiers are the match's infantry bots (section 7).
 - **Co-op end.** A squad counts as destroyed when its vehicles are destroyed. Soldiers respawn, so they don't
   keep a lost match going.
@@ -269,7 +280,7 @@ The host simulates everything.
 | grenade | Mine.cs MineData Handgrenade (damageValue, explosionRadius, $ShrapnelDamageType, mass, elasticity, friction); fuse: Handgrenade::onAdd schedules Mine::Detonate; throw: item.cs Grenade::onUse `GameBase::throw(.., 9 x throwStrength)` | weapons/grenade.cs GrenadeThrown (indirectDamage, damageRadius, radiusDamageType, mass, elasticity, friction, kickBackStrength); fuse: weapTurretCode.cs GrenadeThrown::onThrow schedule |
 | other grenades | - | Concussion (no damage, kickBackStrength 3500), Flash (damage; the white-out isn't modelled); Flare and Camera grenades recorded, not thrown |
 | mine | AntipersonelMine (triggerRadius, damageValue); armed at rest (deployCheck every 3 s); thrown by MineAmmo::onUse | MineDeployed (proximity, armTime, indirectDamage) |
-| repair kit | RepairKit::onUse repairDamage 0.2 | RepairKit::onUse applyRepair 0.2 (only when hurt; the remake uses that rule for both) |
+| repair kit | RepairKit::onUse repairDamage 0.2 (at once) | RepairKit::onUse applyRepair 0.2 (only when hurt; the remake uses that rule for both): the reserve heals at the armour's repairRate 0.0033 per 32 ms tick, 1.94 s for 0.2 (`repair_s`; `InfantryKit.apply_heal`) |
 | beacon | recorded, not used (no targeting system to feed) | same |
 | throw strength | throwRelease: the key held up to 1 s gives 0.3 + 0.7 x hold (remoteThrowItem); 0.5 s between throws | startThrowCount / endThrowCount: hold / 300 ms within 0.5 .. 1.5, / 2; impulse = eye x strength x 20 + up x 4 x (1 - abs(eye.z)) + velocity x 0.4, over the item's mass; 0.8 s between throws |
 

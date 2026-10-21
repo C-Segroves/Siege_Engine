@@ -477,7 +477,7 @@ func _check_packs(battle: Battle) -> void:
 	s.kit.counts["tribes2:REPAIR_KIT"] = 1
 	hurt = float(s.components[0].hp)
 	_press("repair_kit_use")
-	await _frames(2)
+	await _seconds(InfantryGear.item("tribes2:REPAIR_KIT").repair_s + 0.3)   # Tribes 2 applyRepair heals over ~2 s
 	_expect(float(s.components[0].hp) > hurt + 500.0 and s.kit.count("tribes2:REPAIR_KIT") == 0, "repair_kit_use: +600")
 	s.apply_armor("tribes2:LIGHT", ["tribes2:CHAINGUN"], "", "tribes2:SENSOR_JAMMER_PACK")
 	gear.apply_pack_toggle(1)

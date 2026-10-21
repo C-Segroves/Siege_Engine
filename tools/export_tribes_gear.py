@@ -39,6 +39,44 @@ def find(rx, text, default=None, flags=re.S):
     return m.group(1)
 
 
+# The sounds heard when a hand item or a pack is used, copied into the pack as PCM (V.copy_sound).
+#   Tribes 1: nsound.cs SoundShieldOn / SoundJammerOn / SoundEnergyPackOn / SoundRepairItem are the packs' sfxFire
+#     (item.cs ShieldPackImage, SensorJammerPackImage ...), SoundPackUse / SoundPackFail the generic use and refusal,
+#     SoundPickupHealth the stand-in for a repair kit (RepairKit::onUse itself plays nothing).
+#   Tribes 2: packs/<pack>.cs stateSound[1] (the Activate state) of the shield, repair, jammer and cloaking packs,
+#     item.cs RepairPatchSound for the kit, misc.error.wav for a refused use (stand-ins; the energy and ammo packs
+#     have no switch and no sound).
+T1_USE_SOUNDS = {'kit': 'Pku_hlth.wav', 'pack_fail': 'failpack.wav', 'pack_use': 'usepack.wav',
+                 'shield': 'shield_on.wav', 'jammer': 'jammer_on.wav', 'energy': 'energypackon.wav',
+                 'repair': 'repair.wav'}
+T2_USE_SOUNDS = {'kit': 'fx/misc/health_patch.wav', 'pack_fail': 'fx/misc/misc.error.wav',
+                 'shield': 'fx/packs/shield_on.wav', 'repair': 'fx/packs/packs.repairPackOn.wav',
+                 'jammer': 'fx/packs/sensorjammerpack_on.wav', 'cloak': 'fx/packs/cloak_on.wav'}
+# Tribes 2 ShapeBase::applyRepair adds to a reserve that heals repairRate (PlayerData, player.cs) per tick.
+T2_KIT_REPAIR_RATE = 0.0033
+
+
+def apply_use_feedback(pack, gear):
+    """Adds "sounds" {kit, pack_fail, pack_use} to `gear`, each pack's "use_sound" and the kit's "repair_s" (how long
+    the kit takes to heal: Tribes 1 repairDamage is instant = 0, Tribes 2 applyRepair heals at repairRate per tick)."""
+    if pack == 'tribes':
+        find_sound = lambda name: V.copy_sound('tribes', V.find_file(V.T1_SOUNDS, name)) if name else ''
+        table = T1_USE_SOUNDS
+    else:
+        find_sound = lambda name: V.copy_sound('tribes2', os.path.join(V.T2_AUDIO, *name.split('/'))) if name else ''
+        table = T2_USE_SOUNDS
+    gear['sounds'] = {k: find_sound(table.get(k, '')) for k in ('kit', 'pack_fail', 'pack_use')}
+    for p in gear['packs']:
+        p['use_sound'] = find_sound(table.get(p['effect'], '')) or gear['sounds']['pack_use']
+    for item in gear['items']:
+        if item.get('kind') == 'repair_kit':
+            if pack == 'tribes':
+                item['repair_s'] = 0.0
+            else:
+                item['repair_s'] = r(item['repair'] / DAMAGE_SCALE / (T2_KIT_REPAIR_RATE * TICKS_PER_SECOND), 3)
+    return gear
+
+
 def keep_burst_fx(pack, gear):
     """Carries each item's `burst_fx` (written by the weapon_fx step, fx_deaths.attach_gear_bursts) over from the
     existing file, so re-running this exporter alone keeps the bursts' explosions."""
@@ -54,6 +92,7 @@ def keep_burst_fx(pack, gear):
 
 def write(pack, gear, seats):
     keep_burst_fx(pack, gear)
+    apply_use_feedback(pack, gear)
     cloak = gear.pop('cloak', None)
     if cloak:
         V.wjson(P.pack(pack, 'gameplay', 'cloak.json'), {'pack': pack, 'engine_schema': 1, 'profiles': cloak})

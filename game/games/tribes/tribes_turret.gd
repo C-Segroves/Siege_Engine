@@ -84,6 +84,10 @@ func _ready() -> void:
 		_think_t = THINK_SECONDS * float(get_instance_id() % THINK_SLOTS) / float(THINK_SLOTS)
 
 
+func target_cleared() -> void:
+	target = null
+
+
 func is_armed() -> bool:
 	return gun != null and gun.is_valid()
 

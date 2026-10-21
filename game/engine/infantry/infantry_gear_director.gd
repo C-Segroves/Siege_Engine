@@ -17,10 +17,18 @@ const THROW_ACTIONS := {"grenade_throw": SLOT_GRENADE, "mine_drop": SLOT_MINE}
 ## Where a throw starts: this far ahead of the eye (T2 getBoxCenter of the thrower; T1 engine-side).
 const THROW_AHEAD := 0.6
 const MSEC := 1000.0
+## How long a line about a pack or kit use stays on the HUD.
+const NOTICE_SECONDS := 2.5
 
 var battle: Battle
 ## func(peer: int, soldier: Infantry) -> void: host, pack_use with no pack to switch (a mode's reload).
 var reload_hook := Callable()
+## The last pack / kit line told to the local player (InfantryHud draws it for NOTICE_SECONDS), and the end of the
+## green flash a kit gives the health bar.
+var notice_text := ""
+var notice_ok := true
+var notice_until_ms := 0
+var heal_flash_until_ms := 0
 var _hold_started := {}         # action -> ticks msec of the press
 var _items := {}                # item net id -> ThrownItem (every peer)
 var _next_item_id := 1
@@ -137,6 +145,7 @@ static func make_throw_velocity(record: Dictionary, rules: Dictionary, s: Infant
 ## (on only with the pack's min_energy). A pack that is not
 ## toggled (energy, ammo; or none) has nothing to switch: pack_use then asks for a reload instead (the
 ## reload_hook, e.g. the extraction mode loading rounds from the carried inventory; the originals have no reload).
+## Every outcome is told to the soldier's player (see report): what the pack did, or why nothing happened.
 func apply_pack_toggle(peer: int) -> void:
 	var s := battle.occupancy.soldier_of(peer)
 	if s == null or not s.alive:
@@ -145,22 +154,82 @@ func apply_pack_toggle(peer: int) -> void:
 	if deployables and TribesDeployables.is_deploy_pack(s.kit.pack_id):
 		deployables.apply_deploy(peer, s)      # Tribes: using a deploy pack places it (agent H)
 		return
+	var game := str(s.armor.get("pack", "tribes"))
+	var p := InfantryGear.pack(s.kit.pack_id)
+	if p.is_empty():
+		report(peer, false, "No backpack worn - take one at an inventory station", InfantryGear.sound(game, "pack_fail"))
+		return
 	if not s.kit.is_pack_toggled():
 		if reload_hook.is_valid():
 			reload_hook.call(peer, s)
+		else:
+			report(peer, true, make_passive_text(p), "")
 		return
-	var need := float(InfantryGear.pack(s.kit.pack_id).get("min_energy", 0.0))
-	s.kit.pack_active = not s.kit.pack_active and s.capacitor >= need
+	var need := float(p.get("min_energy", 0.0))
+	if not s.kit.pack_active and s.capacitor < need:
+		report(peer, false, "%s: not enough energy" % p.name, InfantryGear.sound(game, "pack_fail"))
+		return
+	s.kit.pack_active = not s.kit.pack_active
+	report(peer, true, "%s %s" % [p.name, "ON" if s.kit.pack_active else "OFF"],
+		str(p.get("use_sound", InfantryGear.sound(game, "pack_use"))) if s.kit.pack_active else "")
+
+
+## What pack_use says for a backpack with no switch: it works while worn.
+static func make_passive_text(p: Dictionary) -> String:
+	match str(p.get("effect", "")):
+		"energy":
+			return "%s: always on, +%s energy/s" % [p.name, str(float(p.get("recharge_bonus_per_s", 0.0)))]
+		"ammo":
+			return "%s: always on, extra ammunition carried" % p.name
+	return "%s: nothing to switch" % p.name
 
 
 ## Host: `peer` uses a repair kit when he is hurt (T2 RepairKit::onUse; the remake applies that rule to Tribes 1 too).
+## The kit heals its repair amount (T1 repairDamage 0.2 at once, T2 applyRepair 0.2 at repairRate per tick: repair_s).
 func apply_repair_kit(peer: int) -> void:
 	var s := battle.occupancy.soldier_of(peer)
-	var id := InfantryKit.make_repair_kit_id(s.armor) if s else ""
-	if id == "" or not s.alive or s.kit.count(id) <= 0 or s.integrity >= 1.0:
+	if s == null or not s.alive:
 		return
+	var game := str(s.armor.get("pack", "tribes"))
+	var id := InfantryKit.make_repair_kit_id(s.armor)
+	if id == "" or s.kit.count(id) <= 0:
+		report(peer, false, "No Repair Kit left", InfantryGear.sound(game, "pack_fail"))
+		return
+	if s.integrity >= 1.0:
+		report(peer, false, "Health is full - Repair Kit kept", InfantryGear.sound(game, "pack_fail"))
+		return
+	var record := InfantryGear.item(id)
+	var amount := float(record.get("repair", 0.0))
 	s.kit.apply_take(id)
-	InfantryPack.apply_repair(s, float(InfantryGear.item(id).get("repair", 0.0)))
+	s.kit.apply_heal(amount, float(record.get("repair_s", 0.0)))
+	InfantryPack.apply_repair(s, s.kit.take_heal(0.0))   # an instant kit (Tribes 1) heals now, a timed one frame by frame
+	var percent := roundi(amount / maxf(float(s.components[0].max), 1.0) * 100.0)
+	report(peer, true, "Repair Kit used: +%d%% health, %d left" % [percent, s.kit.count(id)], InfantryGear.sound(game, "kit"), true)
+
+
+## Host (also the deploy packs): tells `peer`'s player what his key did: a line on his HUD (ok = green, else amber), a sound, and for a kit
+## the green flash of the health bar. Nothing for bots.
+func report(peer: int, ok: bool, text: String, sound: String, healing := false) -> void:
+	if peer == multiplayer.get_unique_id():
+		_show_feedback(ok, text, sound, healing)
+	elif Net.is_online() and multiplayer.get_peers().has(peer):
+		_show_feedback.rpc_id(peer, ok, text, sound, healing)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _show_feedback(ok: bool, text: String, sound: String, healing: bool) -> void:
+	notice_text = text
+	notice_ok = ok
+	notice_until_ms = Time.get_ticks_msec() + int(NOTICE_SECONDS * MSEC)
+	if healing:
+		heal_flash_until_ms = notice_until_ms
+	if sound != "":
+		Sfx.play_ui(sound)
+
+
+## True while the notice is on screen (InfantryHud draws it).
+func is_notice_shown() -> bool:
+	return notice_text != "" and Time.get_ticks_msec() < notice_until_ms
 
 
 # ------------------------------------------------------------------ every peer: thrown items

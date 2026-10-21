@@ -1,0 +1,344 @@
+extends Node
+## Base objects are never removed and can be repaired (docs/TRIBES_BASE_EQUIPMENT.md; BaseRepairRules), on a Tribes 1
+## and a Tribes 2 map in real battles:
+##   standing    a destroyed generator / turret stays in the world as a ruin (disabled, not removed); its power
+##               effect holds: a generator down powers its base off;
+##   faction     a guard soldier of the owner's side walks to the downed generator and repairs it (Task.REPAIR),
+##               without capturing it; the base is powered again;
+##   capture     a player (a team hostile to the owner) who repairs a downed turret with the repair pack captures
+##               it: its team becomes his, it fires at its old faction; it returns to the owner when the time is up
+##               and when it is destroyed; the owner's repair work takes it back; a captured generator powers the
+##               capturer's side and not the owner's;
+##   sync        a client applies the host's team / repair messages (their receiving functions called as the RPC does).
+## godot --headless --audio-driver Dummy --path game res://tests/base_repair_check.tscn
+
+const SavedCampaignGuard := preload("res://tests/saved_campaign_guard.gd")
+const MAPS := ["tribes:Raindance", "tribes2:Katabatic"]
+const SETTLE_FRAMES := 30
+const TIME_SCALE := 4.0
+const TARGET_VEHICLE := "es1:SCORPION"
+const PLAYER_TEAM := 7
+const OWNER_TEAM := 0
+const SPOT_SHARES := [0.3, 0.5, 0.7]
+const SPOT_BEARINGS := 12
+const WAIT_STEP := 0.25
+const FACTION_WAIT := 90.0
+const REPAIR_WAIT := 30.0
+const FIRE_WAIT := 8.0
+const HIT_WAIT := 2.0
+const CREW_DISTANCE := 7.0
+const CREW_DROP := 4.0
+const TEST_CAPTURE_SECONDS := 40.0
+
+var _failures := 0
+var _guard := SavedCampaignGuard.new()
+
+
+func _ready() -> void:
+	_guard.back_up()
+	await get_tree().process_frame
+	_check_rules()
+	for map_id in MAPS:
+		if MapBuilder.load_map(map_id).is_empty():
+			print("skip %s: not installed" % map_id)
+			continue
+		await _check_map(map_id)
+	Engine.time_scale = 1.0
+	_guard.restore()
+	print("base_repair_check: %s (%d failures)" % ["OK" if _failures == 0 else "FAILED", _failures])
+	get_tree().quit(1 if _failures > 0 else 0)
+
+
+func _expect(ok: bool, what: String) -> void:
+	print("  %s %s" % ["ok  " if ok else "FAIL", what])
+	if not ok:
+		_failures += 1
+
+
+func _frames(n: int) -> void:
+	for i in n:
+		await get_tree().physics_frame
+
+
+## Waits up to `limit` seconds (game time) until `done` is true; returns whether it became true.
+func _until(done: Callable, limit: float) -> bool:
+	var t := 0.0
+	while t < limit:
+		if done.call():
+			return true
+		await get_tree().create_timer(WAIT_STEP, true, true).timeout
+		t += WAIT_STEP * Engine.time_scale
+	return done.call()
+
+
+func _check_rules() -> void:
+	print("rules:")
+	_expect(BaseRepairRules.is_capture_on() and BaseRepairRules.make_capture_seconds() > 0.0, "capture is on, with a duration from data")
+	_expect(float(BaseRepairRules.faction().get("search_m", 0.0)) > 0.0 and float(BaseRepairRules.faction().get("reach_m", 0.0)) > 0.0,
+		"the faction repair crew has its search and reach in data")
+
+
+func _check_map(map_id: String) -> void:
+	print("%s:" % map_id)
+	var battle := await _start_battle(map_id)
+	Engine.time_scale = TIME_SCALE
+	var base := TribesBase.of(battle)
+	var turret := _find_turret(base, OWNER_TEAM)
+	_expect(base != null and turret != null, "team 0 has a base with an armed, powered turret")
+	if base and turret:
+		var gens := base.objects_of(TribesBaseObject.KIND_GENERATOR).filter(
+			func(g: TribesBaseObject) -> bool: return base.grid.make_powered_groups([g.power_group]).has(turret.power_group))
+		_expect(not gens.is_empty(), "the turret's group is fed by %d generator(s)" % gens.size())
+		if not gens.is_empty():
+			await _check_standing(base, turret, gens)
+			await _check_faction_repair(battle, base, turret, gens)
+			await _check_capture(battle, base, turret)
+			await _check_captured_generator(battle, base, turret, gens)
+			_check_sync(base, turret)
+	Engine.time_scale = 1.0
+	battle.queue_free()
+	await _frames(4)
+
+
+func _start_battle(map_id: String) -> Battle:
+	var config := BattleSetup.make_default_config("es1:RAPTOR")
+	config.merge({"mode": "vs", "respawn": true, "teams": true, "map": map_id, "start": BattleInfantry.START_ON_FOOT,
+		"frag_limit": 50, "ai": []}, true)
+	var battle: Battle = load("res://games/es1/battle.tscn").instantiate()
+	battle.config = config
+	get_tree().root.add_child(battle)
+	get_tree().current_scene = battle
+	await _frames(SETTLE_FRAMES)
+	return battle
+
+
+func _find_turret(base: TribesBase, team: int) -> TribesTurret:
+	var best: TribesTurret = null
+	for o in base.objects_of(TribesBaseObject.KIND_TURRET):
+		var t := o as TribesTurret
+		if t and t.team == team and t.is_armed() and t.is_working() and (best == null or t.engage_range > best.engage_range):
+			best = t
+	return best
+
+
+## Hits `o` until it is destroyed (a Tribes 2 shield takes the first hits).
+static func _destroy(o: TribesBaseObject) -> void:
+	for i in 6:
+		o.apply_hit(0.0, o.max_hp, null)
+
+
+# ------------------------------------------------------------------ standing
+
+func _check_standing(base: TribesBase, turret: TribesTurret, gens: Array) -> void:
+	print(" standing:")
+	for g in gens:
+		_destroy(g)
+	_destroy(turret)
+	await get_tree().create_timer(TribesBase.STATE_CHECK_SECONDS * 3.0, true, true).timeout
+	_expect(gens.all(func(g: TribesBaseObject) -> bool: return not g.alive and g.make_damage_state() == "Destroyed"),
+		"the generators are destroyed")
+	_expect(gens.all(func(g: TribesBaseObject) -> bool: return _is_standing(base, g)), "a destroyed generator stays standing in the world")
+	_expect(is_instance_valid(turret) and turret.is_inside_tree() and not turret.alive and base.objects.has(turret),
+		"a destroyed turret stays standing too")
+	_expect(not turret.powered and not turret.is_working(), "the base is powered off with its generators down")
+	var shots := turret.shots_fired
+	await get_tree().create_timer(1.0, true, true).timeout
+	_expect(turret.shots_fired == shots, "a downed turret does not fire")
+
+
+## A floor spot CREW_DISTANCE from `g` on the same level (a ray down from just above the generator's height).
+func _find_crew_spot(g: TribesBaseObject) -> Vector3:
+	var space := g.get_world_3d().direct_space_state
+	for k in 8:
+		var dir := Vector3.FORWARD.rotated(Vector3.UP, TAU * k / 8.0)
+		var top := g.global_position + dir * CREW_DISTANCE + Vector3.UP * CREW_DROP
+		var hit := space.intersect_ray(PhysicsRayQueryParameters3D.create(top, top + Vector3.DOWN * CREW_DROP * 3.0))
+		if not hit.is_empty() and (hit.normal as Vector3).y > 0.7:
+			return (hit.position as Vector3) + Vector3.UP
+	return g.global_position + Vector3(CREW_DISTANCE, 1.0, 0.0)
+
+
+static func _is_standing(base: TribesBase, o: TribesBaseObject) -> bool:
+	return is_instance_valid(o) and o.is_inside_tree() and not o.is_queued_for_deletion() and base.objects.has(o) 		and o.is_in_group(Structure.TARGET_GROUP)
+
+
+# ------------------------------------------------------------------ faction crew
+
+func _check_faction_repair(battle: Battle, base: TribesBase, turret: TribesTurret, gens: Array) -> void:
+	print(" faction repair:")
+	var pack: String = battle.infantry.pack
+	var spec := battle.infantry.bots.make_bot_spec(pack, 0)
+	var g: TribesBaseObject = gens[0]
+	var from := _find_crew_spot(g)
+	spec.team = OWNER_TEAM
+	spec.xf = Transform3D(Basis(), from)
+	var brain := battle.infantry.bots.spawn_bot(spec, 0.5)
+	_expect(brain != null, "a guard soldier of the owner's side is fielded")
+	if brain == null:
+		return
+	brain.guard_point = g.global_position
+	brain.guard_radius = CREW_DISTANCE * 4.0
+	var job := base.find_job_for(brain.soldier, brain.bot_id)
+	_expect(job != null and job.team == OWNER_TEAM, "the base hands him a downed object of his side (%s)" % (job.display_name if job else "none"))
+	var done := job != null and await _until(func() -> bool: return job.alive and job.is_enabled(), FACTION_WAIT)
+	_expect(done, "the soldier walks to the downed generator and repairs it (task %d, %.0f/%.0f hp)" % [brain.task,
+		job.hp if job else 0.0, job.max_hp if job else 0.0])
+	_expect(gens.all(func(x: TribesBaseObject) -> bool: return x.team == OWNER_TEAM and not x.is_captured()),
+		"faction repair does not capture: the generators stay the owner's")
+	await get_tree().create_timer(TribesBase.STATE_CHECK_SECONDS * 3.0, true, true).timeout
+	_expect(base.objects_of(TribesBaseObject.KIND_GENERATOR).any(func(x: TribesBaseObject) -> bool: return x.is_power_source()),
+		"a repaired generator powers again")
+	# the crew is done: it must not meddle with the capture checks
+	brain.guard_radius = 0.0
+	brain.set_physics_process(false)
+	brain.soldier.global_position += Vector3(0, 3000, 0)
+
+
+# ------------------------------------------------------------------ player capture
+
+func _check_capture(battle: Battle, base: TribesBase, turret: TribesTurret) -> void:
+	print(" player capture:")
+	var s := battle.player as Infantry
+	var pack_id := _repair_pack_id(s)
+	_expect(pack_id != "", "the armour can wear a repair pack")
+	if pack_id == "":
+		return
+	s.spawn_protection = 100000.0
+	s.apply_spawn_protection()
+	s.team = PLAYER_TEAM
+	s.kit.pack_id = pack_id
+	var enemy := _make_enemy(battle, turret)
+	_expect(enemy != null, "an old-faction target in the turret's sight exists")
+	_destroy(turret)
+	_expect(not turret.alive and turret.team == OWNER_TEAM, "the owner's turret is down")
+	s.global_position = turret.global_position + Vector3.UP * 0.5
+	s.velocity = Vector3.ZERO
+	s.kit.pack_active = true
+	s.capacitor = s.capacitor_max
+	_expect(base.find_repair_target(s) == turret, "the repair pack finds the downed enemy turret in reach")
+	var captured := await _until(func() -> bool: return turret.is_captured(), REPAIR_WAIT)
+	_expect(captured and turret.team == PLAYER_TEAM and turret.home_team == OWNER_TEAM,
+		"repairing it captures it for the player's team (owner %d, now %d)" % [turret.home_team, turret.team])
+	var up := await _until(func() -> bool: return turret.alive and turret.is_enabled(), REPAIR_WAIT)
+	_expect(up, "the repair brings the turret back (%.0f / %.0f hp)" % [turret.hp, turret.max_hp])
+	_expect(turret.is_working(), "a captured turret works on the capturer's own power")
+	s.kit.pack_active = false
+	s.global_position += Vector3(0, 3000, 0)
+	if enemy:
+		var hp0 := _health(enemy)
+		var shots := turret.shots_fired
+		turret._think_t = 0.0
+		turret.energy = turret.energy_max      # the rebuilding hits drained its shield energy
+		await _until(func() -> bool: return turret.shots_fired > shots or not enemy.alive, FIRE_WAIT)
+		await get_tree().create_timer(HIT_WAIT, true, true).timeout
+		_expect(turret.shots_fired > shots, "the captured turret fires at its old faction (%d shots)" % (turret.shots_fired - shots))
+		_expect(not enemy.alive or _health(enemy) < hp0, "and hits it (%.0f -> %.0f)" % [hp0, _health(enemy)])
+	# expiry
+	turret.capture_left = 0.4
+	var home := await _until(func() -> bool: return not turret.is_captured() and turret.team == OWNER_TEAM, 5.0)
+	_expect(home, "when the time is up the turret returns to its owner")
+	if enemy:
+		enemy.team = OWNER_TEAM
+		turret._think_t = 0.0
+		await _frames(4)
+		_expect(turret.find_target() == null, "back home it leaves its own faction alone")
+	# destroyed while captured -> back to the owner
+	turret.apply_capture(PLAYER_TEAM, TEST_CAPTURE_SECONDS)
+	_expect(turret.team == PLAYER_TEAM and turret.is_captured(), "captured again")
+	_destroy(turret)
+	_expect(turret.team == OWNER_TEAM and not turret.is_captured() and not turret.alive,
+		"a captured turret that is destroyed goes back to its owner as a ruin")
+	# the owner's repair work after a capture takes it back
+	turret.apply_capture(PLAYER_TEAM, TEST_CAPTURE_SECONDS)
+	base.apply_object_repair(turret, OWNER_TEAM, 10.0)
+	_expect(turret.team == OWNER_TEAM and not turret.is_captured(), "the owner repairing a captured object recaptures it")
+	# an allied repairer does not capture
+	_destroy(turret)
+	TeamRelations.apply_stance(PLAYER_TEAM, OWNER_TEAM, TeamRelations.ALLIED)
+	base.apply_object_repair(turret, PLAYER_TEAM, 10.0)
+	_expect(turret.team == OWNER_TEAM and not turret.is_captured(), "an ally's repair work does not capture")
+	TeamRelations.clear()
+	s.team = OWNER_TEAM
+	if is_instance_valid(enemy):
+		enemy.global_position += Vector3(0, 3000, 0)
+	turret.apply_repair(turret.max_hp)
+
+
+## An old-faction (team 0) target the turret sees: a vehicle placed in its range, arc and sight.
+func _make_enemy(battle: Battle, turret: TribesTurret) -> Herc:
+	var enemy := battle.spawn_ai(TARGET_VEHICLE, OWNER_TEAM, Transform3D(Basis(), turret.global_position + Vector3(0, 500, 0)), [], "Target", {"skill": 0.0})
+	for c in enemy.get_children():
+		if c is AIPilot:
+			c.queue_free()
+	enemy.end_spawn_protection()
+	for share in SPOT_SHARES:
+		for k in SPOT_BEARINGS:
+			var dir := Vector3.FORWARD.rotated(Vector3.UP, TAU * k / SPOT_BEARINGS)
+			var p := turret.global_position + dir * turret.engage_range * float(share)
+			p.y = MapBuilder.ground_height(battle, p) + 0.5
+			enemy.global_position = p
+			if turret.is_in_arc(p + Vector3.UP * TribesTurret.VEHICLE_AIM_HEIGHT - turret.make_muzzle()) and turret.has_line_of_sight(enemy):
+				return enemy
+	enemy.queue_free()
+	return null
+
+
+static func _health(h: Herc) -> float:
+	return h.shield_front + h.shield_rear + h.integrity * 10000.0
+
+
+func _repair_pack_id(s: Infantry) -> String:
+	for id in InfantryGear.packs_of(s.armor):
+		if str(InfantryGear.pack(id).get("effect", "")) == "repair":
+			return str(id)
+	return ""
+
+
+# ------------------------------------------------------------------ captured generator
+
+func _check_captured_generator(battle: Battle, base: TribesBase, turret: TribesTurret, gens: Array) -> void:
+	print(" captured generator:")
+	if not turret.alive:
+		turret.apply_repair(turret.max_hp)
+	for g in gens:
+		if not g.alive:
+			g.apply_repair(g.max_hp)
+		_destroy(g)
+	turret.apply_repair(turret.max_hp)
+	await get_tree().create_timer(TribesBase.STATE_CHECK_SECONDS * 3.0, true, true).timeout
+	_expect(not turret.powered, "with every generator down the owner's turret is off")
+	var gen: TribesBaseObject = gens[0]
+	gen.apply_capture(PLAYER_TEAM, TEST_CAPTURE_SECONDS)
+	gen.apply_repair(gen.max_hp)
+	await get_tree().create_timer(TribesBase.STATE_CHECK_SECONDS * 3.0, true, true).timeout
+	_expect(gen.team == PLAYER_TEAM and gen.is_power_source() and gen.is_captured(), "the player holds the repaired generator")
+	_expect(not turret.powered, "a captured generator does not power the owner's base")
+	turret.apply_owner_team(PLAYER_TEAM)
+	base.apply_power()
+	_expect(turret.powered, "it powers the capturer's side of the base")
+	turret.apply_owner_team(OWNER_TEAM)
+	gen.apply_release()
+	for g in gens:
+		g.apply_repair(g.max_hp)
+	await get_tree().create_timer(TribesBase.STATE_CHECK_SECONDS * 3.0, true, true).timeout
+	_expect(gen.team == OWNER_TEAM and turret.powered, "released, the generator powers its owner's base again")
+
+
+# ------------------------------------------------------------------ client sync
+
+## A client gets the host's messages through these receiving functions: the team change, the repair, the destruction.
+func _check_sync(base: TribesBase, turret: TribesTurret) -> void:
+	print(" client sync:")
+	var changes := []
+	turret.state_changed.connect(func(o: TribesBaseObject) -> void: changes.append(o.team))
+	turret._apply_team_state(PLAYER_TEAM, 30.0, OWNER_TEAM)
+	_expect(turret.team == PLAYER_TEAM and turret.home_team == OWNER_TEAM and is_equal_approx(turret.capture_left, 30.0),
+		"a client applies the host's capture (team, owner, time)")
+	_expect(changes.has(PLAYER_TEAM), "and the object reports the change (power / targets follow)")
+	turret._apply_destroyed()
+	_expect(not turret.alive and turret.team == OWNER_TEAM and not turret.is_captured(),
+		"a client sees a destroyed captured object go home")
+	turret._apply_repaired(1.0)
+	_expect(turret.alive and turret.is_enabled(), "and a repaired one stand up again")
+	turret._apply_team_state(OWNER_TEAM, 0.0, OWNER_TEAM)
+	_expect(turret.team == OWNER_TEAM and not turret.is_captured(), "the host's release returns it")

@@ -11,6 +11,9 @@ var pack_id := ""
 var pack_active := false
 ## Item id -> count.
 var counts := {}
+## Health (ES points) a used repair kit still has to heal, and how fast (host only; the health itself replicates).
+var heal_left := 0.0
+var heal_per_s := 0.0
 var _next_throw_ms := 0
 
 
@@ -18,6 +21,7 @@ var _next_throw_ms := 0
 func apply_spawn(armor: Dictionary) -> void:
 	pack_id = ""
 	pack_active = false
+	heal_left = 0.0
 	counts = (armor.get("default_items", {}) as Dictionary).duplicate()
 	var grenades := InfantryGear.grenades_of(armor)
 	grenade_id = ""
@@ -26,6 +30,24 @@ func apply_spawn(armor: Dictionary) -> void:
 			grenade_id = id
 	if grenade_id == "" and not grenades.is_empty():
 		grenade_id = grenades[0]
+
+
+## The spawn kit of the pilot's loadout slot (SpawnLoadout.make_kit: {pack, grenade, counts}) on top of the armour's
+## default: the backpack he chose, his grenade type and the hand items he carries (up to the armour's limit).
+func apply_slot(armor: Dictionary, slot_kit: Dictionary) -> void:
+	var wanted := str(slot_kit.get("pack", ""))
+	if wanted != "" and InfantryGear.packs_of(armor).has(wanted):
+		pack_id = wanted
+	var grenades := InfantryGear.grenades_of(armor)
+	var chosen := str(slot_kit.get("grenade", ""))
+	if grenades.has(chosen):
+		grenade_id = chosen
+		for id in grenades:
+			counts.erase(id)
+	var carried: Dictionary = slot_kit.get("counts", {})
+	for id in carried:
+		if (armor.get("hand_items", {}) as Dictionary).has(id) and bool(InfantryGear.item(id).get("mapped", false)) 				and (not grenades.has(id) or id == grenade_id):
+			counts[id] = mini(int(carried[id]), make_max_count(armor, id))
 
 
 ## An inventory purchase: `grenade` (one type, T2 maxGrenades 1) and `pack_choice`, every item full.
@@ -92,6 +114,21 @@ func apply_resupply(armor: Dictionary, rounds: int) -> void:
 	for id in armor.get("hand_items", {}):
 		if counts.has(id) or id == make_mine_id(armor):
 			counts[id] = mini(count(id) + rounds, make_max_count(armor, id))
+
+
+## A repair kit takes effect: `amount` health healed over `seconds` (0 = at once, Tribes 1 repairDamage).
+func apply_heal(amount: float, seconds: float) -> void:
+	heal_left += amount
+	heal_per_s = amount / seconds if seconds > 0.0 else 0.0
+
+
+## The health to add this frame of `delta` seconds (the whole reserve at once without a duration).
+func take_heal(delta: float) -> float:
+	if heal_left <= 0.0:
+		return 0.0
+	var part := heal_left if heal_per_s <= 0.0 else minf(heal_left, heal_per_s * delta)
+	heal_left -= part
+	return part
 
 
 func is_pack_toggled() -> bool:

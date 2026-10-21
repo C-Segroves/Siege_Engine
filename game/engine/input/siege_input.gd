@@ -92,7 +92,10 @@ func make_default_bindings() -> Dictionary:
 		"seat_next": [_physical_key(KEY_F), _joy_button(JOY_BUTTON_DPAD_LEFT)],
 		"grenade_throw": [_physical_key(KEY_G), _joy_button(JOY_BUTTON_DPAD_UP)],
 		"mine_drop": [_physical_key(KEY_B), _joy_button(JOY_BUTTON_DPAD_DOWN)],
-		"pack_use": [_physical_key(KEY_R), _joy_button(JOY_BUTTON_DPAD_RIGHT)],
+		## The originals' defaults where they do not clash: the backpack is R in Tribes 2 (controlDefaults.cs useBackpack)
+		## and P in Tribes 1 (config.cs use("BackPack")); the repair kit is H in Tribes 1 (use("Repair Kit")). Tribes 2's
+		## own Q for the kit is the next weapon here (a soldier has no other weapon key), so Q stays weapon_next.
+		"pack_use": [_physical_key(KEY_R), _physical_key(KEY_P), _joy_button(JOY_BUTTON_DPAD_RIGHT)],
 		"repair_kit_use": [_physical_key(KEY_H), _joy_button(JOY_BUTTON_LEFT_STICK)],
 		"scope_zoom": [_mouse_button(MOUSE_BUTTON_MIDDLE), _joy_button(JOY_BUTTON_PADDLE1)],
 		"scope_level": [_physical_key(KEY_X), _joy_button(JOY_BUTTON_PADDLE2)],

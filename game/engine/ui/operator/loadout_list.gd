@@ -71,12 +71,20 @@ func find_row(row_key: String) -> LoadoutRow:
 	return null
 
 
+## The drop-down row (a raid's kit) holding `row_key`, or null.
+func find_kit_row(row_key: String) -> KitRow:
+	for c in _rows.get_children():
+		if c is KitRow and str((c as KitRow).row.key) == row_key:
+			return c
+	return null
+
+
 func _make_empty_text() -> String:
 	return "No vehicle yet: pick one under Look." if _state.side == LoadoutLayout.SIDE_VEHICLE else "No infantry game is installed."
 
 
 func _refresh_fit() -> void:
-	var fit := LoadoutLayout.make_fit(_state.side, _state.make_slot())
+	var fit := _state.make_fit()
 	_fit_label.text = OperatorText.make_fit_text(_state.side, fit)
 	_fit_label.theme_type_variation = "" if bool(fit.ok) else "BadgeNotAllowed"
 	_fit_bar.visible = _state.side == LoadoutLayout.SIDE_INFANTRY and float(fit.kg_max) > 0.0
@@ -84,7 +92,9 @@ func _refresh_fit() -> void:
 	_title.text = "LOADOUT  -  %s" % ("INFANTRY" if _state.side == LoadoutLayout.SIDE_INFANTRY else "VEHICLE")
 
 
-func _make_row(r: Dictionary, blocks: Dictionary, at_risk: Array) -> LoadoutRow:
+func _make_row(r: Dictionary, blocks: Dictionary, at_risk: Array) -> Control:
+	if r.has("choices"):
+		return _make_kit_row(r, blocks, at_risk)
 	r = _make_shown_row(r)
 	var id := OperatorText.make_row_unlock_id(r)
 	var lost := id != "" and _state.ctx.loss_on_death and _state.profile.unlocks.is_lost(id)
@@ -100,6 +110,18 @@ func _make_row(r: Dictionary, blocks: Dictionary, at_risk: Array) -> LoadoutRow:
 		row.theme_type_variation = "TabButton"
 		row.toggle_mode = true
 		row.set_pressed_no_signal(true)
+	return row
+
+
+func _make_kit_row(r: Dictionary, blocks: Dictionary, at_risk: Array) -> KitRow:
+	var id := OperatorText.make_row_unlock_id(r)
+	var lost := id != "" and _state.ctx.loss_on_death and _state.profile.unlocks.is_lost(id)
+	var row := KitRow.make(r, OperatorText.make_row_badge(str(blocks.get(r.key, "")), at_risk.has(id), lost))
+	row.chosen.connect(_state.apply_choose)
+	row.removed.connect(_state.apply_remove)
+	row.option.mouse_entered.connect(_on_row_hover.bind(id))
+	row.option.focus_entered.connect(_on_row_hover.bind(id))
+	_tooltip.watch(row.option, _make_row_tooltip.bind(r, str(blocks.get(r.key, "")), id))
 	return row
 
 
@@ -132,7 +154,8 @@ func _make_herc_skin_name(skin_id: String) -> String:
 
 func _make_row_tooltip(r: Dictionary, blocked: String, id: String) -> Dictionary:
 	if id == "":
-		return {"title": str(r.label), "lines": ["Right click / X removes. Pick a part in the store."], "warning": blocked}
+		var hint := "Pick from the drop-down. Right click / X empties it." if r.has("choices") else "Right click / X removes. Pick a part in the store."
+		return {"title": str(r.label), "lines": [hint], "warning": blocked}
 	var data := OperatorText.make_tooltip(StoreCatalog.make_entry(id, _state.ctx, _state.profile))
 	data.warning = blocked if blocked != "" else str(data.warning)
 	return data
@@ -171,12 +194,16 @@ func _remember_focus() -> void:
 	var focus := get_viewport().gui_get_focus_owner() if is_inside_tree() else null
 	if focus is LoadoutRow and _rows.is_ancestor_of(focus):
 		_focus_key = str((focus as LoadoutRow).row.key)
+	elif focus is OptionButton and _rows.is_ancestor_of(focus):
+		_focus_key = str(focus.get_meta("row_key", ""))
 
 
 func _restore_focus() -> void:
 	if _focus_key == "" or not is_inside_tree():
 		return
-	var row := find_row(_focus_key)
+	var row: Control = find_row(_focus_key)
+	if row == null and find_kit_row(_focus_key) != null:
+		row = find_kit_row(_focus_key).option
 	_focus_key = ""
 	if row != null and row.is_visible_in_tree():
 		row.grab_focus()

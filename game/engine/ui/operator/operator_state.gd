@@ -58,8 +58,20 @@ func has_store() -> bool:
 func make_block_texts() -> Dictionary:
 	var out := {}
 	for b in make_slot().make_blocks(ctx):
-		out[OperatorText.make_row_key_of_part(str(b.part))] = str(b.text)
+		var key := OperatorText.make_row_key_of_part(str(b.part))
+		if not (is_kit_mode() and key != "armour"):
+			out[key] = str(b.text)   # a raid kit is checked by what it holds, not by the slot's wish list
 	return out
+
+
+## True on the infantry side of a raid: the loadout rows are the kit (ExtractionKitEditor), chosen from the stash.
+func is_kit_mode() -> bool:
+	return extraction != null and side == LoadoutLayout.SIDE_INFANTRY
+
+
+## {slots, slots_max, kg, kg_max, ok} of what is shown: the raid kit, or the open slot.
+func make_fit() -> Dictionary:
+	return ExtractionKitEditor.make_fit(extraction) if is_kit_mode() else LoadoutLayout.make_fit(side, make_slot())
 
 
 ## The unlock ids the open slot would put at risk in a raid (nothing outside one).
@@ -195,6 +207,10 @@ func apply_remove(row_key: String) -> void:
 	var row := find_row(row_key)
 	if row.is_empty() or bool(row.locked):
 		return
+	if is_kit_mode():
+		if str(row.kind) != "armour":
+			apply_choose(row_key, str((row.choices as Array)[0].id))   # the first choice is the empty one
+		return
 	if str(row.kind) == MountEntries.KIND_ROW:
 		_apply_empty_mount(row_key)
 		return
@@ -234,7 +250,7 @@ func apply_adjust(row_key: String, direction: int) -> void:
 	elif target <= 0:
 		LoadoutLayout.apply_clear(make_slot(), row_key)
 	else:
-		make_slot().infantry.gear[str(row_key.get_slice(":", 1))] = target
+		make_slot().infantry.gear[OperatorText.make_row_ref(row_key)] = target
 	apply_changed()
 
 
@@ -244,20 +260,76 @@ func apply_fill(row_key: String) -> void:
 	if row.is_empty() or int(row.ammo_max) <= 0:
 		return
 	if str(row.kind) == "gear" and str(row.current) == "":
-		LoadoutLayout.apply_set(make_slot(), row_key, row_key.get_slice(":", 1))
+		LoadoutLayout.apply_set(make_slot(), row_key, OperatorText.make_row_ref(row_key))
 	elif str(row.kind) == "ammo":
 		LoadoutLayout.apply_set_ammo(make_slot(), str(row.current), int(row.ammo_max))
 	else:
-		make_slot().infantry.gear[row_key.get_slice(":", 1)] = int(row.ammo_max)
+		make_slot().infantry.gear[OperatorText.make_row_ref(row_key)] = int(row.ammo_max)
 	apply_changed()
+
+
+## Chooses `choice` (a row's choice id) for loadout row `row_key` of a raid: the kit takes it from the stash, what it
+## replaces goes back. The armour is the operator's own (unlocks), the rest is stock.
+func apply_choose(row_key: String, choice: String) -> void:
+	if not is_kit_mode():
+		return
+	var ok := _apply_kit_choice(row_key, choice)
+	apply_status("" if ok else ExtractionKitEditor.NO_ROOM % row_key.get_slice(":", 0))
+	apply_changed()
+
+
+func _apply_kit_choice(row_key: String, choice: String) -> bool:
+	match row_key:
+		"armour":
+			return _apply_armour_choice(choice)
+		InsuredRow.KEY:
+			return InsuredRow.apply_choice(extraction, make_at_risk_ids(), choice)
+	return ExtractionKitEditor.apply_choice(extraction, row_key, choice)
+
+
+func _apply_armour_choice(armor_id: String) -> bool:
+	if not make_armour_choices().any(func(c: Dictionary) -> bool: return str(c.id) == armor_id):
+		return false
+	var slot := make_slot()
+	LoadoutLayout.apply_set(slot, "armour", armor_id)
+	extraction.apply_slot_armor(profile)
+	return true
+
+
+## The armours a raider may field: the match's game, free in a raid or owned and not lost ([{id, text}]).
+func make_armour_choices() -> Array:
+	var out := []
+	for pack in InfantryCatalog.INFANTRY_PACKS:
+		for a in InfantryCatalog.armors_of(pack):
+			var unlock := UnlockId.make("armor", str(a.id))
+			if str(a.id) == make_slot().armor or (ctx.make_block_reason(unlock) == "" and ctx.is_usable(unlock) and Assets.has_pack(pack)):
+				out.append({"id": str(a.id), "text": str(a.name) if ctx.pack != "" else "%s (%s)" % [a.name, Packs.pack_name(pack)]})
+	return out
 
 
 func make_rows() -> Array:
 	if side == SIDE_STASH:
 		return []
+	if is_kit_mode():
+		return _make_kit_rows()
 	var rows := LoadoutLayout.make_rows(side, make_slot(), ctx)
 	if side == LoadoutLayout.SIDE_VEHICLE:
 		rows.append_array(MountEntries.make_rows(make_slot(), ctx))
+	return rows
+
+
+## The armour row (chosen from the owned armours) followed by the kit's rows.
+func _make_kit_rows() -> Array:
+	var rows := []
+	for r in LoadoutLayout.make_rows(side, make_slot(), ctx):
+		if str(r.kind) == "armour":
+			r.locked = false
+			r.label = "Armour"   # the drop-down names the armour; the row says what it is for
+			r.choices = make_armour_choices()
+			r.choice = r.current
+			rows.append(r)
+	rows.append_array(ExtractionKitEditor.make_rows(extraction))
+	rows.append(InsuredRow.make_row(extraction, make_at_risk_ids()))
 	return rows
 
 
@@ -273,8 +345,15 @@ func apply_changed() -> void:
 	is_dirty = true
 	profile.save()
 	if extraction != null:
+		_apply_raid_armour()
 		extraction.save()
 	changed.emit()
+
+
+## The raid kit wears the armour of the open slot (a store purchase or the Look tab may have changed it); the context checks the new kit.
+func _apply_raid_armour() -> void:
+	extraction.apply_slot_armor(profile)
+	ctx.apply_raid_kit(extraction.kit)
 
 
 ## Back to the free default of a look row ("skin" or "herc_skin").

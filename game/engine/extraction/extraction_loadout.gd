@@ -57,15 +57,18 @@ static func make_kit_weapons(armor_id: String, inv: ExtractionInventory) -> Arra
 	return out
 
 
-## What a raider in `armor_id` really carries from kit `inv`: its weapons, else the rules' free weapon (apply_free_weapon).
+## What a raider in `armor_id` really carries from kit `inv`: its weapons, else the standard-issue weapon (apply_free_weapon).
 static func make_raid_weapons(armor_id: String, inv: ExtractionInventory) -> Array:
 	var out := make_kit_weapons(armor_id, inv)
-	if not out.is_empty():
-		return out
-	for wid in ExtractionRules.data().get("free_weapons", []):
-		if InfantryCatalog.allows_weapon(armor_id, str(wid)) and ExtractionItems.has(ExtractionItems.make_id("weapon", str(wid))):
-			return [str(wid)]
+	if out.is_empty() and make_free_weapon(armor_id) != "":
+		return [make_free_weapon(armor_id)]
 	return out
+
+
+## The standard-issue weapon armour `armor_id` may carry ("" = none): always on offer, free and never lost.
+static func make_free_weapon(armor_id: String) -> String:
+	var wid := ExtractionItems.make_free_weapon_id()
+	return wid if wid != "" and InfantryCatalog.allows_weapon(armor_id, wid) and ExtractionItems.has(ExtractionItems.make_id("weapon", wid)) else ""
 
 
 ## The weapon item after the one in `soldier`'s hand among every weapon of `inv` his armour may use (sorted by id, so
@@ -87,7 +90,12 @@ static func make_next_weapon_item(soldier: Infantry, inv: ExtractionInventory) -
 
 ## The pack `soldier` wears from `inv` ("" = none).
 static func make_worn_pack(soldier: Infantry, inv: ExtractionInventory) -> String:
-	var allowed := InfantryGear.packs_of(soldier.armor)
+	return make_kit_pack(soldier.armor_id, inv)
+
+
+## The pack armour `armor_id` wears from kit `inv`: the first pack item its armour may wear ("" = none).
+static func make_kit_pack(armor_id: String, inv: ExtractionInventory) -> String:
+	var allowed := InfantryGear.packs_of(InfantryCatalog.armor(armor_id))
 	for id in inv.stacks:
 		if ExtractionItems.kind_of(id) == "pack" and allowed.has(ExtractionItems.ref_of(id)):
 			return ExtractionItems.ref_of(id)
@@ -127,11 +135,11 @@ static func apply_weapon_overrides(soldier: Infantry) -> void:
 static func apply_free_weapon(soldier: Infantry, inv: ExtractionInventory) -> bool:
 	if not make_weapon_loadout(soldier, inv).is_empty():
 		return false
-	for wid in ExtractionRules.data().get("free_weapons", []):
-		if InfantryCatalog.allows_weapon(soldier.armor_id, str(wid)) and ExtractionItems.has(ExtractionItems.make_id("weapon", str(wid))):
-			inv.apply_add_unchecked(ExtractionItems.make_id("weapon", str(wid)), 1)
-			return true
-	return false
+	var wid := make_free_weapon(soldier.armor_id)
+	if wid == "":
+		return false
+	inv.apply_add_unchecked(ExtractionItems.make_id("weapon", wid), 1)
+	return true
 
 
 ## The raid starts: no free spawn kit, empty magazines (apply_reload fills them from the inventory).

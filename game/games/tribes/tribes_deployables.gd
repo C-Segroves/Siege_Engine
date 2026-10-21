@@ -13,7 +13,6 @@ extends Node
 const NODE_NAME := "Deployables"
 const META_FROM := "deployed_from"
 const META_USES := "deploy_uses_left"
-const MESSAGE_SECONDS := 3.0
 ## Extraction inventory item id of a worn pack (ExtractionItems: "pack/<gear pack id>").
 const EXTRACTION_PACK_PREFIX := "pack/"
 
@@ -54,7 +53,7 @@ func apply_deploy(peer: int, soldier: Infantry) -> void:
 	var placed := base.objects.filter(func(o: TribesBaseObject) -> bool: return o.has_meta(META_FROM) and o.alive)
 	var result: Dictionary = TribesDeployRules.make(rules).make_placement(soldier, placed, make_team_size())
 	if str(result.error) != "":
-		_tell(peer, str(result.error))
+		_tell(peer, str(result.error), false)
 		return
 	var record := {"shape": str(result.place.get("shape", "")), "spec": str(result.place.get("spec", result.place.deployed)),
 		"datablock": str(result.place.deployed), "team": soldier.team, "from": str(rules.item), "id": _next_id}
@@ -116,14 +115,6 @@ func _spend_pack(net_id: int) -> void:
 		s.kit.pack_active = false
 
 
-func _tell(peer: int, text: String) -> void:
-	if peer == multiplayer.get_unique_id():
-		_show_message(text)
-	elif Net.is_online():
-		_show_message.rpc_id(peer, text)
-
-
-@rpc("authority", "call_remote", "reliable")
-func _show_message(text: String) -> void:
-	if battle.has_method("fx"):
-		battle.fx("message", [text, MESSAGE_SECONDS])
+## Tells `peer`'s player what the deploy key did: the HUD line of the pack and kit feedback (InfantryGearDirector.report).
+func _tell(peer: int, text: String, ok := true) -> void:
+	battle.infantry.gear.report(peer, ok, text, "")

@@ -1,7 +1,8 @@
 class_name InfantryHud
 extends Control
 ## The soldier's instruments over the battle HUD: energy (jetpack and energy weapons), health, the weapon in
-## hand with its ammunition, the kit (grenades, mines, repair kits, the pack and whether it is on), and the
+## hand with its ammunition, the kit (grenades, mines, repair kits, the pack and whether it is on, each with the key
+## that uses it), the line that says what a pack or kit key just did (InfantryGearDirector.notice_text), and the
 ## boarding hint of the OccupancyDirector ("E: enter the Raptor",
 ## "Light armor required", "E: get out of the Raptor") - the hint shows in vehicles too: in the cockpit's own
 ## message area while a cockpit / HUD shows (CockpitDisplay.hint), so it never covers that HUD's windows.
@@ -18,6 +19,16 @@ const FONT_SIZE := 16
 const HINT_FONT_SIZE := 20
 const HINT_RISE := 160.0
 const LOW_FRACTION := 0.25
+const OK_COLOR := Color(0.45, 1.0, 0.55)
+const WARN_COLOR := Color(1.0, 0.8, 0.3)
+const NOTICE_FONT_SIZE := 22
+const NOTICE_RISE := 128.0
+const NOTICE_FADE_S := 0.5
+const KIT_WIDTH := 480.0
+const HEAL_FLASH := Color(0.3, 1.0, 0.45, 0.14)
+## Item kind -> the action that uses it; the pack's is PACK_ACTION.
+const KIT_ACTIONS := {"grenade": "grenade_throw", "concussion": "grenade_throw", "mine": "mine_drop", "repair_kit": "repair_kit_use"}
+const PACK_ACTION := "pack_use"
 const SCOPE_COLOR := Color(1.0, 0.25, 0.25)
 const SCOPE_CROSS_GAP := 8.0
 const SCOPE_CROSS_REACH := 0.2   # of the window height
@@ -68,12 +79,40 @@ func is_drawing_hint() -> bool:
 func _draw() -> void:
 	var soldier := director.battle.player as Infantry
 	if soldier and soldier.alive:
+		_draw_heal_flash()
 		_draw_soldier(soldier)
 		_draw_scope(soldier)
+		_draw_notice()
 	if is_drawing_hint():
 		var w := font.get_string_size(hint, HORIZONTAL_ALIGNMENT_LEFT, -1, HINT_FONT_SIZE).x
 		draw_string(font, Vector2((size.x - w) * 0.5, size.y - HINT_RISE), hint, HORIZONTAL_ALIGNMENT_LEFT, -1,
 			HINT_FONT_SIZE, HINT_COLOR)
+
+
+## The green wash of a repair kit just used (it fades with the notice).
+func _draw_heal_flash() -> void:
+	var left := float(_gear().heal_flash_until_ms - Time.get_ticks_msec()) / 1000.0
+	if left > 0.0:
+		var c := HEAL_FLASH
+		c.a *= clampf(left / NOTICE_FADE_S, 0.0, 1.0)
+		draw_rect(Rect2(Vector2.ZERO, size), c)
+
+
+## "Shield Pack ON" or "No Repair Kit left": the answer to a pack_use / repair_kit_use press, centred above the bars.
+func _draw_notice() -> void:
+	var gear := _gear()
+	if not gear.is_notice_shown():
+		return
+	var left := float(gear.notice_until_ms - Time.get_ticks_msec()) / 1000.0
+	var c := OK_COLOR if gear.notice_ok else WARN_COLOR
+	c.a = clampf(left / NOTICE_FADE_S, 0.0, 1.0)
+	var w := font.get_string_size(gear.notice_text, HORIZONTAL_ALIGNMENT_LEFT, -1, NOTICE_FONT_SIZE).x
+	draw_string(font, Vector2((size.x - w) * 0.5, size.y - NOTICE_RISE), gear.notice_text, HORIZONTAL_ALIGNMENT_LEFT, -1,
+		NOTICE_FONT_SIZE, c)
+
+
+func _gear() -> InfantryGearDirector:
+	return director.battle.infantry.gear
 
 
 func _draw_soldier(soldier: Infantry) -> void:
@@ -127,19 +166,28 @@ func _draw_scope(soldier: Infantry) -> void:
 ## them): the soldier's bars and texts and the hint line.
 static func make_occupied_rects(s: Vector2) -> Array:
 	var origin := Vector2(s.x * 0.5 + MARGIN, s.y - MARGIN - BAR_GAP * 4.0)
-	return [Rect2(origin - Vector2(8, 8), Vector2(BAR_SIZE.x + 160, BAR_GAP * 4.0 + MARGIN)),
-		Rect2(s.x * 0.2, s.y - HINT_RISE - HINT_FONT_SIZE - 6, s.x * 0.6, HINT_FONT_SIZE + 14)]
+	return [Rect2(origin - Vector2(8, 8), Vector2(KIT_WIDTH, BAR_GAP * 4.0 + MARGIN)),
+		Rect2(s.x * 0.2, s.y - HINT_RISE - HINT_FONT_SIZE - 6, s.x * 0.6, HINT_FONT_SIZE + 14),
+		Rect2(s.x * 0.2, s.y - NOTICE_RISE - NOTICE_FONT_SIZE - 4, s.x * 0.6, NOTICE_FONT_SIZE + 10)]
 
 
-## "Grenade 5  Mine 3  Repair Kit 1  Shield Pack ON".
+## "[G] Grenade 5  [B] Mine 3  [H] Repair Kit 1  [R] Shield Pack ON": each item with the key that uses it.
 static func make_kit_text(soldier: Infantry) -> String:
 	var parts := []
 	for id in soldier.kit.counts:
-		parts.append("%s %d" % [InfantryGear.item(id).get("name", id), soldier.kit.count(id)])
+		var record := InfantryGear.item(id)
+		parts.append("%s%s %d" % [_make_key_prefix(KIT_ACTIONS.get(str(record.get("kind", "")), "")), record.get("name", id), soldier.kit.count(id)])
 	if soldier.kit.pack_id != "":
 		var on := " ON" if soldier.kit.pack_active else ""
-		parts.append("%s%s" % [InfantryGear.pack(soldier.kit.pack_id).get("name", soldier.kit.pack_id), on])
+		parts.append("%s%s%s" % [_make_key_prefix(PACK_ACTION), InfantryGear.pack(soldier.kit.pack_id).get("name", soldier.kit.pack_id), on])
 	return "  ".join(parts)
+
+
+## "[R] " for the first control bound to `action`, "" for none.
+static func _make_key_prefix(action: String) -> String:
+	if action == "" or not InputMap.has_action(action):
+		return ""
+	return "[%s] " % BindingText.make_action_bindings(action).get_slice(BindingText.SEPARATOR, 0)
 
 
 ## "Disc Launcher 12/15", "Blaster" (energy) or "unarmed".

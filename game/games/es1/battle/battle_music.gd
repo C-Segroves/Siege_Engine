@@ -10,6 +10,8 @@ extends RefCounted
 ##   * Battledrome arenas (SIM.EXE 0x28486): a random track of the music set chosen in Options (the
 ##     original's Preferences MUSIC TYPE; "none" is silent), never the one just played, each played once.
 ##   * Earthsiege 2, Starsiege, Tribes, Tribes 2: CdMusic (mission tracks from the scripts / executable).
+##   * Anything the originals never scored (Aerial Assault, Vengeance, extraction maps such as Varuna's Fall, or a
+##     game whose own music isn't installed): MusicShuffle plays the available music, the map's own pack first.
 
 const THEME_COUNT := 3
 ## 0x585dc: no scan for 300 sim-clock units after the start and each switch.  The clock (0x981c4) counts every
@@ -35,6 +37,7 @@ var _hold_t := 0.0
 var _arena_tracks: Array = []
 var _last_arena_track := ""
 var _cd := CdMusic.new()
+var _shuffle := MusicShuffle.new()
 
 
 ## Starts the music for a battle (config / mission definition as BattleSetup resolved them).
@@ -42,27 +45,36 @@ var _cd := CdMusic.new()
 func start(config := {}, mdef := {}) -> void:
 	Sfx.stop_music(MENU_FADE_OUT)
 	var map_pack := String(config.get("map", "")).get_slice(":", 0)
+	if not _start_original(config, mdef, map_pack):
+		_mode = ""
+		_shuffle.start(map_pack if map_pack != "" else String(mdef.get("pack", "")))
+
+
+## The music the original game played here; false when it has none (not scored, or not installed).
+func _start_original(config: Dictionary, mdef: Dictionary, map_pack: String) -> bool:
 	var map_id := String(config.get("map", "")).get_slice(":", 1)
 	if config.has("arena") and not config.has("map"):
-		_start_arena()
-	elif mdef.get("pack") == CdMusic.ES2:
+		return _start_arena()
+	if mdef.get("pack") == CdMusic.ES2:
 		_mode = CdMusic.ES2
-		CdMusic.play_es2(String(config.get("mission_name", "")).to_upper().contains("TRAIN"))
-	elif StarsiegeMissionRuntime.is_starsiege(mdef) or map_pack == CdMusic.STARSIEGE:
+		return CdMusic.play_es2(String(config.get("mission_name", "")).to_upper().contains("TRAIN"))
+	if StarsiegeMissionRuntime.is_starsiege(mdef) or map_pack == CdMusic.STARSIEGE:
 		_mode = CdMusic.STARSIEGE
-		_cd.play_starsiege(map_id if map_id != "" else String(mdef.get("name", "")))
-	elif map_pack == CdMusic.TRIBES:
+		return _cd.play_starsiege(map_id if map_id != "" else String(mdef.get("name", "")))
+	if map_pack == CdMusic.TRIBES:
 		_mode = CdMusic.TRIBES
-		CdMusic.play_tribes(map_id)
-	elif map_pack == CdMusic.TRIBES2:
+		return CdMusic.play_tribes(map_id)
+	if map_pack == CdMusic.TRIBES2:
 		_mode = CdMusic.TRIBES2
-		CdMusic.play_tribes2(map_id)
-	else:
-		_start_earthsiege()
+		return CdMusic.play_tribes2(map_id)
+	if map_pack in ["", ES1_PACK]:
+		return _start_earthsiege()
+	return false
 
 
 func stop() -> void:
 	_cd.stop_playlist()
+	_shuffle.stop()
 	if Sfx.music_finished.is_connected(_on_arena_track_finished):
 		Sfx.music_finished.disconnect(_on_arena_track_finished)
 
@@ -108,12 +120,15 @@ static func is_all_close(player: Herc) -> bool:
 	return true
 
 
-func _start_earthsiege() -> void:
-	_mode = ES1_PACK
+func _start_earthsiege() -> bool:
 	_theme = randi() % THEME_COUNT
 	_engaged = false
+	if MusicLibrary.track_path(_theme_track(), ES1_PACK) == "":
+		return false
+	_mode = ES1_PACK
 	_hold_t = HOLD_SECONDS
 	Sfx.play_music(_theme_track(), SWITCH_FADE, ES1_PACK)
+	return true
 
 
 func _theme_track() -> String:
@@ -123,17 +138,18 @@ func _theme_track() -> String:
 	return "battle%d%s" % [_theme + 1, "b" if _engaged else "a"]
 
 
-func _start_arena() -> void:
+## True also when the player chose no arena music: that silence is the original's choice, not a gap.
+func _start_arena() -> bool:
 	_mode = ARENA_PACK
 	var music_set := MusicLibrary.arena_set()
 	if music_set == MusicLibrary.NO_ARENA_MUSIC:
-		return
+		return true
 	_arena_tracks = MusicLibrary.situations(ARENA_PACK).get("arena_sets", {}).get(music_set, [])
-	if _arena_tracks.is_empty():
-		_start_earthsiege()
-		return
+	if _arena_tracks.is_empty() or MusicLibrary.track_path(String(_arena_tracks[0]), ARENA_PACK) == "":
+		return _start_earthsiege()
 	Sfx.music_finished.connect(_on_arena_track_finished)
 	_play_next_arena_track()
+	return true
 
 
 func _play_next_arena_track() -> void:

@@ -12,6 +12,8 @@ const ROW_SKIN := "skin"
 const ROW_VEHICLE := "vehicle"
 const ROW_HERC_SKIN := "herc_skin"
 const COLUMNS := 2
+## Below this width the pickers stack one per line, so a drop-down never shrinks to its arrow (a 900 px window).
+const ONE_COLUMN_WIDTH := 360
 const LABEL_WIDTH := 72
 const LABELS := {ROW_ARMOUR: "Armour", ROW_BODY: "Body", ROW_SKIN: "Skin", ROW_VEHICLE: "Vehicle", ROW_HERC_SKIN: "Veh. skin"}
 
@@ -28,6 +30,11 @@ func _init(state: OperatorState) -> void:
 	_rows = GridContainer.new()
 	_rows.columns = COLUMNS
 	add_child(_rows)
+	resized.connect(_apply_columns)
+
+
+func _apply_columns() -> void:
+	_rows.columns = 1 if size.x < ONE_COLUMN_WIDTH else COLUMNS
 
 
 func make_pickers() -> Array[Control]:

@@ -57,6 +57,9 @@ func _ready() -> void:
 	_check_relations()
 	_check_insured_and_armor()
 	_check_free_weapon_and_board()
+	_check_free_weapon_always_offered()
+	_check_kit_editor_matches_spawn()
+	_check_kit_editor_stock()
 	if not OS.get_cmdline_user_args().has(ONLY_REVIVE_ARG):
 		await _check_raid_extract()
 		await _check_raid_death()
@@ -269,6 +272,114 @@ func _check_bot_targeting(battle: Battle, near: Vector3) -> void:
 
 
 # ------------------------------------------------------------------ X5 free blaster, X8 task board
+
+## The standard-issue weapon is a choice of every weapon row, with a full stash and an empty one; without Tribes 1 the
+## rules' fallback (free_weapon_fallbacks) takes its place; dying never loses it.
+func _check_free_weapon_always_offered() -> void:
+	print("free weapon always offered:")
+	var armor_id := ExtractionProfile.make_free_armor_id()
+	var free := ExtractionItems.make_free_weapon_id()
+	_expect(free == "tribes:BLASTER" or Packs.weapons.get("tribes:BLASTER", {}).is_empty(), "the Tribes 1 Blaster is the standard-issue weapon when installed (%s)" % free)
+	for stocked in [false, true]:
+		var p := ExtractionProfile.new()
+		p.apply_new("QA Free")
+		p.kit.apply_clear()
+		p.stash.apply_clear()
+		if stocked:
+			for r in ExtractionItems.items_of_kind("weapon"):
+				p.stash.apply_add_unchecked(str(r.id), 1)
+		var rows := ExtractionKitEditor.make_rows(p)
+		var weapon_rows := rows.filter(func(r: Dictionary) -> bool: return r.kind == "weapon")
+		_expect(not weapon_rows.is_empty() and ((weapon_rows[0].choices as Array).any(func(c: Dictionary) -> bool: return c.id == free) or ExtractionLoadout.make_free_weapon(armor_id) == ""),
+			"every weapon row offers the free weapon (stash %s)" % ("full" if stocked else "empty"))
+		_expect(ExtractionLoadout.make_raid_weapons(armor_id, p.kit).has(free) or not stocked and free == "", "an empty kit spawns with it (stash %s)" % ("full" if stocked else "empty"))
+	var saved: Dictionary = Packs.weapons.get("tribes:BLASTER", {})
+	if not saved.is_empty():
+		Packs.weapons.erase("tribes:BLASTER")
+		ExtractionItems.reload()
+		var fallback := ExtractionItems.make_free_weapon_id()
+		_expect(fallback != "tribes:BLASTER" and (fallback == "" or ExtractionItems.is_standard_issue(ExtractionItems.make_id("weapon", fallback))), "with Tribes 1 missing the fallback is chosen (%s)" % fallback)
+		Packs.weapons["tribes:BLASTER"] = saved
+		ExtractionItems.reload()
+	var tag := ExtractionItems.make_id("weapon", free)
+	_expect(free == "" or (ExtractionLoadout.make_insured_split([[tag, 1]], []).dropped as Array).is_empty(), "the free weapon is never lost on death")
+
+
+## What the kit rows show is what the spawn gives (ExtractionLoadout.make_raid_weapons), also after a choice.
+func _check_kit_editor_matches_spawn() -> void:
+	print("kit editor choice equals the spawn kit:")
+	var p := ExtractionProfile.new()
+	p.apply_new("QA Kit")
+	p.kit.apply_clear()
+	var armor_id := p.kit_armor
+	for r in ExtractionItems.items_of_kind("weapon"):
+		if InfantryCatalog.allows_weapon(armor_id, str(r.ref)):
+			p.stash.apply_add_unchecked(str(r.id), 1)
+	var rows := ExtractionKitEditor.make_rows(p)
+	var second := rows.filter(func(r: Dictionary) -> bool: return r.key == "weapon:0")
+	if second.is_empty():
+		return
+	var options: Array = (second[0].choices as Array).filter(func(c: Dictionary) -> bool: return c.id != "" and c.id != second[0].choice)
+	if options.is_empty():
+		return
+	var pick := str(options[0].id)
+	_expect(ExtractionKitEditor.apply_choice(p, "weapon:0", pick), "choosing %s for weapon 1 works" % pick)
+	var shown := ExtractionKitEditor.make_rows(p).filter(func(r: Dictionary) -> bool: return r.kind == "weapon").map(func(r: Dictionary) -> String: return str(r.current)).filter(func(w: String) -> bool: return w != "")
+	_expect(shown == ExtractionLoadout.make_raid_weapons(armor_id, p.kit), "the rows %s equal the spawn weapons %s" % [shown, ExtractionLoadout.make_raid_weapons(armor_id, p.kit)])
+	_expect(p.kit.count(ExtractionItems.make_id("weapon", pick)) == 1 and p.stash.count(ExtractionItems.make_id("weapon", pick)) == 0, "the choice moved the weapon from the stash to the kit")
+	ExtractionKitEditor.apply_choice(p, "weapon:0", "")
+	_expect(p.stash.count(ExtractionItems.make_id("weapon", pick)) == 1 and p.kit.count(ExtractionItems.make_id("weapon", pick)) == 0, "empty puts it back in the stash")
+
+
+## Pack, ammunition, hand item and insured choices move stock between the stash and the kit, and the pack row is the pack
+## the spawn wears (ExtractionLoadout.make_kit_pack); the overview lists stash and kit together.
+func _check_kit_editor_stock() -> void:
+	print("kit editor packs, ammunition, hand items, overview:")
+	var p := ExtractionProfile.new()
+	p.apply_new("QA Stock")
+	p.kit.apply_clear()   # the starter kit nearly fills a light armour: start from an empty one
+	var armor := InfantryCatalog.armor(p.kit_armor)
+	var packs := InfantryGear.packs_of(armor)
+	if not packs.is_empty():
+		var pack_id := str(packs[0])
+		var item := ExtractionItems.make_id("pack", pack_id)
+		p.stash.apply_add_unchecked(item, 1)
+		var pack_row: Dictionary = ExtractionKitEditor.make_rows(p).filter(func(r: Dictionary) -> bool: return r.key == "pack")[0]
+		_expect((pack_row.choices as Array).any(func(c: Dictionary) -> bool: return c.id == pack_id) and pack_row.choice == "", "the pack row offers the stash pack and starts empty")
+		_expect(ExtractionKitEditor.apply_choice(p, "pack", pack_id), "choosing the pack works")
+		_expect(ExtractionLoadout.make_kit_pack(p.kit_armor, p.kit) == pack_id and p.kit.count(item) == 1 and p.stash.count(item) == 0, "the spawn wears the chosen pack")
+		ExtractionKitEditor.apply_choice(p, "pack", "")
+		_expect(ExtractionLoadout.make_kit_pack(p.kit_armor, p.kit) == "" and p.stash.count(item) == 1, "empty takes the pack off and back to the stash")
+	var gear_rows := ExtractionKitEditor.make_rows(p).filter(func(r: Dictionary) -> bool: return r.kind == "gear")
+	if not gear_rows.is_empty():
+		var key := str(gear_rows[0].key)
+		var gear := ExtractionItems.make_id("gear", key.substr(key.find(":") + 1))
+		var before := p.kit.count(gear)
+		p.stash.apply_add_unchecked(gear, 10)
+		var most := int(gear_rows[0].ammo_max)
+		ExtractionKitEditor.apply_choice(p, key, str(most))
+		_expect(p.kit.count(gear) == mini(most, before + 10) and p.kit.count(gear) + p.stash.count(gear) == before + 10, "a hand item choice fills the kit to the count (%d of %d)" % [p.kit.count(gear), most])
+		ExtractionKitEditor.apply_choice(p, key, "0")
+		_expect(p.kit.count(gear) == 0, "none empties it")
+	var groups := ExtractionKitEditor.make_overview(p)
+	var counted := 0
+	for g in groups:
+		for e in g.entries:
+			counted += int(e.stash) + int(e.kit)
+	var held := 0
+	for id in p.stash.stacks:
+		held += p.stash.count(id)
+	for id in p.kit.stacks:
+		held += p.kit.count(id)
+	_expect(counted == held, "the overview counts the stash and the kit together (%d = %d)" % [counted, held])
+	var insured_choice := InsuredRow.make_choices(p, [])
+	_expect(str(insured_choice[0].id) == "", "the insured row starts with none")
+	if insured_choice.size() > 1:
+		var stack := str(insured_choice[1].id)
+		_expect(InsuredRow.apply_choice(p, [], stack) and p.make_insured_id() == stack, "the insured row's choice insures a kit stack")
+		InsuredRow.apply_choice(p, [], "")
+		_expect(p.make_insured_id() == "", "none empties the slot")
+
 
 func _check_free_weapon_and_board() -> void:
 	print("X5 free blaster, X8 task board:")
