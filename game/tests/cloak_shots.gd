@@ -11,6 +11,11 @@ const SOLDIER_CLOSE_DISTANCE := 5.0
 const HERC_DISTANCE := 38.0
 const HERC_VEHICLE := "starsiege:rb_eman"
 const SETTLE_FRAMES := 20
+const ZOOM_FOV := 28.0
+const BACKGROUND_ANGLES := 8
+const CROP_W := 200
+const CROP_H := 300
+const FADE_STEPS := 6
 const FADE_SECONDS := 2.0
 const SITE_RINGS := [0, 1, 2, 3, 4, 5, 6]
 const SITE_DIRECTIONS := 8
@@ -40,6 +45,8 @@ func _ready() -> void:
 		battle.overlay.visible = false
 	var site := _find_site(battle)
 	await _film_soldier(battle, cam, site)
+	await _film_backgrounds(battle, cam, site)
+	await _film_fade(battle, cam, site)
 	await _film_herc(battle, cam, site + Vector3(0, 0, -100))
 	print("cloak_shots: %s (%d failures)" % ["OK" if _failures == 0 else "FAILED", _failures])
 	get_tree().quit(1 if _failures > 0 else 0)
@@ -91,6 +98,7 @@ func _is_level(battle: Battle, p: Vector3) -> bool:
 
 func _shot(name: String) -> void:
 	await _frames(3)
+	_hide_layers(get_tree().root)
 	await RenderingServer.frame_post_draw
 	var path := "%s/%s.png" % [_out, name]
 	get_viewport().get_texture().get_image().save_png(path)
@@ -133,3 +141,81 @@ func _film_herc(battle: Battle, cam: Camera3D, site: Vector3) -> void:
 	_expect(h.cloak.is_cloaked(), "the Herc is cloaked")
 	_aim(cam, h.global_position, HERC_DISTANCE, HERC_LOOK_HEIGHT)
 	await _shot("cloak_herc_cloaked")
+	cam.fov = ZOOM_FOV
+	await _shot("cloak_herc_cloaked_zoom")
+	h.cloak_input = false
+	await get_tree().create_timer(FADE_SECONDS, true, true).timeout
+	await _shot("cloak_herc_plain_zoom")
+	cam.fov = 75.0
+
+
+## The soldier cloaked and seen from every side, so the sheet shows him against the ground, the slope, the sky and the
+## buildings (cloak_backgrounds.png: crops, one per angle).
+func _film_backgrounds(battle: Battle, cam: Camera3D, site: Vector3) -> void:
+	var s := battle.spawn_soldier_for(91, 2, "Scout", Transform3D(Basis(), site + Vector3(3, 0.3, 0)))
+	s.apply_armor("tribes2:LIGHT", ["tribes2:CHAINGUN"], "", "tribes2:CLOAKING_PACK")
+	s.end_spawn_protection()
+	await _frames(30)
+	s.cloak.apply_wanted(true, s)
+	await get_tree().create_timer(FADE_SECONDS, true, true).timeout
+	cam.fov = ZOOM_FOV
+	var crops: Array[Image] = []
+	for k in BACKGROUND_ANGLES:
+		var a := TAU * float(k) / BACKGROUND_ANGLES
+		cam.global_position = s.global_position + Vector3(sin(a), 0, cos(a)) * (SOLDIER_DISTANCE * 1.6) + Vector3(0, CAMERA_HEIGHT, 0)
+		cam.look_at(s.global_position + Vector3(0, LOOK_HEIGHT, 0))
+		crops.append(await _grab_crop(cam, s))
+	_save_sheet(crops, "cloak_backgrounds", 4)
+	s.cloak.apply_wanted(false, s)
+	cam.fov = 75.0
+
+
+## The cloak fading in then out, FADE_STEPS frames each, as crops (cloak_fade.png): the shader's `amount` stepped by hand.
+func _film_fade(battle: Battle, cam: Camera3D, site: Vector3) -> void:
+	var s := battle.spawn_soldier_for(92, 2, "Scout", Transform3D(Basis(), site + Vector3(-3, 0.3, 0)))
+	s.apply_armor("tribes2:LIGHT", ["tribes2:CHAINGUN"], "", "tribes2:CLOAKING_PACK")
+	s.end_spawn_protection()
+	await _frames(30)
+	cam.fov = ZOOM_FOV
+	_aim(cam, s.global_position, SOLDIER_DISTANCE * 1.6, LOOK_HEIGHT)
+	var crops: Array[Image] = []
+	s.cloak.apply_wanted(true, s)
+	var step_s: float = s.cloak.profile.fade_in_s / FADE_STEPS
+	for i in FADE_STEPS + 1:
+		crops.append(await _grab_crop(cam, s))
+		await get_tree().create_timer(step_s, true, true).timeout
+	await _frames(5)
+	s.cloak.apply_wanted(false, s)
+	for i in FADE_STEPS + 1:
+		crops.append(await _grab_crop(cam, s))
+		await get_tree().create_timer(step_s, true, true).timeout
+	_save_sheet(crops, "cloak_fade", FADE_STEPS + 1)
+	cam.fov = 75.0
+
+
+func _grab_crop(cam: Camera3D, unit: Node3D) -> Image:
+	await _frames(2)
+	_hide_layers(get_tree().root)
+	await RenderingServer.frame_post_draw
+	var full := get_viewport().get_texture().get_image()
+	var at := cam.unproject_position(unit.global_position + Vector3(0, LOOK_HEIGHT, 0))
+	var rect := Rect2i(Vector2i(at) - Vector2i(CROP_W / 2, CROP_H / 2), Vector2i(CROP_W, CROP_H)).intersection(Rect2i(Vector2i.ZERO, full.get_size()))
+	var crop := full.get_region(rect)
+	crop.convert(Image.FORMAT_RGBA8)
+	return crop
+
+
+func _save_sheet(crops: Array[Image], name: String, columns: int) -> void:
+	var rows := ceili(float(crops.size()) / columns)
+	var sheet := Image.create(columns * CROP_W, rows * CROP_H, false, Image.FORMAT_RGBA8)
+	for i in crops.size():
+		sheet.blit_rect(crops[i], Rect2i(Vector2i.ZERO, crops[i].get_size()), Vector2i((i % columns) * CROP_W, (i / columns) * CROP_H))
+	sheet.save_png("%s/%s.png" % [_out, name])
+	print("  sheet ", name)
+
+
+func _hide_layers(node: Node) -> void:
+	if node is CanvasLayer:
+		node.visible = false
+	for c in node.get_children():
+		_hide_layers(c)

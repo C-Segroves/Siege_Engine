@@ -3,8 +3,9 @@ extends RefCounted
 ## The vehicle delivery call-in (host; docs/design/lobby_loadout_economy.md section 9.5): the caller's saved vehicle is flown in by an AI
 ## transport and set down at his landing zone.
 ##   MARKED      flare and ring; the countdown is the preparation time
-##   INBOUND     the transport (ExtractionTransports.spawn_delivery_transport) flies in, the vehicle slung under it
-##               (kinematic, carried every frame, untouchable); the HUD counts down the flight
+##   INBOUND     the transport (ExtractionTransports.spawn_delivery_transport) flies in, the vehicle slung under its belly
+##               (kinematic, carried every frame, untouchable; the sling is as long as the vehicle is tall, so a Herc hangs
+##               clear of a 33 m dropship hull instead of sinking into it); the HUD counts down the flight
 ##   DELIVERING  the transport hovers over the zone (TransportFlight HOVER_DROP), releases the vehicle, which falls the
 ##               last hover_height_m and settles; the transport departs and is removed
 ##   ACTIVE      the vehicle is empty, parked, of the caller's team; for owner_claim_s only he may board it (BoardingRules
@@ -21,12 +22,16 @@ const DESCENT_RATE := 5.0
 const FLY_SETTLE_S := 0.5
 const SETTLE_TIMEOUT_S := 6.0
 const CARRIED_META := "carried_by"
+## The vehicle hangs this far (m) below the transport's lowest point.
+const SLING_CLEARANCE_M := 1.5
 ## Spawn protection of a carried vehicle beyond its trip (s).
 const CARRY_PROTECTION_PAD := 20.0
 
 var callins: CallinDirector
 ## Host: cargo net id -> {peer, left} while only the caller may board the delivered vehicle.
 var claims := {}
+## Host: order id -> length (m) of the sling that carries its vehicle, from the transport's origin to the vehicle's feet.
+var _slings := {}
 var _departing: Array = []
 
 
@@ -52,6 +57,30 @@ static func make_cruise_speed(transport_id: String) -> float:
 static func make_flight_seconds(distance: float, cruise: float, drop: float) -> float:
 	var top := minf(cruise, sqrt(2.0 * TransportFlight.APPROACH_BRAKE * maxf(distance, 0.0)))
 	return distance / maxf(top * APPROACH_AVERAGE_SHARE, 1.0) + maxf(drop, 0.0) / DESCENT_RATE + TransportFlight.HOVER_SETTLE
+
+
+## Length of the sling (m) from the transport's origin to the feet of a vehicle `cargo_height_m` tall: the vehicle hangs
+## SLING_CLEARANCE_M under the transport's lowest point (`belly_m`, relative to its origin), and never shorter than the rule's sling_m.
+static func make_sling_m(belly_m: float, cargo_height_m: float) -> float:
+	var minimum := float(CallinRules.rule(CallinRules.KIND_VEHICLE).get("sling_m", 8.0))
+	return maxf(cargo_height_m + SLING_CLEARANCE_M - minf(belly_m, 0.0), minimum)
+
+
+## The lowest point (m, relative to its origin) of a transport's model; 0 when it has none (a server without models).
+static func make_belly_m(transport: Flyer) -> float:
+	if transport.shape == null:
+		return 0.0
+	return make_model_belly_m(transport.shape, transport.global_position.y)
+
+
+## The lowest point of `model` (m) relative to an origin at height `origin_y`.
+static func make_model_belly_m(model: ShapeInstance, origin_y: float) -> float:
+	return LootContainer._make_world_box(model).position.y - origin_y
+
+
+## The sling (m) of `order`'s vehicle.
+func make_sling_of(order: CallinOrder) -> float:
+	return float(_slings.get(order.id, CallinRules.rule(CallinRules.KIND_VEHICLE).get("sling_m", 8.0)))
 
 
 ## Host, when the order is made: the transport (or the fallback pod), and the times of the sequence. The flight is
@@ -92,8 +121,10 @@ func apply_launch(order: CallinOrder) -> void:
 		order.eta = order.fall_s
 		return
 	var rule := CallinRules.rule(CallinRules.KIND_VEHICLE)
-	var hover := float(rule.get("hover_height_m", 6.0)) + float(rule.get("sling_m", 8.0))
-	var fl := callins.director.transports.spawn_delivery_transport(order.transport_vehicle, order.lz, order.approach_m, hover)
+	var release_m := float(rule.get("hover_height_m", 6.0))
+	var fl := callins.director.transports.spawn_delivery_transport(order.transport_vehicle, order.lz, order.approach_m, release_m)
+	if fl != null:
+		_apply_sling(order, fl, release_m)
 	var cargo := _spawn_cargo(order, fl) if fl != null else null
 	if cargo == null:
 		if fl != null:
@@ -109,9 +140,15 @@ func apply_launch(order: CallinOrder) -> void:
 	callins.alert.apply_noise(order.lz, CallinRules.make_alert_radius(order.kind), order.team)
 
 
+## The transport holds the vehicle's release height (`release_m`) over the ground plus the sling that carries it.
+func _apply_sling(order: CallinOrder, fl: Flyer, release_m: float) -> void:
+	var sling := make_sling_m(make_belly_m(fl), float(Packs.vehicle(order.vehicle_id).get("height_m", 0.0)))
+	_slings[order.id] = sling
+	(fl.ai as TransportFlight).hover_height = release_m + sling
+
+
 func _spawn_cargo(order: CallinOrder, fl: Flyer) -> Herc:
-	var rule := CallinRules.rule(CallinRules.KIND_VEHICLE)
-	var xf := Transform3D(Basis(Vector3.UP, fl.global_rotation.y), fl.global_position + Vector3.DOWN * float(rule.get("sling_m", 8.0)))
+	var xf := Transform3D(Basis(Vector3.UP, fl.global_rotation.y), fl.global_position + Vector3.DOWN * make_sling_of(order))
 	var spec := _make_cargo_spec(order, xf, order.eta + CARRY_PROTECTION_PAD)
 	callins.battle.send_spawn(spec)
 	var cargo := callins.battle.vehicles.get(int(spec.net_id)) as Herc
@@ -139,18 +176,18 @@ func apply_inbound_tick(order: CallinOrder) -> void:
 		return
 	_carry(order, fl, cargo)
 	order.eta = make_flight_seconds(Vector2(fl.global_position.x - order.lz.x, fl.global_position.z - order.lz.z).length(),
-		make_cruise_speed(order.transport_vehicle), fl.make_altitude() - float(CallinRules.rule(CallinRules.KIND_VEHICLE).get("hover_height_m", 6.0)) - float(CallinRules.rule(CallinRules.KIND_VEHICLE).get("sling_m", 8.0)))
+		make_cruise_speed(order.transport_vehicle), fl.make_altitude() - float(CallinRules.rule(CallinRules.KIND_VEHICLE).get("hover_height_m", 6.0)) - make_sling_of(order))
 	if (fl.ai as TransportFlight).is_hovering():
 		_release(order, fl, cargo)
 
 
-func _carry(_order: CallinOrder, fl: Flyer, cargo: Herc) -> void:
-	var sling := float(CallinRules.rule(CallinRules.KIND_VEHICLE).get("sling_m", 8.0))
-	cargo.global_transform = Transform3D(Basis(Vector3.UP, fl.global_rotation.y), fl.global_position + Vector3.DOWN * sling)
+func _carry(order: CallinOrder, fl: Flyer, cargo: Herc) -> void:
+	cargo.global_transform = Transform3D(Basis(Vector3.UP, fl.global_rotation.y), fl.global_position + Vector3.DOWN * make_sling_of(order))
 	cargo.velocity = Vector3.ZERO
 
 
 func _release(order: CallinOrder, fl: Flyer, cargo: Herc) -> void:
+	_slings.erase(order.id)
 	cargo.remove_meta(CARRIED_META)
 	cargo.remove_collision_exception_with(fl)
 	fl.remove_collision_exception_with(cargo)

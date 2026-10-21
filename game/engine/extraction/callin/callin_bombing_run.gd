@@ -17,7 +17,7 @@ const RUNWAY_M := 150.0
 ## Flight past the last bomb at least (m).
 const EXIT_MARGIN_M := 120.0
 const GROUND_SAMPLE_STEP_M := 100.0
-const NOTICE_TEXT := "BOMBING RUN inbound along the marked line - keep clear."
+const NOTICE_TEXT := "BOMBING RUN inbound (%s) along the marked line - keep clear."
 const DANGER_TEXT := "DANGER CLOSE: bombs on your position in seconds - get off the line!"
 const PROTECTION_S := 100000.0
 const FLIGHT_SECONDS_SLACK := 20.0
@@ -124,7 +124,7 @@ func _launch(order: CallinOrder, flight: CallinAirFlight) -> void:
 	craft.ai = pilot
 	order.apply_state(CallinOrder.State.INBOUND)
 	order.eta = pilot.make_seconds_to_release()
-	apply_warning(order, flight, NOTICE_TEXT)
+	apply_warning(order, flight, NOTICE_TEXT % CallinAirframes.make_name_of(flight.airframe_id))
 	callins.alert.apply_noise(order.lz, CallinRules.make_alert_radius(get_kind()), order.team)
 	callins.apply_broadcast(order)
 

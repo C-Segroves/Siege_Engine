@@ -7,6 +7,11 @@ extends RefCounted
 
 ## Godot cubemap layer order: +X right, -X left, +Y top, -Y bottom, +Z back, -Z front.
 const SKYBOX_FACES := ["right", "left", "top", "bottom", "back", "front"]
+## Layout of the six face images. "cube": already in Godot's cubemap orientation (the Tribes AA baker writes these).
+## "torque": the pictures as a Torque sky material list shows them, each as seen from inside the box looking at it
+## (Tribes 2: sky_<face>.png exported untouched). A map says "torque" with skybox_layout, or by naming its skybox_source.
+const LAYOUT_CUBE := "cube"
+const LAYOUT_TORQUE := "torque"
 const SKYBOX_SHADER := preload("res://engine/shaders/skybox.gdshader")
 const DARKSTAR_SKY := preload("res://engine/darkstar_sky.gd")
 const DEFAULT_SKY := [140, 160, 190]
@@ -27,7 +32,7 @@ static func build(parent: Node3D, e: Dictionary, dir := "") -> void:
 	var draws := not ServerProfile.is_collision_only()
 	var faces = e.get("skybox_faces")
 	if draws and faces is Dictionary and dir != "":
-		var sky := _skybox(faces, dir)
+		var sky := _skybox(faces, dir, make_skybox_layout(e))
 		if sky:
 			env.sky = sky
 			env.background_mode = Environment.BG_SKY
@@ -58,14 +63,31 @@ static func _apply_darkstar_sky(env: Environment, e: Dictionary, dir: String) ->
 	env.fog_sky_affect = 0.0
 
 
+## LAYOUT_TORQUE or LAYOUT_CUBE: how the face images of environment `e` are oriented.
+static func make_skybox_layout(e: Dictionary) -> String:
+	return str(e.get("skybox_layout", LAYOUT_TORQUE if e.has("skybox_source") else LAYOUT_CUBE))
+
+
+## Turns the picture of `face` as seen from inside the box into the orientation of a Godot cubemap layer. Godot samples
+## a layer the OpenGL way (+X: u runs toward -Z, +Y: v runs toward -Z ...), so a side picture is mirrored left to right
+## and the top one top to bottom; the bottom of a Torque sky is a flat colour and needs nothing.
+static func apply_torque_orientation(img: Image, face: String) -> void:
+	if face == "top":
+		img.flip_y()
+	elif face != "bottom":
+		img.flip_x()
+
+
 ## Cubemap sky from the six face images; null if any is missing.
-static func _skybox(faces: Dictionary, dir: String) -> Sky:
+static func _skybox(faces: Dictionary, dir: String, layout: String) -> Sky:
 	var imgs: Array[Image] = []
 	for k in SKYBOX_FACES:
 		var img := Image.load_from_file(dir.path_join(String(faces.get(k, ""))))
 		if img == null:
 			return null
 		img.convert(Image.FORMAT_RGB8)
+		if layout == LAYOUT_TORQUE:
+			apply_torque_orientation(img, k)
 		if not imgs.is_empty() and img.get_size() != imgs[0].get_size():
 			img.resize(imgs[0].get_width(), imgs[0].get_height())
 		imgs.append(img)

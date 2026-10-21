@@ -12,6 +12,8 @@ const KIND_INVENTORY := "inventory_station"
 const KIND_RADAR := "radar_sweep"
 const KIND_BOMBING := "bombing_run"
 const KIND_ATTACK := "attack_craft"
+## Between an air call-in's label and the name of its aircraft.
+const AIRCRAFT_SEPARATOR := " - "
 ## The air call-ins: aircraft that fly to a designated point (CallinAir runs them).
 const AIR_KINDS := [KIND_BOMBING, KIND_ATTACK]
 ## Menu order.
@@ -55,8 +57,13 @@ static func is_air_kind(kind: String) -> bool:
 	return kind in AIR_KINDS
 
 
+## The name of call-in `kind` for the player: the rule's label; an air call-in names the aircraft that flies it too
+## ("Bombing run - Thundersword"), whichever airframe CallinAirframes picks from the installed content.
 static func make_label(kind: String) -> String:
-	return str(rule(kind).get("label", kind))
+	var label := str(rule(kind).get("label", kind))
+	if is_air_kind(kind):
+		return "%s%s%s" % [label, AIRCRAFT_SEPARATOR, CallinAirframes.make_craft_name(kind)]
+	return label
 
 
 ## A rule number, in a fast run the callins.fast value of the same key when it has one (config: the battle's).

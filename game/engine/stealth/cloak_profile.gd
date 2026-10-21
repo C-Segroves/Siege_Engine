@@ -10,9 +10,9 @@ extends RefCounted
 ## Ids are "<pack>:<name>" (tribes2:cloaking_pack, starsiege:830).
 
 const FILE := "gameplay/cloak.json"
-## Seconds the shimmer takes to fade in and out (the remake's choice: the originals' cloak is engine code, not data).
-const DEFAULT_FADE_IN_S := 0.8
-const DEFAULT_FADE_OUT_S := 0.5
+## Seconds the cloak takes to fade in and out: about one second in Tribes 2's ShapeBase cloak (engine code, not data).
+const DEFAULT_FADE_IN_S := 1.0
+const DEFAULT_FADE_OUT_S := 1.0
 
 static var NONE := CloakProfile.new()
 static var _by_id := {}
@@ -52,6 +52,8 @@ var ai_uses := false
 var ai_order := ""
 var sound_loop := ""
 var sound_toggle := ""
+## The cloak bitmap of the pack ("fx/textures/cloaktexture.png": Tribes 2's special/cloakTexture), "" = the shader's own pattern.
+var texture := ""
 var fade_in_s := DEFAULT_FADE_IN_S
 var fade_out_s := DEFAULT_FADE_OUT_S
 
@@ -81,6 +83,7 @@ static func make_from(d: Dictionary) -> CloakProfile:
 	p.ai_order = str(d.get("ai_order", ""))
 	p.sound_loop = str(d.get("sound_loop", ""))
 	p.sound_toggle = str(d.get("sound_toggle", ""))
+	p.texture = str(d.get("texture", ""))
 	p.fade_in_s = float(d.get("fade_in_s", DEFAULT_FADE_IN_S))
 	p.fade_out_s = float(d.get("fade_out_s", DEFAULT_FADE_OUT_S))
 	return p

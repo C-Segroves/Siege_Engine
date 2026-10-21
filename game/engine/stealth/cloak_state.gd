@@ -134,7 +134,7 @@ func apply_step(unit: Node, delta: float) -> void:
 	if _cloaked != before:
 		toggled.emit(_cloaked)
 	fade = move_toward(fade, 1.0 if _cloaked else 0.0, delta / maxf(0.01, profile.fade_in_s if _cloaked else profile.fade_out_s))
-	_visual.apply_amount(unit, fade, profile.reveal_range_m)
+	_visual.apply_amount(unit, fade, profile)
 
 
 ## The state of the cloak as the snapshot carries it.

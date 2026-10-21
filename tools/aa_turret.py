@@ -118,11 +118,11 @@ def _add_mount(nodes, transforms, owner, meshes, pose, elevate, parents):
     nodes.append({'parent': elevate, 'default': len(transforms) - 1, 'name': MOUNT})
 
 
-def rigged_json(data, texture_path, nose=None):
+def rigged_json(data, texture_path):
     """Turret .SHP bytes -> engine shape JSON with nodes, default pose and sequences. ValueError when it has no pose block or
-    no sequences (not a rigged shape). `nose` = 'back' for a shape whose nose is at the Tribes 2 frame's -y (the transport): it is turned
-    half a turn about the up axis so that it faces +y. The pose block is the first single-frame block (the transport stores it
-    after its sequence)."""
+    no sequences (not a rigged shape). The pose block is the first single-frame block (the transport stores it after its
+    sequence). The transport's nose is at the Tribes 2 frame's +y like the Tribes 2 Havoc's (its cockpit glass and the engine pods
+    sit the same way round), so no turn is needed."""
     boxes = aa_shape.node_boxes(data)
     if not boxes:
         raise ValueError('no node table')
@@ -132,7 +132,7 @@ def rigged_json(data, texture_path, nose=None):
     if first is None:
         raise ValueError('no node pose block')
     blocks = [first] + [b for b in blocks if b is not first]
-    frame = M if nose is None else np.diag([-1.0, -1.0, 1.0]) @ M
+    frame = M
     seqs = name_sequences(blocks)
     if not seqs:
         raise ValueError('no sequences')

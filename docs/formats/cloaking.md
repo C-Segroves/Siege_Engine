@@ -59,9 +59,14 @@ dampening field. The user will not be visible to any non-motion-detecting sensor
   (`defaultGame.cs:446`, `player.cs:4`, ended early by firing); the inventory station flashes the buyer cloaked for
   0.5 s / 0.9 s (`station.cs:275,563`); a vehicle leaving its pad is cloaked 4.8 s with the appear sound at 3.7 s
   (`vehicles/serverVehicleHud.cs:140-148`). These use the engine's cloak shader, not data.
-- **Visual:** engine code (Torque `setCloaked`), no shader in the data. The only cloak art is the pack's own
-  (`pack_upgrade_cloaking.dts`, `skins/cloak_core*.png` + `cloak_core.ifl` 20-frame core glow, `lite_pack_cloak.ifl`).
-  The remake draws a screen-refraction shimmer (section 8).
+- **Visual:** engine code (Torque `setCloaked`), no shader in the data, but the engine names its art: `Tribes2.exe`
+  holds the string `special/cloakTexture` (offset 0x369aa0, next to `onForceUncloak`, `canCloak`, `setCloaked`,
+  `isCloaked`, `cloakable`, `detectsCloaked`) and `textures.vl2` ships `special/cloakTexture.bm8` (256x256, grey,
+  tileable: a liquid-metal bump pattern of bright ridges and dark pools). No script, datablock or `.cs` references
+  it, so it is fixed in the engine: a cloaked ShapeBase is drawn see-through, with that bitmap scrolling over it as
+  the distortion / glint map, and `setCloaked` fades the effect in and out (about 1 s; the exact constant is engine
+  code and is inferred, flagged in section 8). The pack's own art is separate (`pack_upgrade_cloaking.dts`,
+  `skins/cloak_core*.png` + `cloak_core.ifl` 20-frame core glow, `lite_pack_cloak.ifl`).
 - **Sounds:** `CloakingPackActivateSound` = `fx/packs/cloak_on.wav`, `description = CloseLooping3d`, played from the
   Activate state (a loop while the pack is on). There is no off sound.
 
@@ -126,7 +131,11 @@ remake offers none (the sound is converted as `tv_packs/cloakpack_loop1`).
 - **What breaks it:** nothing in the data; a cloak order on a vehicle without the component does nothing.
 - **Sounds:** the action plays `bc_mfd.wav` 2D (`sound.cs:94` `IDSFX_CAMOUFLAGE`); the voice lines `IDCV_CLOAK_ON/OFF`,
   `IDCV_DAM_CLOAK`, `IDCV_DES_CLOAK` are commented out.
-- **Visual:** engine code. The cloak is a shimmer in the cockpit's external view, invisible at range.
+- **Visual:** engine code, no art of its own. `Starsiege.exe` has no cloak texture or effect name: its cloak strings
+  are only `newCloak`, `cloakInfo1/2`, the `cloak` order, `isCloaked(<Vehicle ID>)` and the `Cloak` mount kind, and
+  the shell has component icons (`chameleonCloak_*.bmp`, `cuttlefishCloak_*.bmp`) only. The data has no mask or
+  texture to reuse, so the remake draws the same see-through shimmer with the shader's procedural pattern (a
+  documented fallback, not an original asset).
 
 ## 7. Earthsiege 1, Battledrome, Earthsiege 2
 
@@ -138,10 +147,10 @@ One mechanic, per-game data:
 
 | Piece | Where | Rule |
 |---|---|---|
-| `CloakProfile` | `engine/stealth/cloak_profile.gd` | `gameplay/cloak.json` per pack: energy/s, minimum energy, recloak delay and energy gate, breaks (fire, damage over a threshold), reveal range, jams-sensors-when-worn, jam-field block, timed cloaks, sensor modes, glitch/fail health, AI use, sounds. Fade times are the remake's (0.8 s in, 0.5 s out) because the originals' are engine code. |
+| `CloakProfile` | `engine/stealth/cloak_profile.gd` | `gameplay/cloak.json` per pack: energy/s, minimum energy, recloak delay and energy gate, breaks (fire, damage over a threshold), reveal range, jams-sensors-when-worn, jam-field block, timed cloaks, sensor modes, glitch/fail health, AI use, sounds. Fade times are 1.0 s in and out (Tribes 2's `setCloaked` fade, about 1 s; engine code, inferred). |
 | `CloakState` | `engine/stealth/cloak_state.gd` | `Herc.cloak` (every vehicle and soldier): `apply_wanted` / `apply_follow` / `apply_forced`, `apply_fired`, `apply_damaged`, drain, glitch, fade; a puppet follows the host's flag. |
 | `CloakRules` | `engine/stealth/cloak_rules.gd` | eyes: hidden beyond `reveal_range_m` (Tribes 2: 8 m); sensors: also hidden unless `detects_cloaked` and moving at `min_velocity` (Tribes 2 motion sensors, exported in `base_equipment.json`); radar without a sensor net (Starsiege): a per-sweep roll against base + camo + speed class + `activ` of the looking Herc's own sensor; allies always see each other. |
-| `CloakVisual` + `cloak.gdshader` | `engine/stealth/cloak_visual.gd`, `engine/shaders/cloak.gdshader` | a per-unit shader override on the body and the held weapon: the scene behind it, bent by the surface normal and shimmering, plain again within the reveal range of the camera. Under `render_unified` or not (the override replaces the shape's material). No ally outline: no original shows one (`outline_strength` is 0 and a game's data may turn it on). |
+| `CloakVisual` + `cloak.gdshader` | `engine/stealth/cloak_visual.gd`, `engine/shaders/cloak.gdshader` | a per-unit shader override on the body and the held weapon, drawn as Tribes 2 draws a cloaked ShapeBase: the body is see-through, a scrolling bump map (the pack's `fx/textures/cloaktexture.png` = `special/cloakTexture`, written by `tools/export_tribes_gear.py`; named by the profile's `texture`) bends the scene behind it and glints on it, with a faint cool tint and an edge rim; the pattern is fixed to the body (scaled to the unit's height) and scrolls with time. Without the texture (Starsiege, or Tribes 2 not installed) a procedural liquid pattern in the shader stands in. The effect is emissive (unshaded): lit, the earlier version came out as a dark silhouette. Plain again within the reveal range of the camera. Under `render_unified` or not (the override replaces the shape's material). No ally outline: no original shows one (`outline_strength` is 0 and a game's data may turn it on). |
 | Radar, command map, T-targeting | `RadarContacts.is_shown` (`is_cloak_hidden`), `Targeting` through `is_on_scope` | a hostile cloaked unit is not on the scope; a call-in radar sweep still shows it. |
 | Tribes sensor net | `TribesSensorNet` | the worn pack jams; `_senses` / `_soldier_sees` ask `CloakRules.is_hidden_from_sensor`. |
 | Turrets | `TurretTargeting.find_nearest` (`sensor` in the spec); `TribesTurret`, `SSTurret` | a cloaked unit is skipped unless the turret's sensor is a motion sensor. |
@@ -150,7 +159,7 @@ One mechanic, per-game data:
 | Vehicles | `Herc.cloak_input`; `cloak_toggle` action (Ctrl+X) in `PlayerPilot`; `SSUnitDirector._order_cloak`, mission mountables installed on spawn | host authoritative: the wish rides in the controls (`BattleNetSync.make_controls`) and in `InputFrame` flag 8. |
 | Network | `SnapshotCodec.IDX_CLOAKED` (bit 1 of the status byte), `HercSnapshots.SNAP_CLOAK` | observers draw and hide the unit from the host's flag. |
 
-Assumptions (flagged, not in the data): fade times and the shimmer's look; speed classes of Starsiege's sensor modes
+Assumptions (flagged, not in the data): the 1 s fade and the exact distortion strength, scroll speed and tint (the texture itself is the original's); the body shows as flat grey for the first instants of the fade (the shape's own skins are not kept under the override); speed classes of Starsiege's sensor modes
 (stop below 5 % of top speed, slow below 50 %); health glitch / fail read from the unit's integrity; the jam-field block
 applies to any sensor jammer field; Starsiege cloaks cost no energy and nothing breaks them. Done for Tribes 2 soldiers: the script cloaks (`tribes2:timed_cloak`): a respawn cloaks the soldier for
 `$InvincibleTime` (6 s, a shot ends it) with no pack, and a mission script's `setCloaked(on)` / `isCloaked()` are real
@@ -158,4 +167,4 @@ applies to any sensor jammer field; Starsiege cloaks cost no energy and nothing 
 (0.5 / 0.9 s) flashes are in the profile (`vehicle_pad_cloak_s`) but not started by the station code; Starsiege
 components cannot be bought in the garage (components are not modelled there); the Aerial Assault and Vengeance
 soldiers have no pack kit. Tests: `tests/cloak_check.tscn` (headless), `tests/cloak_shots.tscn` (windowed renders:
-`cloak_soldier_plain / cloaked / close`, `cloak_herc_plain / cloaked`).
+`cloak_soldier_plain / cloaked / close`, `cloak_herc_plain / cloaked`, `cloak_herc_*_zoom`, and the sheets `cloak_backgrounds` (the soldier cloaked from 8 sides against ground, slope, sky, buildings) and `cloak_fade` (6 steps in, 6 out)). Before / after renders: `renders/cloak_before`, `renders/cloak_after`.

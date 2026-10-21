@@ -25,6 +25,10 @@ var world_shown := true
 var world_model: ShapeInstance
 var view_model: ShapeInstance
 var _animations: Array[InfantryWeaponAnimation] = []
+var _hand: Node3D
+var _rest_correction := Basis.IDENTITY
+var _grip := Vector3.ZERO
+var _world_scale := Vector3.ONE
 var _last_cooldown := 0.0
 
 
@@ -41,10 +45,12 @@ func build(w: Weapon, body: ShapeInstance, hand_node: int, eye: Node3D) -> void:
 	var palette := Packs.default_palette(str(w.def.get("pack", "tribes")))
 	var body_layers := make_body_layers(body)
 	world_model = make_ready_model(shape_id, palette)
-	var hand: Node3D = body.nodes[hand_node] if hand_node >= 0 and hand_node < body.nodes.size() else body
-	world_model.scale = world_model.scale / body.scale   # the hand node already carries the body's unit scale
-	world_model.position = -make_grip_offset(world_model) * world_model.scale
-	hand.add_child(world_model)
+	_hand = body.nodes[hand_node] if hand_node >= 0 and hand_node < body.nodes.size() else body
+	_world_scale = world_model.scale / body.scale   # the hand node already carries the body's unit scale
+	_grip = make_grip_offset(world_model)
+	_rest_correction = HandMount.make_rest_correction(body, hand_node)
+	_hand.add_child(world_model)
+	apply_mount_pose()
 	apply_layers(world_model, body_layers)
 	world_model.visible = world_shown
 	view_model = make_ready_model(shape_id, palette)
@@ -58,6 +64,25 @@ func build(w: Weapon, body: ShapeInstance, hand_node: int, eye: Node3D) -> void:
 		anim.apply_draw()
 		_animations.append(anim)
 	_last_cooldown = w.cooldown
+
+
+## The world model in the hand with the calibrated mount rotation (HandMount): dead, seated, or before the first aim.
+func apply_mount_pose() -> void:
+	_place_world_model(_rest_correction)
+
+
+## The world model's muzzle along world basis `aim`, its grip still on the hand node (a living soldier).
+func apply_aim(aim: Basis) -> void:
+	if is_instance_valid(world_model) and is_instance_valid(_hand):
+		_place_world_model(HandMount.make_aim_rotation(_hand, aim))
+
+
+## Turns the world model by `rotation` (hand node frame) about its grip, which stays at the hand node's origin.
+func _place_world_model(rotation: Basis) -> void:
+	if not is_instance_valid(world_model):
+		return
+	world_model.basis = rotation * Basis.from_scale(_world_scale)
+	world_model.position = rotation * (-_grip * _world_scale)
 
 
 ## One frame of weapon `w` in hand: a shot (its refire timer restarted) plays fire and reload; the loops run.
@@ -125,6 +150,11 @@ static func make_ready_model(shape_id: String, palette: String) -> ShapeInstance
 ## Index of the Darkstar sequence called `seq_name` (any case), -1 when missing.
 static func find_sequence(model: ShapeInstance, seq_name: String) -> int:
 	return ShapeCycles.find_named(model, [seq_name])
+
+
+## The way a weapon model points: its shape's -Z axis in world space (the grip node and the shape agree on it).
+static func make_forward(model: Node3D) -> Vector3:
+	return (-model.global_basis.z).normalized()
 
 
 ## The grip node's position in the model's own (unscaled) space; zero when the shape has none.

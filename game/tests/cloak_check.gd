@@ -164,10 +164,10 @@ func _check_fade_and_puppet(t2: CloakProfile) -> void:
 	u.cloak.apply_wanted(true, u)
 	_run(u, 0.3)
 	_expect(u.cloak.fade > 0.0 and u.cloak.fade < 1.0, "the shimmer fades in (%.2f)" % u.cloak.fade)
-	_run(u, 1.0)
+	_run(u, t2.fade_in_s)
 	_expect(is_equal_approx(u.cloak.fade, 1.0), "fully cloaked")
 	u.cloak.apply_wanted(false, u)
-	_run(u, 1.0)
+	_run(u, t2.fade_out_s + 0.1)
 	_expect(u.cloak.fade == 0.0, "and out again")
 	var puppet := _make_unit(t2)
 	puppet.is_puppet = true

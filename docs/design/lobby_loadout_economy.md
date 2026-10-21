@@ -653,7 +653,7 @@ States: `REQUESTED -> MARKED -> INBOUND -> DELIVERING -> ACTIVE -> EXPIRING -> D
    flight and Seq02_LAND by height (`DropshipAnimation`), AI-piloted
    (`TransportFlight`), `dormant`, untouchable, flies the shared FlightModel to the LZ at cruise height.
 3. `DELIVERING`: `TransportFlight` gains a phase `HOVER_DROP`: descend to `hover_height_m` (6) over the LZ, hold, release
-   (the vehicle was spawned `parked`, kinematic, slung `sling_m` (8) below the transport via meta `carried_by`; on
+   (the vehicle was spawned `parked`, kinematic, slung below the transport via meta `carried_by`, on a sling as long as the vehicle is tall (`CallinVehicleRun.make_sling_m`: its height + 1.5 m under the transport's lowest point, at least `sling_m` (8); a Herc hangs clear of a dropship hull) and released `hover_height_m` above the ground; on
    release it becomes a normal physics body and settles), then `DEPART` to `leave_m` and removal (existing).
 4. `ACTIVE`: the vehicle is empty, parked, team = caller's team, `owner_claim_s` (30) boarding priority for the caller
    (after that the usual Tribes touch rule: anyone may take it). `apply_commit_risk([vehicle id])` is sent to the
@@ -665,8 +665,9 @@ States: `REQUESTED -> MARKED -> INBOUND -> DELIVERING -> ACTIVE -> EXPIRING -> D
 **Orbital drops (armour, ammo, stations)**
 1. `MARKED`: flare at the LZ; 6 s countdown (`marker_s`) shown to the caller's squad; red ring on the ground.
 2. `INBOUND`: no transport. A pod falls from `drop_height_m` (400) at `fall_speed_mps` (90, about 4.5 s): a visual
-   streak plus a siren/whoosh cue for everyone within 400 m. Clients animate from `(t0, lz, fall_s)` on the server
-   clock (visual only).
+   streak plus a siren/whoosh cue for everyone within 400 m. Clients animate from `(t0, lz, fall_s)` in game time (the frames'
+   delta, not the wall clock; visual only). The pod falls nose first and swings upright onto its tail in the last
+   `flip_height_m` (40) metres (`CallinPodPose`); each shape's nose axis is data (`pod.nose_axes`).
 3. `DELIVERING` (impact): host applies `impact_damage` (400) in `impact_radius_m` (3.5) to anything inside (the caller
    too: the ring warns); a crater decal; impact event sent reliably to all.
 4. `ACTIVE`: armour/ammo become a `CallinCrate` (a `LootContainer` variant shown with the cargo-box shape; `interact`

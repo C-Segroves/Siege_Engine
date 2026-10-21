@@ -527,7 +527,7 @@ def export_shapes(files, out, progress=None):
                     js = None
             if stem in aa_vehicles.RIGGED:                      # the transport: nodes + pose block like a turret
                 try:
-                    js = aa_turret.rigged_json(raw, tex, aa_vehicles.RIGGED[stem])
+                    js = aa_turret.rigged_json(raw, tex)
                     _BOUNDS[stem] = js['bounds']['header']
                 except (ValueError, KeyError, IndexError, struct.error):
                     js = None

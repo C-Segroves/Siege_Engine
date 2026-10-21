@@ -5,14 +5,14 @@ same names), so they take the Tribes 2 vehicle stats (scripts/vehicles/*.cs as e
 The weapons are Tribes 2's too ("tribes2:" ids; without that pack the vehicle simply flies unarmed). The shapes are
 exported facing the engine's forward (aa_shape.face_nose, NOSE below) with a single root node, so the guns hang on the root.
 The transport (turrettrans_vehicle, the Tribes 2 Havoc: an AI-only carrier, unarmed) is the turret-style rigged shape: nodes with a
-pose block and the wing fold sequence (aa_turret.rigged_json, nose 'back'), shown with the wings out.
+pose block and the wing fold sequence (aa_turret.rigged_json, nose at +y like the Tribes 2 Havoc), shown with the wings out.
 The Thundersword's crew (belly-turret bombardier and tail gunner) needs seat data the disc shapes do not give, so the bomb
 scout is a one-seat bomber carrying the two bombs only. """
 
 # file axes of the shape's nose (+X is the engine's forward after to_json); see aa_shape.face_nose
 NOSE = {'scout': (-1, 0), 'bombscout': (0, 1), 'grav_scout': (0, 1)}
-# rigged vehicle shapes (nodes + pose block, aa_turret.rigged_json): stem -> nose direction
-RIGGED = {'turrettrans_vehicle': 'back'}
+# rigged vehicle shapes (nodes + pose block, aa_turret.rigged_json)
+RIGGED = {'turrettrans_vehicle'}
 
 
 def _hull(hp, max_damage):

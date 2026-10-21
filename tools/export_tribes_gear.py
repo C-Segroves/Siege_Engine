@@ -288,6 +288,23 @@ T2_CLOAK_ID = 'tribes2:cloaking_pack'
 T2_TIMED_ID = 'tribes2:timed_cloak'
 
 
+T2_CLOAK_TEXTURE = 'fx/textures/cloaktexture.png'
+T2_CLOAK_TEXTURE_SRC = P.work('tribes2', 'extracted', 'textures', 'textures', 'special', 'cloakTexture.png')
+
+
+def copy_cloak_texture():
+    """Tribes2.exe names "special/cloakTexture" for the cloak shimmer: the 256x256 liquid-metal bitmap (grey, tileable)
+    -> fx/textures/cloaktexture.png of the pack. Returns the pack-relative path, or '' when it is not extracted."""
+    if not os.path.exists(T2_CLOAK_TEXTURE_SRC):
+        return ''
+    from PIL import Image
+    dst = P.pack('tribes2', *T2_CLOAK_TEXTURE.split('/'))
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    with Image.open(T2_CLOAK_TEXTURE_SRC) as im:
+        im.convert('L').convert('RGB').save(dst)
+    return T2_CLOAK_TEXTURE
+
+
 def t2_cloak(resolve):
     """The Tribes 2 cloaking pack's rules (scripts/packs/cloakingpack.cs, projectiles.cs, player.cs, ai.cs, defaultGame.cs,
     station.cs, vehicles/serverVehicleHud.cs), keyed by CloakProfile id. Values come from the scripts, not from memory."""
@@ -297,6 +314,7 @@ def t2_cloak(resolve):
     ai_cs, game_cs, hud_cs = (read(os.path.join(S, 'ai.cs')), read(os.path.join(S, 'defaultGame.cs')),
                               read(os.path.join(S, 'vehicles', 'serverVehicleHud.cs')))
     img = resolve('CloakingPackImage')
+    texture = copy_cloak_texture()
     sound = V.copy_sound('tribes2', os.path.join(V.T2_AUDIO, *str(resolve('CloakingPackActivateSound')['filename']).split('/')))
     timed = {'id': T2_TIMED_ID, 'name': 'Timed cloak', 'kind': 'script', 'source': 'scripts/defaultGame.cs, station.cs',
              'recloak_delay_s': float(find(r'reCloak = %obj.schedule\( (\d+), "setCloaked", true', proj_cs)) / 1000.0,
@@ -307,7 +325,9 @@ def t2_cloak(resolve):
              'vehicle_pad_cloak_s': float(find(r'schedule\((\d+), "setCloaked", false\)', hud_cs)) / 1000.0,
              'reveal_range_m': float(find(r'\(!%clIsCloaked \|\| %distance < (\d+)\)', ai_cs)),
              'note': 'The cloak the scripts switch on with setCloaked: a respawn, a station, a new vehicle.'}
+    timed['texture'] = texture
     return {T2_TIMED_ID: timed, T2_CLOAK_ID: {
+        'texture': texture,
         'id': T2_CLOAK_ID, 'name': 'Cloaking Pack', 'kind': 'pack', 'source': 'scripts/packs/cloakingpack.cs',
         'energy_per_s': float(img['stateEnergyDrain[1]']), 'min_energy': float(img['minEnergy']),
         'recloak_delay_s': float(find(r'reCloak = %obj.schedule\( (\d+), "setCloaked", true', proj_cs)) / 1000.0,

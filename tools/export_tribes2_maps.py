@@ -572,6 +572,7 @@ def environment(root, outdir, notes):
                                      faces['front']]
                     env['skybox_faces'] = faces
                     env['skybox_source'] = dml
+                    env['skybox_layout'] = 'torque'    # the pictures untouched; the engine orients them per face
                 else:
                     notes.append('sky %s: %d of 6 faces found' % (dml, len(faces)))
     if sun:

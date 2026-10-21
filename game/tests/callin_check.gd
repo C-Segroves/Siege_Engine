@@ -150,6 +150,7 @@ func _check_rules() -> void:
 	_expect(CallinRules.make_offers().slice(-2).map(func(o: Dictionary) -> String: return str(o.kind)) == ["bombing_run", "attack_craft"], "the bombing run and the attack craft close the list")
 	_check_transport_choice()
 	_check_dropship_animation()
+	_check_air_names()
 	_expect(CallinRules.shared_cooldown({}) == 20.0 and CallinRules.max_active_orders() == 2 and CallinRules.order_timeout({}) == 90.0, "shared cooldown 20 s, 2 orders, timeout 90 s")
 	_expect(CallinRules.make_fall_seconds() > 4.0 and CallinRules.make_fall_seconds() < 5.0, "a pod falls about 4.4 s (%.1f)" % CallinRules.make_fall_seconds())
 	_expect(RaidPoints.make_cap() == 1000, "the raid-point cap is the economy option (1000)")
@@ -161,6 +162,25 @@ func _check_rules() -> void:
 		print("    %s shape: %s" % [kind, shape if shape != "" else "none imported (plain model)"])
 	print("    pod shape: %s" % CallinRules.pick_imported_shape(CallinRules.pod().get("pod_shapes", [])))
 	print("    transport: %s" % CallinVehicleRun.pick_transport_id())
+
+
+## An air call-in is named with the aircraft that flies it ("Bombing run - Thundersword"), whichever airframe is picked.
+func _check_air_names() -> void:
+	for kind in CallinRules.AIR_KINDS:
+		var craft := CallinAirframes.make_craft_name(kind)
+		var label := CallinRules.make_label(kind)
+		_expect(craft != "" and label == "%s - %s" % [str(CallinRules.rule(kind).label), craft], "%s is named '%s' (the craft it flies)" % [kind, label])
+		_expect(CallinRules.make_offers().any(func(o: Dictionary) -> bool: return o.kind == kind and str(o.label) == label), "the menu and the command map list it as '%s'" % label)
+	var rule := CallinRules.rule(CallinRules.KIND_BOMBING)
+	var listed: Array = rule.airframe_ids
+	rule.airframe_ids = []
+	var picked := CallinAirframes.pick(rule, true)
+	_expect(CallinRules.make_label(CallinRules.KIND_BOMBING).ends_with(CallinAirframes.make_name_of(picked)), "with no listed airframe the label follows the pick (%s)" % picked)
+	rule.airframe_ids = listed
+	if CallinAirframes.is_usable("tribes2:THUNDERSWORD"):
+		_expect(CallinRules.make_label(CallinRules.KIND_BOMBING).to_lower().ends_with("thundersword"), "the Tribes 2 bomber is the Thundersword")
+	if CallinAirframes.is_usable("tribes2:SHRIKE"):
+		_expect(CallinRules.make_label(CallinRules.KIND_ATTACK).to_lower().ends_with("shrike"), "the Tribes 2 gunship is the Shrike")
 
 
 ## What is delivered picks the transport: Hercs and Cybrids a Starsiege dropship (the Cybrids' own cy_drop), Tribes
@@ -1320,6 +1340,9 @@ func _check_every_kind(battle: Battle, x: ExtractionDirector, c: CallinDirector,
 		caps[k[0]] = ExtractionRules.data().callins.kinds[k[0]].max_per_raid
 		ExtractionRules.data().callins.kinds[k[0]].max_per_raid = 99
 	_reset_callins(c)
+	for pod_kind in CallinRules.POD_KINDS:
+		var request := CallinRequest.make(pod_kind, "light" if pod_kind == CallinRules.KIND_ARMOR else "", 1, spots[0])
+		_expect(bool(c.checks.make_plan(request).ok), "%s is accepted at an open spot, like every other pod: '%s'" % [pod_kind, c.checks.make_plan(request).reason])
 	var orders := []
 	for i in kinds.size():
 		c.apply_clear_cooldowns(1)
@@ -1446,7 +1469,10 @@ func _check_transport_delivery(battle: Battle, c: CallinDirector, me: Infantry) 
 	_expect(flyer != null and flyer.vehicle_id == CallinVehicleRun.pick_transport_id(BOUGHT_VEHICLE), "the transport is the one chosen for the cargo")
 	_expect(cargo != null and cargo.vehicle_id == BOUGHT_VEHICLE and cargo.has_meta("carried_by"), "the vehicle is slung under it")
 	await _frames(30)
-	_expect(cargo.global_position.y < flyer.global_position.y - 4.0 and cargo.global_position.distance_to(flyer.global_position) < 12.0, "hanging %.1f m below" % (flyer.global_position.y - cargo.global_position.y))
+	var sling := c.vehicles.make_sling_of(order)
+	_expect(cargo.global_position.y < flyer.global_position.y - 4.0 and cargo.global_position.distance_to(flyer.global_position) < sling + 4.0, "hanging %.1f m below (sling %.1f m)" % [flyer.global_position.y - cargo.global_position.y, sling])
+	var cargo_height := float(Packs.vehicle(BOUGHT_VEHICLE).get("height_m", 0.0))
+	_expect(sling >= cargo_height + CallinVehicleRun.SLING_CLEARANCE_M, "the sling is as long as the vehicle is tall, so it hangs clear of the hull (%.1f m for %.1f m)" % [sling, cargo_height])
 	_expect(c.make_hud_lines().any(func(l: String) -> bool: return l.begins_with("VEHICLE DELIVERY INBOUND")), "the HUD counts the flight: '%s' (%.0f s)" % [c.make_hud_lines().back(), order.eta])
 	await _shot_at(battle, flyer.global_position, Vector3(40, 10, 40), "transport_inbound")
 	var aware := _spawn_hostile(battle, order.lz + Vector3(120, 0, 0))
@@ -1462,7 +1488,7 @@ func _check_transport_delivery(battle: Battle, c: CallinDirector, me: Infantry) 
 		if is_instance_valid(flyer) and order.state == CallinOrder.State.INBOUND:
 			release_alt[0] = flyer.make_altitude()
 		return order.state == CallinOrder.State.DELIVERING, 60.0), "it hovers over the zone and lets go: DELIVERING")
-	var hover_m := float(CallinRules.rule(CallinRules.KIND_VEHICLE).get("hover_height_m", 6.0)) + float(CallinRules.rule(CallinRules.KIND_VEHICLE).get("sling_m", 8.0))
+	var hover_m := float(CallinRules.rule(CallinRules.KIND_VEHICLE).get("hover_height_m", 6.0)) + sling
 	_expect(absf(float(release_alt[0]) - hover_m) <= 3.0, "the vehicle is released at the hover height (%.1f m over the ground, hover %.0f m)" % [release_alt[0], hover_m])
 	await _shot_at(battle, order.lz, Vector3(30, 14, 30), "transport_hover")
 	_expect(not cargo.has_meta("carried_by"), "the vehicle is released")

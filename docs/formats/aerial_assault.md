@@ -190,8 +190,9 @@ Test: `res://tests/aa_campaign_check.tscn` (`AA_TEST_ROOT` for a scratch data fo
   AA_SCOUT / AA_BOMBSCOUT / AA_GRAV_SCOUT with the Tribes 2 Shrike / Thundersword / Wildcat stats and Tribes 2 weapon ids (unarmed
   without that pack; the bomb scout is a one-seat bomber, no belly turret). turrettrans_vehicle (the Tribes 2 Havoc) is a node-table shape like the turrets
   (14 root nodes, each part in its node's frame; the pose block with the node positions comes AFTER the 21-frame wing fold sequence,
-  its last frame equals the pose, which has the wings out; the nose is at -y of the Tribes 2 frame and is turned to +y;
-  `aa_turret.rigged_json(..., nose='back')`). Its material records are in a looser layout (no lum texture: `aa_shape._materials(loose)`
+  its last frame equals the pose, which has the wings out; the nose is at +y of the Tribes 2 frame like the Tribes 2 Havoc's (an earlier
+  export turned it half a turn and flew it tail first: `res://tests/vehicle_facing_check.tscn` compares the tail weight of every AA vehicle
+  with its Tribes 2 twin), so `aa_turret.rigged_json` keeps the frame). Its material records are in a looser layout (no lum texture: `aa_shape._materials(loose)`
   and the texture list keeps repeated entries, the indices count them). Offered as AA_TRANSPORT with the Havoc stats, six seats,
   AI-only and unarmed. Check: `res://tests/aa_vehicle_check.tscn`.
 - Turrets (`tools/aa_turret.py`, `aa_anim.node_blocks`): turret_base_large, the five barrels (aa, fusion = plasma, missile, mortar,

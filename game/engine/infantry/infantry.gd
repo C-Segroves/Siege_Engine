@@ -147,15 +147,23 @@ func make_hand_node() -> int:
 	if body_shape == "" or hand < 0:
 		return hand
 	var own: Array = Assets.shape(str(armor.get("shape", ""))).get("nodes", [])
-	var wanted := str(own[hand].get("name", "")).to_lower() if hand < own.size() else ""
+	var wanted := make_node_stem(str(own[hand].get("name", ""))) if hand < own.size() else ""
 	var nodes: Array = Assets.shape(body_shape).get("nodes", [])
 	for i in nodes.size():
-		if str(nodes[i].get("name", "")).to_lower() == wanted:
+		if make_node_stem(str(nodes[i].get("name", ""))) == wanted:
 			return i
 	for i in nodes.size():
 		if str(nodes[i].get("name", "")) == InfantryCatalog.AA_HAND_NODE:
 			return i
 	return -1
+
+
+## A node name without its case and the trailing mesh number Tribes 1 appends ("Dummy Hand36" -> "dummy hand").
+static func make_node_stem(node_name: String) -> String:
+	var stem := node_name.to_lower()
+	while stem != "" and stem[stem.length() - 1].is_valid_int():
+		stem = stem.left(stem.length() - 1)
+	return stem
 
 
 func _build_collision() -> void:
@@ -529,9 +537,12 @@ func _animate(delta: float, with_steps := true) -> void:
 	if with_steps:
 		_sounds.apply_steps(self, _animation, delta)
 	held.update(current_weapon(), delta)
+	if alive and eye:
+		held.apply_aim(eye.global_basis)
 
 
 func _death_anim(delta: float) -> void:
+	held.apply_mount_pose()
 	_death_t += delta
 	_animation.apply_death(_death_t, make_death_choice())
 
@@ -659,6 +670,7 @@ func _process(delta: float) -> void:
 	apply_seat_transform()
 	if is_seated_visibly() and alive:
 		_animation.apply_hold(seat.pose, delta)
+		held.apply_mount_pose()
 		held.update(current_weapon(), delta)
 
 

@@ -40,6 +40,22 @@ static func pick(rule: Dictionary, carries_bombs: bool) -> String:
 	return best if best != "" else PLAIN_ID
 
 
+## The airframe the air call-in `kind` flies (the same pick the run makes when it starts).
+static func pick_for_kind(kind: String) -> String:
+	return pick(CallinRules.rule(kind), kind == CallinRules.KIND_BOMBING)
+
+
+## The craft's own name (Thundersword, Shrike, Skimmer) as the pack spells it; a pack that spells it in capitals gets title case.
+static func make_craft_name(kind: String) -> String:
+	return make_name_of(pick_for_kind(kind))
+
+
+## The name of flyer `id` (see make_craft_name).
+static func make_name_of(id: String) -> String:
+	var name := str(Packs.vehicle(id).get("name", id.get_slice(":", 1)))
+	return name.capitalize() if name == name.to_upper() else name
+
+
 ## How well flyer `v` suits the role: a bomber by the bombs it carries then its mass, a gunship by its combat rating.
 static func make_score(v: Dictionary, carries_bombs: bool) -> float:
 	if carries_bombs:

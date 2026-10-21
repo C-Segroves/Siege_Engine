@@ -88,6 +88,7 @@ static func _expand(d: Dictionary) -> Dictionary:
 		"albedo_repeat": 1.0}
 	var env: Dictionary = (d.environment as Dictionary).duplicate(true)
 	env["skybox_faces"] = SKY_FACES
+	env["skybox_layout"] = MapEnvironment.LAYOUT_TORQUE
 	env["water"] = d.water
 	m["environment"] = env
 	var out := {"interiors": [], "statics": [], "stations": [], "mode_objects": [], "power_groups": [], "sites": [], "loot_areas": []}

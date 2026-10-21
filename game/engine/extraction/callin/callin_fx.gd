@@ -1,8 +1,8 @@
 class_name CallinFx
 extends Node3D
 ## What every peer sees of the call-ins (child "CallinFx" of the battle; docs/design/lobby_loadout_economy.md sections 9.5 and 9.6):
-## the flare and the ground ring at a landing zone, the pod falling from orbit (animated from the time the host said it
-## has left, visual only), the impact flash and the crater that fades. The host tells the state of each order
+## the flare and the ground ring at a landing zone, the pod falling from orbit (animated in game time from the seconds the host said
+## it has left, visual only; CallinPodPose holds its attitude), the impact flash and the crater that fades. The host tells the state of each order
 ## (`apply_view`) and the impacts (`apply_impact`); nothing here changes the game.
 
 const STALE_SECONDS := 2.5
@@ -20,10 +20,12 @@ const IMPACT_SOUND := "big_explosion"
 const IMPACT_SIZE := 7.0
 const SIREN_UNIT := 40.0
 
-## order id -> {root, kind, full (the caller and his squad see it at any range), seen (msec), shown, pod (Node3D or null),
-## fall_end (msec), speed (m/s), light, ring, beam}
+## order id -> {root, kind, full (the caller and his squad see it at any range), seen (game s), shown, pod (Node3D or null),
+## pod_body (the turning pod model), nose (its nose axis), fall_left (s), speed (m/s), light, ring, beam}
 var markers := {}
 var craters: Array = []
+## Game seconds: the sum of the frames' delta, so a paused or slowed game holds the markers and the pods too.
+var _clock := 0.0
 var _pulse := 0.0
 var _puff_left := 0.0
 
@@ -33,16 +35,16 @@ func _init() -> void:
 
 
 func _process(delta: float) -> void:
+	_clock += delta
 	_pulse += delta
 	_puff_left -= delta
-	var now := Time.get_ticks_msec()
 	var player := get_viewport().get_camera_3d()
 	for id in markers.keys():
 		var m: Dictionary = markers[id]
-		if now - int(m.seen) > STALE_SECONDS * 1000.0 and not bool(m.full):
+		if _clock - float(m.seen) > STALE_SECONDS and not bool(m.full):
 			apply_remove(int(id))
 			continue
-		_animate(m, now, player)
+		_animate(m, delta, player)
 	if _puff_left <= 0.0:
 		_puff_left = 0.6
 
@@ -59,7 +61,7 @@ func apply_view(view: Dictionary) -> void:
 	if not markers.has(id):
 		markers[id] = _build_marker(view)
 	var m: Dictionary = markers[id]
-	m.seen = Time.get_ticks_msec()
+	m.seen = _clock
 	m.full = view.has("peer")
 	m.root.global_position = view.lz
 	if state == CallinOrder.State.INBOUND and m.pod == null and str(view.kind) in CallinRules.POD_KINDS + [CallinRules.KIND_VEHICLE] \
@@ -100,8 +102,8 @@ func _build_marker(view: Dictionary) -> Dictionary:
 	root.add_child(light)
 	var ring := _make_ring(float(view.radius))
 	root.add_child(ring)
-	return {"root": root, "kind": str(view.kind), "full": view.has("peer"), "seen": Time.get_ticks_msec(), "pod": null,
-		"fall_end": 0, "speed": 0.0, "shown": true, "light": light, "ring": ring, "beam": beam}
+	return {"root": root, "kind": str(view.kind), "full": view.has("peer"), "seen": _clock, "pod": null,
+		"pod_body": null, "nose": CallinPodPose.FALLBACK_NOSE, "fall_left": 0.0, "speed": 0.0, "shown": true, "light": light, "ring": ring, "beam": beam}
 
 
 func _make_ring(radius: float) -> MeshInstance3D:
@@ -135,30 +137,31 @@ static func _unshaded(color: Color) -> StandardMaterial3D:
 func _start_pod(m: Dictionary, view: Dictionary) -> void:
 	var height := float(CallinRules.pod().get("drop_height_m", 400.0))
 	m.speed = height / maxf(float(view.fall_s), 0.1)
-	m.fall_end = Time.get_ticks_msec() + int(float(view.fall_left) * 1000.0)
+	m.fall_left = float(view.fall_left)
 	m.pod = Node3D.new()
 	(m.root as Node3D).add_child(m.pod)
-	_build_pod(m.pod)
+	_build_pod(m)
 	Sfx.play_at_range(SIREN_SOUND, view.lz, 0.0, Vector2(SIREN_UNIT, float(CallinRules.pod().get("siren_m", 400.0))))
 
 
-## Fills `pod` (already in the tree: a model is measured in the world) with the pod's body and its fiery streak.
-func _build_pod(pod: Node3D) -> void:
+## Fills the marker's `pod` (already in the tree: a model is measured in the world) with the pod's body, which turns about its
+## middle, and its fiery streak, which always trails straight above it.
+func _build_pod(m: Dictionary) -> void:
+	var pod: Node3D = m.pod
+	var body := Node3D.new()
+	pod.add_child(body)
+	m.pod_body = body
 	var shape_id := CallinRules.pick_imported_shape(CallinRules.pod().get("pod_shapes", []))
 	if shape_id != "":
-		var model := ShapeInstance.new()
-		pod.add_child(model)
-		model.build(Assets.shape(shape_id), 0, Packs.default_palette(Assets.split_id(shape_id)[0]))
-		var extent := LootContainer._make_world_box(model).get_longest_axis_size()
-		if extent > 0.0:
-			model.scale *= POD_LENGTH / extent
+		_build_pod_model(body, shape_id)
+		m.nose = CallinPodPose.make_nose_axis(shape_id)
 	else:
-		var body := MeshInstance3D.new()
-		var capsule := CapsuleMesh.new()
-		capsule.radius = POD_WIDTH
-		capsule.height = POD_LENGTH
-		body.mesh = capsule
-		pod.add_child(body)
+		var capsule := MeshInstance3D.new()
+		var mesh := CapsuleMesh.new()
+		mesh.radius = POD_WIDTH
+		mesh.height = POD_LENGTH
+		capsule.mesh = mesh
+		body.add_child(capsule)
 	var streak := MeshInstance3D.new()
 	var cyl := CylinderMesh.new()
 	cyl.top_radius = 0.05
@@ -169,9 +172,27 @@ func _build_pod(pod: Node3D) -> void:
 	streak.position.y = STREAK_LENGTH * 0.5 + POD_LENGTH * 0.5
 	streak.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	pod.add_child(streak)
+	_pose_pod(m)
 
 
-func _animate(m: Dictionary, now: int, camera: Camera3D) -> void:
+## The pod model scaled to POD_LENGTH along its longest axis, its middle on `body`'s origin so that it turns about it.
+func _build_pod_model(body: Node3D, shape_id: String) -> void:
+	var model := ShapeInstance.new()
+	body.add_child(model)
+	model.build(Assets.shape(shape_id), 0, Packs.default_palette(Assets.split_id(shape_id)[0]))
+	var extent := LootContainer._make_world_box(model).get_longest_axis_size()
+	if extent > 0.0:
+		model.scale *= POD_LENGTH / extent
+	model.position -= LootContainer._make_world_box(model).get_center() - body.global_position
+
+
+func _pose_pod(m: Dictionary) -> void:
+	var height := maxf(float(m.fall_left), 0.0) * float(m.speed)
+	(m.pod as Node3D).position.y = height + POD_LENGTH * 0.5
+	(m.pod_body as Node3D).basis = CallinPodPose.make_basis(m.nose, height)
+
+
+func _animate(m: Dictionary, delta: float, camera: Camera3D) -> void:
 	var flicker := 0.75 + 0.25 * sin(_pulse * 9.0)
 	(m.light as OmniLight3D).light_energy = 2.0 * flicker
 	(m.ring as Node3D).scale = Vector3.ONE * (1.0 + 0.04 * sin(_pulse * 5.0))
@@ -179,12 +200,11 @@ func _animate(m: Dictionary, now: int, camera: Camera3D) -> void:
 		Effects.puff(self, (m.root as Node3D).global_position + Vector3.UP * 1.5, "smoke")
 	var pod := m.pod as Node3D
 	if pod != null:
-		var left := maxf(float(int(m.fall_end) - now) / 1000.0, 0.0)
-		pod.position.y = left * float(m.speed) + POD_LENGTH * 0.5
+		m.fall_left = maxf(float(m.fall_left) - delta, 0.0)
+		_pose_pod(m)
 	if not bool(m.full) and camera != null:
 		var visible_m := float(CallinRules.data().get("marker", {}).get("visible_m", 300.0))
-		(m.root as Node3D).visible = bool(m.shown) and (pod != null \
-			or camera.global_position.distance_to((m.root as Node3D).global_position) <= visible_m)
+		(m.root as Node3D).visible = bool(m.shown) and (pod != null 			or camera.global_position.distance_to((m.root as Node3D).global_position) <= visible_m)
 
 
 # ------------------------------------------------------------------ the impact

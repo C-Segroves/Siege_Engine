@@ -204,7 +204,10 @@
     "designation": {"range_m": 220.0, "approach_check_m": 120.0, "approach_clearance_m": 4.0},
     "marker": {"visible_m": 300.0, "alert_radius_m": 120.0, "color": [1.0, 0.55, 0.1], "ring_color": [1.0, 0.2, 0.15]},
     "pod": {"drop_height_m": 400.0, "fall_speed_mps": 90.0, "slow_fall_s": 9.0, "impact_damage": 400.0, "impact_radius_m": 3.5,
-            "siren_m": 400.0, "crater_fade_s": 120.0, "expiring_s": 8.0, "pod_shapes": ["starsiege:hdroppod", "starsiege:cdroppod", "starsiege:cy_pod"]},
+            "siren_m": 400.0, "crater_fade_s": 120.0, "expiring_s": 8.0, "pod_shapes": ["starsiege:hdroppod", "starsiege:cdroppod", "starsiege:cy_pod"],
+            "flip_height_m": 40.0,
+            "nose_axes": {"starsiege:hdroppod": [0, 0, -1], "starsiege:cdroppod": [0, 0, -1], "starsiege:cy_pod": [0, -1, 0]},
+            "nose_notes": "Nose = the end opposite the engine nozzles, in the shape's engine frame (-Z forward, +Y up): hdroppod and cdroppod lie along Z with the hatch dome at -Z and four nozzles at +Z; cy_pod stands with its engines (the ringed disc) up. The pod falls nose down and swings upright onto its tail in the last flip_height_m metres (remake design)."},
     "vehicle_class": {"light_rating_max": 0.4, "medium_rating_max": 0.7},
     "kinds": {
       "vehicle_delivery": {"label": "Vehicle delivery", "text": "Your saved vehicle is flown in and set down at your spot.",
