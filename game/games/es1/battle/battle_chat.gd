@@ -82,14 +82,17 @@ func _on_closed() -> void:
 
 # ------------------------------------------------------------------ where the panel may go
 
-## The screen rects of the HUD in use (ChatPlacement): the cockpit's windows while it shows, else the plain
-## HUD's meters and the soldier's bars.
+## The screen rects of the HUD in use (ChatPlacement): the cockpit's windows while it shows, else every element
+## the shared HUD layout (HudLayout) shows now.
 func make_occupied_rects() -> Array:
 	var screen: Vector2 = panel.get_viewport_rect().size
 	var cockpit := battle.overlay.cockpit
 	if is_instance_valid(cockpit) and cockpit.visible:
 		return ChatPlacement.make_screen_rects(CockpitOccupancy.make_rects(cockpit), cockpit.canvas_size, screen)
-	return HUD.make_occupied_rects(screen) + InfantryHud.make_occupied_rects(screen)
+	var live := HudLayout.of(panel).make_occupied_rects()
+	if live.is_empty():
+		return HUD.make_occupied_rects(screen) + InfantryHud.make_occupied_rects(screen)
+	return live + [HUD.make_crosshair_rect(screen)]
 
 
 # ------------------------------------------------------------------ saying a line (LAN)

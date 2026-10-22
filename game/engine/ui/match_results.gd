@@ -81,6 +81,7 @@ func start_battle(cfg: Dictionary) -> void:
 
 
 func continue_to_front_end() -> void:
+	Session.show_play_tab()
 	get_tree().change_scene_to_file(Session.front_end_scene())
 
 

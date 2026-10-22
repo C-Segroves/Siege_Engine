@@ -6,7 +6,7 @@ extends Node
 ##   godot --headless --audio-driver Dummy --path game res://tests/ui_nav_check.tscn
 
 const STEP_FRAMES := 2
-## The menu's lobby entries: [kind, offline].
+## The lobby entries (the host lobby's kinds): [kind, offline].
 const LOBBY_ENTRIES := [["skirmish", true], ["extraction", true], ["vs", false], ["coop", false], ["campaign", false]]
 const SavedGuard := preload("res://tests/saved_campaign_guard.gd")
 
@@ -196,23 +196,24 @@ func _is_in_dialog(frame: Node) -> bool:
 
 func _check_launcher_routes() -> void:
 	var launcher: Launcher = load("res://launcher.tscn").instantiate()
+	launcher.set_meta("start_mode", Launcher.JOIN_START_MODE)
 	add_child(launcher)
 	await _frames(4)
-	_expect(launcher.current_name == "menu", "launcher opens on the menu")
-	_expect(_focus() != null and launcher.is_ancestor_of(_focus()), "launcher menu has focus (%s)" % _focus_name())
-	for page in ["browser", "options", "new_campaign", "saves"]:
+	_expect(launcher.current_name == "browser", "launcher opens on the page the library asked for")
+	_expect(_focus() != null and launcher.is_ancestor_of(_focus()), "launcher page has focus (%s)" % _focus_name())
+	for page in ["options", "new_campaign", "saves"]:
 		launcher.go(page)
 		await _frames(3)
 		_expect(_focus() != null and launcher.current.is_ancestor_of(_focus()), "%s: first control focused (%s)" % [page, _focus_name()])
 		_expect(_walks_to_footer(launcher.current), "%s: every control links down to the footer" % page)
 		await _send_action("menu_back")
-		_expect(launcher.current_name == "menu", "%s: menu_back returns to the menu (now %s)" % [page, launcher.current_name])
+		_expect(launcher.current_name == "browser", "%s: menu_back returns to the page before (now %s)" % [page, launcher.current_name])
 	for entry in LOBBY_ENTRIES:
 		launcher.open_lobby(entry[0], entry[1])
 		await _frames(4)
 		_expect(launcher.current_name == "lobby" and _focus() != null and launcher.current.is_ancestor_of(_focus()), "%s lobby: first control focused (%s)" % [entry[0], _focus_name()])
 		await _send_action("menu_back")
-		_expect(launcher.current_name == "menu" and Net.roster.is_empty(), "%s lobby: menu_back leaves to the menu (now %s)" % [entry[0], launcher.current_name])
+		_expect(launcher.current_name == "browser" and Net.roster.is_empty(), "%s lobby: menu_back leaves to the page before (now %s)" % [entry[0], launcher.current_name])
 	Net.stop_discovery()
 	launcher.queue_free()
 	await _frames()
@@ -337,40 +338,57 @@ func _expect_back(launcher: Launcher, from: String, expected: String) -> void:
 
 
 ## Every Back path of the menu map: Back returns to the screen the player came from; from a page the library
-## opened (Host, Join, campaign pages, the launcher's own menu) that is the library.
+## opened (Host, Join, campaign pages) that is the library home.
 func _check_back_paths() -> void:
 	for entry in [["host", "lobby"],
-			["join", "browser"], ["new_campaign", "new_campaign"], ["load", "saves"], ["menu", "menu"]]:
+			["join", "browser"], ["new_campaign", "new_campaign"], ["load", "saves"]]:
 		var launcher := await _open_launcher_scene(entry[0])
 		_expect(launcher.current_name == entry[1], "library %s opens %s (%s)" % [entry[0], entry[1], launcher.current_name])
 		await _expect_back(launcher, "library %s: %s" % [entry[0], entry[1]], "library")
 		_expect(Net.roster.is_empty(), "library %s: Back closed the session" % entry[0])
 		await _close_scene()
-	var launcher := await _open_launcher_scene(Launcher.MENU_START_MODE)
-	for page in ["browser", "options", "new_campaign", "saves", "training"]:
+	var launcher := await _open_launcher_scene("join")
+	for page in ["options", "new_campaign", "saves", "training"]:
 		launcher.go(page, {"pack": "tribes"} if page == "training" else {})
 		await _frames(3)
-		await _expect_back(launcher, "menu > %s" % page, "menu")
+		await _expect_back(launcher, "browser > %s" % page, "browser")
 	launcher.go("new_campaign")
 	await _frames(2)
 	launcher.go("saves", {"mode": "load"})
 	await _frames(2)
-	await _expect_back(launcher, "menu > new campaign > saves", "new_campaign")
-	await _expect_back(launcher, "menu > new campaign", "menu")
+	await _expect_back(launcher, "browser > new campaign > saves", "new_campaign")
+	await _expect_back(launcher, "browser > new campaign", "browser")
 	await _check_lobby_back(launcher)
 	await _check_campaign_back(launcher)
-	await _expect_back(launcher, "menu", "library")
+	await _expect_back(launcher, "browser", "library")
+	await _close_scene()
+	await _check_leave_match_returns_to_library()
+
+
+## A launcher opened after a match with no session left (results Continue) goes to the library home, Play tab.
+func _check_leave_match_returns_to_library() -> void:
+	Net.leave()
+	Session.last_result = {}
+	Session.front_end = Launcher.SELF_SCENE
+	var launcher: Launcher = load("res://launcher.tscn").instantiate()
+	get_tree().root.add_child(launcher)
+	get_tree().current_scene = launcher
+	await _frames(6)
+	_expect(_scene_is_library(), "after a match with no session the launcher goes to the library")
+	if _scene_is_library():
+		var library := get_tree().current_scene as Library
+		_expect(library.current_name == "home" and LibraryHome.make_start_tab() == "play", "the library home opens on the Play tab")
 	await _close_scene()
 
 
-## Host LAN game > lobby > Leave returns to the menu.
+## Host LAN game > lobby > Leave returns to the page before.
 func _check_lobby_back(launcher: Launcher) -> void:
 	launcher.open_lobby("vs")
 	await _frames(3)
 	if launcher.current_name != "lobby":
 		_expect(false, "menu > Host LAN game opens the lobby (port busy?)")
 		return
-	await _expect_back(launcher, "menu > lobby (Leave)", "menu")
+	await _expect_back(launcher, "browser > lobby (Leave)", "browser")
 	_expect(not Net.is_online(), "Leave closed the LAN session")
 
 
@@ -388,6 +406,6 @@ func _check_campaign_back(launcher: Launcher) -> void:
 	await _frames(3)
 	await _expect_back(launcher, "lobby > hangar", "lobby")
 	Session.clear_campaign()
-	Net.leave()   # the session ended under the lobby: the launcher goes back to the menu it was opened from
+	Net.leave()   # the session ended under the lobby: the launcher goes back to the page it was opened from
 	await _frames(2)
-	_expect(launcher.current_name == "menu", "the lobby came from the menu: the stack leads back there (%s)" % launcher.current_name)
+	_expect(launcher.current_name == "browser", "the lobby came from the browser: the stack leads back there (%s)" % launcher.current_name)

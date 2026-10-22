@@ -1,11 +1,14 @@
+class_name LibraryHome
 extends RoutedScreen
 ## Library home, in three tabs (TabPages). Play: the campaigns (Continue / New campaign / Load game open the launcher's
 ## campaign pages), Host LAN game (the standard lobby: the host picks co-op, the campaign, skirmish, training, extraction or
 ## any versus game mode there; alone it is a solo game against bots) and Join. Your library: import discs, switch each
-## game's content on/off, and soundtracks. Options & tools: the shape viewer, Options, Tested game versions. The tab last
+## game's content on/off, and soundtracks. Options & tools: Play intro, the shape viewer, Options (with the pilot name),
+## Tested game versions. Leaving a match returns here on the Play tab (Session.front_end_tab). The tab last
 ## shown is kept while the app runs; with nothing imported the library tab opens first.
 
 const SHAPE_VIEWER := "res://tools/shape_viewer.tscn"
+const INTRO_MOVIE := "video/flic/intro3.ogv"
 const PACK_GRID_COLUMNS := 3
 const FILE_DIALOG_RATIO := 0.7
 const PERCENT := 100.0
@@ -48,6 +51,9 @@ static func make_start_tab() -> String:
 	var asked := ScreenRouter.arg_value("tab")
 	if asked != "":
 		return asked
+	if Session.front_end_tab != "":
+		_last_tab = Session.front_end_tab
+		Session.front_end_tab = ""
 	if _last_tab != "":
 		return _last_tab
 	return TAB_LIBRARY if Packs.packs.is_empty() else TAB_PLAY
@@ -216,6 +222,9 @@ func _add_play_section(page: VBoxContainer, can_play: bool) -> void:
 
 func _add_tools_section(page: VBoxContainer) -> void:
 	page.add_child(Widgets.section("Tools"))
+	var intro := Widgets.button("Play intro", func() -> void: MoviePlayer.play(self, INTRO_MOVIE))
+	intro.disabled = not FileAccess.file_exists(Assets.path(INTRO_MOVIE))
+	page.add_child(intro)
 	var viewer := Widgets.button("Shape viewer", func() -> void: get_tree().change_scene_to_file(SHAPE_VIEWER))
 	viewer.disabled = Packs.packs.is_empty()
 	page.add_child(viewer)

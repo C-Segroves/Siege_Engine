@@ -41,8 +41,8 @@ func save_shot(file_name: String) -> void:
 # ------------------------------------------------------------------ Earthsiege 2
 
 func flow_es2_economy() -> void:
-	var l := open_scene("res://launcher.tscn") as Launcher
-	await wait_screen("menu")
+	var l := open_launcher()
+	await wait_screen("browser")
 	LauncherAutomation._start_campaign_of("es2")
 	l.show_started_campaign()
 	if not await wait_screen("lobby", 30):

@@ -23,6 +23,20 @@ const KILL_FAMILIES := ["deathmatch", "duel"]
 const GOAL_SEED_KEY := "goal_seed"
 ## Maps preferred for a raid (big Tribes / Tribes 2 / Starsiege maps), by entry name.
 const PREFERRED_RAID_MAPS := ["Tribes 2 map - Katabatic", "Tribes map - Raindance", "Tribes 2 map", "Tribes map", "Starsiege map"]
+## The groups of the one Game mode picker, in its order, and the id prefix of the vs and training choices.
+const GROUP_VERSUS := "Versus"
+const GROUP_COOP := "Co-op"
+const GROUP_CAMPAIGN := "Campaign"
+const GROUP_EXTRACTION := "Extraction"
+const GROUP_TRAINING := "Training"
+const VERSUS_PREFIX := "vs:"
+const TRAINING_PREFIX := "training:"
+const TRAINING_KIND := "training"
+const COOP_LABEL := "Co-op vs AI"
+const BATTLEDROME_MODES := ["duel"]
+
+static var _maps_by_mode := {}
+static var _maps_by_mode_key := 0
 
 
 ## The settings of a new lobby of `kind` (KIND_*): a LAN game, or with `solo` an offline session.
@@ -57,16 +71,17 @@ static func make_default_infantry_pack() -> String:
 	return slot_pack if packs.has(slot_pack) else PlayerProfile.load_infantry_pack()
 
 
-## The map entry index a new lobby of `mode` starts on (a raid prefers a big map; else the first).
+## The map entry index a new lobby of `mode` starts on (a raid prefers a big map among those that can host it; else the first).
 static func make_default_map_index(mode: String) -> int:
 	if mode != KIND_EXTRACTION:
 		return 0
 	var entries := MapPicker.make_entries()
+	var raid_maps := make_maps_for_choice(KIND_EXTRACTION)
 	for wanted in PREFERRED_RAID_MAPS:
-		for i in entries.size():
+		for i in raid_maps:
 			if str(entries[i].name).begins_with(wanted):
 				return i
-	return 0
+	return raid_maps[0] if not raid_maps.is_empty() else 0
 
 
 # ------------------------------------------------------------------ changes
@@ -142,6 +157,76 @@ static func make_with_time_limit(s: Dictionary, minutes: int) -> Dictionary:
 	return make_with_value(s, GameModes.TIME_LIMIT_KEY, 0 if seconds == int(make_default_limits(s).time_limit_s) else seconds)
 
 
+## Whatever the host picks in the single Game mode picker, by choice id (make_choice_id): every versus game mode of the
+## installed games, co-op, the co-op campaign, the extraction raid, then the training pages. Each choice is
+## {id, label, group, kind (KIND_* or TRAINING_KIND), game_mode (versus), pack (training), maps (entry indices of the
+## maps it can be played on), enabled, reason ("" when enabled: why no map offers it)}.
+static func make_mode_choices() -> Array:
+	return make_choices_from(_make_maps_by_mode(), ExtractionRules.is_available())
+
+
+## make_mode_choices for `maps` (game mode id -> the entry indices of the maps that offer it) and whether the raid's soldiers
+## are installed: the pure part, so a lobby with some games missing can be checked.
+static func make_choices_from(maps: Dictionary, soldiers_installed: bool) -> Array:
+	var out := []
+	for id in _make_versus_ids():
+		var offered: Array = maps.get(id, [])
+		out.append(_make_choice(VERSUS_PREFIX + id, GameModes.label_for(id), GROUP_VERSUS, KIND_VERSUS, offered, _make_versus_reason(id)))
+		out.back()["game_mode"] = id
+	out.append(_make_choice(KIND_COOP, COOP_LABEL, GROUP_COOP, KIND_COOP, maps.get("coop_ai", []), "needs an installed map"))
+	out.append(_make_choice(KIND_CAMPAIGN, str(LobbySettings.MODE_TITLES[KIND_CAMPAIGN]), GROUP_CAMPAIGN, KIND_CAMPAIGN, [0], ""))
+	out.back()["maps"] = []
+	out.append(_make_choice(KIND_EXTRACTION, str(LobbySettings.MODE_TITLES[KIND_EXTRACTION]), GROUP_EXTRACTION, KIND_EXTRACTION,
+		maps.get("extraction", []), "needs Tribes 2 installed" if not soldiers_installed else "needs a large map"))
+	for pack in TribesMissionRuntime.PACKS:
+		if not TribesMissionRuntime.list_missions(pack).is_empty():
+			out.append(_make_choice(TRAINING_PREFIX + str(pack), "%s training..." % Packs.pack_name(pack), GROUP_TRAINING, TRAINING_KIND, [0], ""))
+			out.back()["pack"] = str(pack)
+			out.back()["maps"] = []
+	return out
+
+
+static func find_mode_choice(id: String) -> Dictionary:
+	for c in make_mode_choices():
+		if str(c.id) == id:
+			return c
+	return {}
+
+
+## The picker's choice id of settings `s`: "vs:<game mode>" in versus, else the mode itself.
+static func make_choice_id(s: Dictionary) -> String:
+	var mode := str(s.get("mode", KIND_VERSUS))
+	return VERSUS_PREFIX + GameModes.canonical(str(s.get(LobbySettings.GAME_MODE_KEY, GameModes.DEFAULT))) if mode == KIND_VERSUS else mode
+
+
+## The name of settings `s`' game mode as the picker and a client's read-only row show it.
+static func make_choice_label(s: Dictionary) -> String:
+	var mode := str(s.get("mode", KIND_VERSUS))
+	if mode == KIND_VERSUS:
+		return LobbySettings.make_game_mode_label(s)
+	return COOP_LABEL if mode == KIND_COOP else str(LobbySettings.MODE_TITLES.get(mode, mode))
+
+
+## The entry indices of the maps choice `id` can be played on (every map for a mode the maps offer; [] for the campaign).
+static func make_maps_for_choice(id: String) -> Array:
+	return find_mode_choice(id).get("maps", [])
+
+
+## The settings after the host picks choice `id`: the lobby's mode and game mode change, and the map moves to the first
+## one that can host it when the current map cannot (the map is kept when it fits). A disabled choice changes nothing.
+static func make_with_choice(s: Dictionary, id: String) -> Dictionary:
+	var choice := find_mode_choice(id)
+	if choice.is_empty() or not bool(choice.enabled) or str(choice.kind) == TRAINING_KIND:
+		return s.duplicate(true)
+	var kind := str(choice.kind)
+	var out := s.duplicate(true) if str(s.get("mode", "")) == kind else make_with_mode(s, kind)
+	if kind != KIND_CAMPAIGN:
+		out = _make_fitted_map(out, choice)
+	if kind == KIND_VERSUS:
+		out = make_with_game_mode(out, str(choice.game_mode))
+	return out
+
+
 # ------------------------------------------------------------------ queries
 
 static func make_map_entry(s: Dictionary) -> Dictionary:
@@ -205,3 +290,52 @@ static func _apply_game_mode(s: Dictionary, mode: Dictionary) -> Dictionary:
 	s[GameModes.SCORE_LIMIT_KEY] = 0
 	s[GameModes.TIME_LIMIT_KEY] = 0
 	return s
+
+
+## `s` on a map `choice` can be played on: unchanged when its map fits, else the first fitting map (a raid: the preferred one).
+static func _make_fitted_map(s: Dictionary, choice: Dictionary) -> Dictionary:
+	var maps: Array = choice.maps
+	if maps.is_empty() or maps.has(int(s.get("world_idx", -1))):
+		return s
+	var at := make_default_map_index(KIND_EXTRACTION) if str(choice.kind) == KIND_EXTRACTION else int(maps[0])
+	return make_with_map(s, at if maps.has(at) else int(maps[0]))
+
+
+static func _make_choice(id: String, label: String, group: String, kind: String, maps: Array, reason: String) -> Dictionary:
+	var enabled := not maps.is_empty()
+	return {"id": id, "label": label, "group": group, "kind": kind, "maps": maps, "enabled": enabled, "reason": "" if enabled else reason}
+
+
+## Every versus game mode the registry knows, in its order (the co-op and extraction families are choices of their own).
+static func _make_versus_ids() -> Array:
+	var out := []
+	for id in GameModes.data().get("order", []):
+		if GameModes.is_known(str(id)) and not GameModes.family_of(str(id)) in GameModes.LEGACY_FAMILIES and not out.has(str(id)):
+			out.append(str(id))
+	for id in GameModes.data().get("modes", {}):
+		if not GameModes.family_of(str(id)) in GameModes.LEGACY_FAMILIES and not out.has(str(id)):
+			out.append(str(id))
+	return out
+
+
+static func _make_versus_reason(id: String) -> String:
+	if id in BATTLEDROME_MODES:
+		return "needs a Battledrome arena"
+	return "needs an installed map" if id in GameModes.REMAKE_MODES else "needs a Tribes map"
+
+
+## Game mode id -> the entry indices of the maps that offer it.
+static func _make_maps_by_mode() -> Dictionary:
+	var entries := MapPicker.make_entries()
+	var key := hash(JSON.stringify(entries.map(func(e: Dictionary) -> String: return str(e.name))) + str(ExtractionRules.is_available()))
+	if key == _maps_by_mode_key and not _maps_by_mode.is_empty():
+		return _maps_by_mode
+	var out := {}
+	for i in entries.size():
+		for id in GameModes.make_mode_ids_for_map(entries[i]):
+			if not out.has(id):
+				out[id] = []
+			out[id].append(i)
+	_maps_by_mode = out
+	_maps_by_mode_key = key
+	return out

@@ -1,7 +1,8 @@
 class_name GameOptionsPanel
 extends VBoxContainer
-## Game Options, the lobby's top left (docs/design/lobby_loadout_economy.md section 5): the host edits the mode, the game
-## mode, the map and (in sheets) the detailed options and the teams; everybody else sees the same rows as read-only text
+## Game Options, the lobby's top left (docs/design/lobby_loadout_economy.md section 5): the host edits the one Game mode (every
+## versus mode, co-op, the co-op campaign, the extraction raid and the training pages), the map (only the maps that mode can be
+## played on) and (in sheets) the detailed options and the teams; everybody else sees the same rows as read-only text
 ## (OptionRow.make_readonly). A campaign adds the host's Save game and Hangar buttons. The panel never touches Net: it
 ## sends `settings_changed(new_settings)` and the lobby applies them.
 ##   refresh(settings, is_host, roster)
@@ -19,13 +20,13 @@ signal training_requested(pack: String)
 
 const READ_ONLY_HINT := "Only the host changes these."
 const HOST_HINT := "You are the host: these are yours to change."
+const DISABLED_TEXT := "%s  (%s)"
 const OPPONENTS_TEXT := "%d %s, %d %s"
 
 var controls := {}          # key -> Control of the host's rows (tests, focus)
 var settings := {}
 var is_host := false
 var _structure := ""
-var _game_mode_ids: Array = []
 var _syncing := false
 var _hint: Label
 var _body: VBoxContainer
@@ -75,16 +76,7 @@ func _rebuild() -> void:
 
 func _build_host_rows() -> void:
 	var mode := str(settings.get("mode", ""))
-	if _can_change_mode():
-		var modes := _make_changeable_modes()
-		var picker := Widgets.option_button(modes.map(_make_short_mode_name))   # the long names ("Extraction raid (loot, exfil, PvPvE)") clip in the row
-		picker.item_selected.connect(func(i: int) -> void: _emit(GameOptionsModel.make_with_mode(settings, str(modes[i]))))
-		_add_row("mode", "Mode", picker)
-	if mode == GameOptionsModel.KIND_VERSUS:
-		var picker := Widgets.option_button([])
-		_game_mode_ids = []
-		picker.item_selected.connect(func(i: int) -> void: _emit(GameOptionsModel.make_with_game_mode(settings, str(_game_mode_ids[i]))))
-		_add_row("game_mode", "Game mode", picker)
+	_add_row("game_mode", "Game mode", _make_mode_picker())
 	if mode != GameOptionsModel.KIND_CAMPAIGN:
 		var map := MapPicker.new("Map")
 		map.map_changed.connect(func(i: int) -> void:
@@ -95,7 +87,6 @@ func _build_host_rows() -> void:
 	_body.add_child(Widgets.button("Game options...", func() -> void: options_requested.emit()))
 	controls["options"] = _body.get_child(_body.get_child_count() - 1)
 	_build_team_buttons()
-	_build_training_buttons(mode)
 	if mode == GameOptionsModel.KIND_CAMPAIGN:
 		_build_campaign_buttons()
 
@@ -112,16 +103,54 @@ func _build_team_buttons() -> void:
 	controls["shuffle"] = shuffle
 
 
-## Training: the Tribes missions are single player scenarios, picked on their own screen (the lobby is left).
-func _build_training_buttons(mode: String) -> void:
-	if mode == GameOptionsModel.KIND_CAMPAIGN:
-		return
-	for pack in TribesMissionRuntime.PACKS:
-		if TribesMissionRuntime.list_missions(pack).is_empty():
-			continue
-		var button := Widgets.button("%s training..." % Packs.pack_name(pack), func() -> void: training_requested.emit(pack))
-		_body.add_child(button)
-		controls["training_%s" % pack] = button
+## The one Game mode picker: the choices in groups under separators, a mode no installed map offers disabled with its reason.
+## Picking a training page opens it (the lobby is left); the picker then shows the lobby's own mode again.
+func _make_mode_picker() -> OptionButton:
+	var picker := Widgets.option_button([])
+	var group := ""
+	for c in _make_shown_choices():
+		if str(c.group) != group:
+			group = str(c.group)
+			picker.add_separator(group)
+		var at := picker.item_count
+		picker.add_item(make_choice_text(c))
+		picker.set_item_metadata(at, str(c.id))
+		picker.set_item_disabled(at, not bool(c.enabled))
+		picker.set_item_tooltip(at, str(c.reason))
+	picker.item_selected.connect(func(i: int) -> void: _pick_choice(str(picker.get_item_metadata(i))))
+	return picker
+
+
+## A choice's picker text: its label, and for a disabled one the reason in brackets.
+static func make_choice_text(choice: Dictionary) -> String:
+	return str(choice.label) if bool(choice.enabled) else DISABLED_TEXT % [choice.label, choice.reason]
+
+
+## Online the host may switch to any mode; an offline session keeps its own kind of game (versus modes, or the one mode).
+func _make_shown_choices() -> Array:
+	var mode := str(settings.get("mode", ""))
+	return GameOptionsModel.make_mode_choices().filter(func(c: Dictionary) -> bool:
+		return Net.is_online() or str(c.kind) in [mode, GameOptionsModel.TRAINING_KIND])
+
+
+## The row of choice `id` in the host's Game mode picker (separators count), -1 when it is not listed.
+func find_choice_item(id: String) -> int:
+	var picker := controls.get("game_mode") as OptionButton
+	for i in picker.item_count if picker != null else 0:
+		if str(picker.get_item_metadata(i)) == id:
+			return i
+	return -1
+
+
+## What picking choice `id` does (also the tests' and the automation's way in).
+func _pick_choice(id: String) -> void:
+	var choice := GameOptionsModel.find_mode_choice(id)
+	if str(choice.get("kind", "")) == GameOptionsModel.TRAINING_KIND:
+		training_requested.emit(str(choice.pack))
+		_sync_values()
+	elif not _syncing:
+		_emit(GameOptionsModel.make_with_choice(settings, id))
+		_sync_values()
 
 
 func _build_campaign_buttons() -> void:
@@ -137,46 +166,22 @@ func _add_row(key: String, text: String, control: Control) -> void:
 	_body.add_child(OptionRow.new(text, control))
 
 
-## The mode's short title, which fits the picker at any width.
-static func _make_short_mode_name(mode: String) -> String:
-	return str(LobbySettings.MODE_TITLES.get(mode, MatchFlow.make_mode_name(mode)))
-
-
-func _can_change_mode() -> bool:
-	return Net.is_online() and _make_changeable_modes().size() > 1
-
-
-## The modes a host may switch between inside the lobby (MatchFlow.make_offered_modes: versus, co-op, co-op campaign, raid).
-func _make_changeable_modes() -> Array:
-	return MatchFlow.make_offered_modes()
-
-
 ## Puts the settings into the host's controls without sending anything.
 func _sync_values() -> void:
 	if not is_host:
 		return
 	_syncing = true
-	if controls.has("mode"):
-		var picker := controls.mode as OptionButton
-		picker.select(maxi(_make_changeable_modes().find(str(settings.get("mode", ""))), 0))
-		picker.tooltip_text = MatchFlow.make_mode_name(str(settings.get("mode", "")))
-	if controls.has("game_mode"):
-		_sync_game_modes(controls.game_mode as OptionButton)
+	var id := GameOptionsModel.make_choice_id(settings)
+	var picker := controls.game_mode as OptionButton
+	for i in picker.item_count:
+		if str(picker.get_item_metadata(i)) == id:
+			picker.select(i)
+			picker.tooltip_text = str(picker.get_item_text(i))
 	if controls.has("map"):
-		(controls.map as MapPicker).select_index(int(settings.get("world_idx", 0)))
+		var map := controls.map as MapPicker
+		map.set_allowed(GameOptionsModel.make_maps_for_choice(id))
+		map.select_index(int(settings.get("world_idx", 0)))
 	_syncing = false
-
-
-## The picker lists the game modes of the lobby's map (they change with the map) and shows the chosen one.
-func _sync_game_modes(picker: OptionButton) -> void:
-	var modes := GameOptionsModel.make_game_modes(settings)
-	var ids := modes.map(func(m: Dictionary) -> String: return str(m.id))
-	if ids != _game_mode_ids:
-		_game_mode_ids = ids
-		picker.clear()
-		for m in modes:
-			picker.add_item(str(m.label))
-	picker.select(maxi(ids.find(str(settings.get(LobbySettings.GAME_MODE_KEY, ""))), 0))
 
 
 func _emit(new_settings: Dictionary) -> void:
@@ -191,12 +196,10 @@ func _build_read_only_rows() -> void:
 		_body.add_child(OptionRow.make_readonly(str(row[0]), str(row[1])))
 
 
-## [label, text] per setting a non-host sees: the mode, game mode, map, limits, opponents, teams, infantry game, relations.
+## [label, text] per setting a non-host sees: the game mode, map, limits, opponents, teams, infantry game, relations.
 static func make_readonly_rows(s: Dictionary) -> Array:
 	var mode := str(s.get("mode", ""))
-	var rows := [["Mode", str(LobbySettings.MODE_TITLES.get(mode, mode))]]
-	if mode == GameOptionsModel.KIND_VERSUS:
-		rows.append(["Game mode", LobbySettings.make_game_mode_label(s)])
+	var rows := [["Game mode", GameOptionsModel.make_choice_label(s)]]
 	if mode != GameOptionsModel.KIND_CAMPAIGN:
 		rows.append(["Map", str(s.get("map", ""))])
 	rows.append_array(_make_limit_rows(s, mode))

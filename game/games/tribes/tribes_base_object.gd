@@ -114,11 +114,14 @@ static func add_shape_collision(body: CollisionObject3D, shape: ShapeInstance) -
 		body.add_child(col)
 
 
-## Bounds of `shape`'s meshes in `frame`'s space (an empty box at the origin when it has none).
+## Bounds of `shape`'s visible meshes in `frame`'s space (pieces that start hidden, like muzzle flashes and
+## deploy effects, stay out of it; an empty box at the origin when it has none).
 static func make_shape_bounds(frame: Node3D, shape: ShapeInstance) -> AABB:
 	var box := AABB()
 	var found := false
 	for mi in shape.find_children("*", "MeshInstance3D", true, false):
+		if not (mi as MeshInstance3D).visible:
+			continue
 		var b: AABB = frame.global_transform.affine_inverse() * mi.global_transform * (mi as MeshInstance3D).get_aabb()
 		box = b if not found else box.merge(b)
 		found = true

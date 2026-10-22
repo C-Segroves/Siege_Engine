@@ -97,8 +97,8 @@ func _run() -> void:
 		"abort":
 			await flow_abort()
 		"continue":
-			open_scene("res://launcher.tscn")
-			await wait_screen("menu")
+			open_scene("res://library.tscn")
+			await wait_screen("home")
 			await wait(0.8)
 			var cb := find_button("Continue campaign")
 			log_line("Continue campaign offered: %s; Session.campaign=%s saga=%s" % [cb != null, Session.campaign, Session.saga])
@@ -199,6 +199,47 @@ func open_scene(path: String) -> Node:
 	get_tree().root.add_child(n)
 	get_tree().current_scene = n
 	return n
+
+
+## The launcher as the library opens it (Library.open_launcher): on `start_mode`'s page ("join": the LAN browser). A
+## launcher with no start mode and no open session leaves for the library home.
+func open_launcher(start_mode := "join") -> Launcher:
+	Session.front_end = "res://library.tscn"
+	var l: Launcher = load("res://launcher.tscn").instantiate()
+	l.set_meta("start_mode", start_mode)
+	get_tree().root.add_child(l)
+	get_tree().current_scene = l
+	return l
+
+
+## The front door a LAN flow starts at: the library home for a host that presses Host LAN game, else the launcher on the
+## LAN browser (a joining client; a host that opens its lobby directly).
+func open_front_door(library_home: bool) -> void:
+	if library_home:
+		open_scene("res://library.tscn")
+		await wait_screen("home")
+	else:
+		open_launcher()
+		await wait_screen("browser")
+
+
+## After a match whose session is still open the lobby is shown (results Continue); Leave goes on to the library home.
+func expect_lobby_then_library(what: String) -> void:
+	expect(await wait_scene_class("Launcher", 30) and await wait_screen("lobby", 10), "%s: results -> Continue returns to the lobby (screen '%s')" % [what, screen()])
+	await wait(1.0)
+	await shot("lobby_after_" + what.replace(" ", "_"))
+	await click_text("Leave")
+	await expect_library_home_play_tab("%s lobby Leave" % what)
+
+
+## After a match with no session left the app shows the library home on its Play tab (docs/MENU_MAP.md).
+func expect_library_home_play_tab(what: String) -> void:
+	expect(await wait_scene_class("Library", 20), "%s: back at the library" % what)
+	await wait(1.0)
+	expect(screen() == "home", "%s: the library home is shown (screen '%s')" % [what, screen()])
+	var tabs := all_controls(cur(), []).filter(func(c: Control) -> bool: return c is TabPages)
+	expect(not tabs.is_empty() and (tabs[0] as TabPages).current == "play", "%s: the Play tab is shown" % what)
+	await shot("library_home_after_" + what.replace(" ", "_"))
 
 
 ## The router's screen name (library / launcher), "" otherwise.
@@ -838,15 +879,10 @@ func _find_hangar_screen() -> HangarScreen:
 
 ## Campaign lobby -> hangar (build) -> Start mission -> win -> debrief -> continue, `missions` times.
 func flow_campaign(game: String, missions: int) -> void:
-	if game == "es1":
-		open_scene("res://launcher.tscn")
-		await wait_screen("menu")
-		await click_text("Metaltech: Earthsiege campaign")
-	else:
-		var l := open_scene("res://launcher.tscn") as Launcher
-		await wait_screen("menu")
-		LauncherAutomation._start_campaign_of(game)
-		l.show_started_campaign()
+	var l := open_launcher()
+	await wait_screen("browser")
+	LauncherAutomation._start_campaign_of(game)
+	l.show_started_campaign()
 	if not await wait_screen("lobby", 30):
 		return
 	for k in missions:
@@ -929,10 +965,11 @@ func _status(s: Object) -> String:
 
 func flow_saga() -> void:
 	DirAccess.remove_absolute(ProjectSettings.globalize_path("user://saves/autosave.json"))
-	open_scene("res://launcher.tscn")
-	await wait_screen("menu")
+	var saga_launcher := open_launcher()
+	await wait_screen("browser")
 	await wait(0.5)
-	await click_text("Saga:")
+	Session.start_saga()
+	saga_launcher.show_started_campaign()
 	if not await wait_screen("lobby", 20):
 		return
 	log_line("saga stage: %s" % Session.saga.stage_name())
@@ -1041,8 +1078,8 @@ func skirmish_from_menu() -> void:
 # ------------------------------------------------------------------ flow: skirmish
 
 func flow_skirmish() -> void:
-	open_scene("res://launcher.tscn")
-	await wait_screen("menu")
+	open_scene("res://library.tscn")
+	await wait_screen("home")
 	await wait(0.8)
 	await skirmish_from_menu()
 	await shot("01_lobby")
@@ -1080,10 +1117,7 @@ func flow_skirmish() -> void:
 	await wait(1.0)
 	await shot("06_end")
 	await pass_results("skirmish")
-	if await wait_scene_class("Launcher", 30):
-		await wait(1.0)
-		log_line("after match: launcher screen '%s'" % screen())
-		await shot("07_back")
+	await expect_lobby_then_library("skirmish")
 
 
 # ------------------------------------------------------------------ flow: gamepad only
@@ -1313,14 +1347,9 @@ func flow_lan() -> void:
 	var via_lobby := flow.begins_with("lobby")
 	var mode := _arg("mode") if _arg("mode") != "" else "coop"
 	var dedicated := _has("dedicated")
-	open_scene("res://launcher.tscn")
-	await wait_screen("menu")
+	await open_front_door(role == "host" and not via_lobby)
 	await wait(0.8)
-	for c in all_controls(cur(), []):
-		if c is LineEdit and c.is_visible_in_tree():
-			(c as LineEdit).text = "Host" if role == "host" else "Client"
-			(c as LineEdit).text_changed.emit((c as LineEdit).text)
-			break
+	PlayerProfile.apply_name("Host" if role == "host" else "Client")
 	log_line("pilot name set to %s" % Net.player_name)
 	if role == "host":
 		if via_lobby:
@@ -1346,8 +1375,7 @@ func flow_lan() -> void:
 		log_line("host lobby roster: %s" % [Net.roster])
 		await lan_press_start("Start mission" if find_button("Start mission") != null else "Start match")
 	else:
-		await click_text("Join LAN game")
-		await wait_screen("browser", 5)
+		await wait_screen("browser", 5)   # the launcher opened on the LAN browser
 		var by_ws := _arg("transport") == "ws"
 		var ok := not by_ws and await wait_for(func() -> bool: return find_button("Host's game") != null, 20.0, "LAN discovery of the host")
 		await shot("01_browser")
@@ -1489,6 +1517,8 @@ func flow_lan() -> void:
 		await shot("07_after_" + role)
 		if role == "host":
 			await wait(8.0)   # keep the session open while the client is still on its results screen
+		await click_text("Leave")
+		await expect_library_home_play_tab("%s lobby Leave" % role)
 
 
 ## LAN chat both ways (BattleChat): each side says an all line and a team line through the chat input (chat_all /
@@ -1541,10 +1571,10 @@ func lan_open_lobby_directly(mode: String) -> void:
 ## The host picks `kind` (a MatchFlow mode) in the lobby's Game Options mode picker, the way a player does (mouse or pad:
 ## the OptionButton's own selection signal).
 func lan_pick_mode(lobby: LobbyScreen, kind: String) -> bool:
-	var picker := lobby.options.controls.get("mode") as OptionButton
-	var at := MatchFlow.make_offered_modes().find(kind)
-	if picker == null or at < 0:
-		fail("the host's mode picker offers no '%s'" % kind)
+	var picker := lobby.options.controls.get("game_mode") as OptionButton
+	var at := lobby.options.find_choice_item(GameOptionsModel.VERSUS_PREFIX + GameModes.DEFAULT if kind == "vs" else kind)
+	if picker == null or at < 0 or picker.is_item_disabled(at):
+		fail("the host's Game mode picker offers no '%s'" % kind)
 		return false
 	picker.select(at)
 	picker.item_selected.emit(at)
@@ -1896,10 +1926,10 @@ func _save_named_shot(file_name: String) -> void:
 # ------------------------------------------------------------------ flow: in-battle menu
 
 ## Skirmish -> Esc opens the menu (paused, mouse free) -> Options -> back -> Resume (pad Start
-## opens / B closes) -> Leave match (confirm) -> results -> Rematch -> menu -> Leave -> results -> Continue.
+## opens / B closes) -> Leave match (confirm) -> the library home (Play tab) -> skirmish again -> Quit to main menu -> the same.
 func flow_pause() -> void:
-	open_scene("res://launcher.tscn")
-	await wait_screen("menu")
+	open_scene("res://library.tscn")
+	await wait_screen("home")
 	await wait(0.8)
 	await skirmish_from_menu()
 	await lan_press_start("Start match")
@@ -1910,7 +1940,7 @@ func flow_pause() -> void:
 	log_line("objective: '%s'" % BattleRules.make_objective_text(b.config))
 	await tap("menu_pause")
 	await wait(0.3)
-	expect(b.is_menu_open() and get_tree().paused, "Esc (menu_pause) opens the in-battle menu and pauses")
+	expect(b.is_menu_open() and get_tree().paused == not Net.is_online(), "Esc (menu_pause) opens the in-battle menu (it pauses only offline)")
 	expect(Input.mouse_mode == Input.MOUSE_MODE_VISIBLE, "mouse released while the menu is open")
 	await shot("01_menu")
 	await _save_named_shot("ui_pause.png")
@@ -1932,21 +1962,19 @@ func flow_pause() -> void:
 	await wait(0.3)
 	await shot("03_leave_confirm")
 	await confirm_dialog()
-	if not await wait_scene_class("MatchResults", 10):
-		return
-	await wait(0.8)
-	await shot("04_results")
-	await _save_named_shot("ui_results.png")
-	await click_text("Rematch")
-	if not await wait_scene_class("Battle", 60):
+	# a hosted skirmish (a LAN session of one) ends without results: straight back to the library home
+	await expect_library_home_play_tab("battle menu leave")
+	# Quit to main menu from the battle menu: the same
+	await skirmish_from_menu()
+	await lan_press_start("Start match")
+	if not await wait_scene_class("Battle", 90):
 		return
 	await wait(2.0)
-	expect(battle().player != null, "Rematch starts the skirmish again")
 	await tap("menu_pause")
-	await click(battle_menu_button("Leave match"), "Leave match")
+	await click(battle_menu_button("Quit to main menu"), "Quit to main menu")
+	await wait(0.3)
 	await confirm_dialog()
-	await pass_results("rematch_left")
-	expect(await wait_scene_class("Launcher", 20), "Continue returns to the launcher")
+	await expect_library_home_play_tab("battle menu quit")
 
 
 # ------------------------------------------------------------------ flow: abort a campaign mission
@@ -1955,8 +1983,8 @@ func flow_pause() -> void:
 ## results -> debriefing (failed) -> Continue: the campaign records it as a lost mission.
 func flow_abort() -> void:
 	var game := _arg("game") if _arg("game") != "" else "es1"
-	var l := open_scene("res://launcher.tscn") as Launcher
-	await wait_screen("menu")
+	var l := open_launcher()
+	await wait_screen("browser")
 	LauncherAutomation._start_campaign_of(game)
 	l.show_started_campaign()
 	if not await wait_screen("lobby", 30):
@@ -2028,14 +2056,12 @@ func lan_leave_mid_match(role: String, b: Battle, remote: Herc) -> void:
 		await shot("05_menu_" + role)
 		await click(battle_menu_button("Leave match"), "Leave match")
 		await confirm_dialog()
-		expect(await wait_scene_class("Launcher", 20), "%s left: back at the launcher" % role)
-		await wait(1.0)
+		await expect_library_home_play_tab("%s left the LAN match" % role)
 		log_line("%s after leaving: screen '%s' online %s status '%s'" % [role, screen(), Net.is_online(), _status(cur().current)])
 		await shot("06_left_" + role)
 		return
 	if role == "client":
-		expect(await wait_scene_class("Launcher", 30), "client: the host leaving ends the match")
-		await wait(1.0)
+		await expect_library_home_play_tab("client after the host left")
 		var status := _status(cur().current)
 		log_line("client after host left: screen '%s' status '%s'" % [screen(), status])
 		expect(status.contains("host left"), "client is told the host left ('%s')" % status)
@@ -2067,14 +2093,9 @@ func flow_extraction() -> void:
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(SaveGames.make_profile_path(OperatorProfile.make_id(pilot))))
 	if role == "client":
 		_prepare_callin_profile(pilot)
-	open_scene("res://launcher.tscn")
-	await wait_screen("menu")
+	await open_front_door(role == "host")
 	await wait(0.8)
-	for c in all_controls(cur(), []):
-		if c is LineEdit and c.is_visible_in_tree():
-			(c as LineEdit).text = pilot
-			(c as LineEdit).text_changed.emit(pilot)
-			break
+	PlayerProfile.apply_name(pilot)
 	if role == "host":
 		await _extraction_host_lobby()
 	else:
@@ -2123,7 +2144,6 @@ func _extraction_host_lobby() -> void:
 
 
 func _extraction_client_lobby() -> void:
-	await click_text("Join LAN game")
 	await wait_screen("browser", 5)
 	if await wait_for(func() -> bool: return find_button("XHost's game") != null, 20.0, "LAN discovery of the host"):
 		await click_text("XHost's game")
@@ -2157,6 +2177,7 @@ func _extraction_raid(role: String, b: Battle) -> void:
 		await _extraction_client_callins(b, x)
 		await _extraction_client_part(b, x)
 	await pass_results("extraction_" + role)
+	await expect_lobby_then_library("extraction " + role)
 
 
 ## Host: puts the client's soldier beside his own, downs him, then holds interact by him until he is up.

@@ -5,7 +5,7 @@ extends RefCounted
 ##     on its map): that game's original menu music -- Earthsiege 2 SHELL2 / SHELL1, Starsiege SHELL1,
 ##     Tribes CD track 2, Battledrome's shell song; Earthsiege plays its shell's region song for the same
 ##     place (briefing map, debriefing, main menu); Tribes 2's shell was silent, so is its context;
-##   * the app's own hubs (library home, launcher main menu), and any game or map without menu music of its own
+##   * the app's own hubs (library home), and any game or map without menu music of its own
 ##     (Tribes 2's silent shell, the remake's extraction maps, a game whose music isn't installed): the
 ##     installed music, shuffled (MusicShuffle), carrying on if it is already playing;
 ##   * the end of a campaign: Earthsiege's won / lost songs, the other games' menu music (they had none);

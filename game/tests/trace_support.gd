@@ -8,6 +8,8 @@ const TICK := 0.25
 const SEED := 20261018
 const HASH_LEN := 12
 const MAX_SHOWN_DIFFS := 12
+## The pilot name the goldens were recorded with: the player's own saved name (settings.json) must not leak into a trace.
+const PILOT := "PenDragon"
 
 var game := ""
 var rows: Array = []         # every row in order: [t, event, text, code]
@@ -24,6 +26,7 @@ var skip_kill_feed := true
 func _init(p_game: String, p_tree: SceneTree) -> void:
 	game = p_game
 	_tree = p_tree
+	Net.player_name = PILOT   # a test that needs another name sets it after creating the trace
 	# The bot LOD director steps by wall-clock milliseconds (BotSleep._last_step_ms) and wakes / sleeps units by
 	# distance: it would make AI fights, and with them the traces, depend on machine speed. Off, as scope_check does.
 	var rules: Variant = ExtractionRules.data().get("bot_sleep")

@@ -27,9 +27,9 @@ var _guard := SavedCampaignGuard.new()
 
 func _ready() -> void:
 	_guard.back_up()
+	_trace = TraceSupport.new("modes_extraction", get_tree())
 	Net.player_name = _pilot
 	await get_tree().process_frame
-	_trace = TraceSupport.new("modes_extraction", get_tree())
 	_modes()
 	if Assets.has_pack("tribes2") and not MapBuilder.list_maps().filter(func(m): return m.id == MAP).is_empty():
 		await _raid()

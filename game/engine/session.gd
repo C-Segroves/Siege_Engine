@@ -29,6 +29,8 @@ var last_result := {}            # {success, code, vars, mission, text}
 var last_mission := {}           # the resolved mission dict of the battle just played
 ## Message for the front end's status line after a battle was left (e.g. "The host left the match.").
 var front_end_status := ""
+## The library home tab to open on next (set when a match or the launcher is left; "" keeps the last tab shown).
+var front_end_tab := ""
 
 
 func _ready() -> void:
@@ -51,6 +53,11 @@ func _snap(path: String) -> void:
 const MAIN_MENU_SCENE := "res://library.tscn"
 
 var front_end := MAIN_MENU_SCENE
+
+
+## The library home opens on its Play tab the next time (after leaving a match).
+func show_play_tab() -> void:
+	front_end_tab = "play"
 
 
 func front_end_scene() -> String:

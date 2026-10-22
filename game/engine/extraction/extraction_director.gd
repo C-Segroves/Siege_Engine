@@ -5,7 +5,7 @@ extends Node
 ##   start     the host lays out the map (ExtractionMap), rolls the caches (LootRoller), spawns the faction squads
 ##             (ExtractionSquads), sets the relations and sends every peer one raid setup message; each player's
 ##             inventory starts as the kit he brought (lobby roster "kit"), and he drops in (ExtractionTransports)
-##   loot      interact (InfantryInteraction offer, make_loot_offer) asks the host, which moves what fits from the nearest container into the inventory and
+##   loot      interact (InfantryInteraction offer, make_loot_offer) opens the loot window (LootWindow): the container beside the kit; the host (LootTransfer) moves what is asked and
 ##             sends the container to every peer and the inventory to its owner only
 ##   downed    a lethal hit with a teammate up downs a player instead (ExtractionRevive: bleed-out, revive by interact)
 ##   death     a killed player leaves everything he carried and his worn armour in a bag, except his insured stack
@@ -13,6 +13,9 @@ extends Node
 ##   exfil     exfil_call (pad: hold the right stick click; inventory_toggle: hold X, HeldAction) -> ExtractionTransports; an extracted player's carried items go to his profile's stash
 ##             (his own machine saves it); the raid ends when no player is left in it
 ## Every peer keeps its own profile (ExtractionProfile): the kit is spent when the raid starts.
+
+## A message for the local player arrived (the overlay shows it; the loot window shows it beside its rows).
+signal notified(text: String)
 
 const STATUS_IN_RAID := "in_raid"
 const STATUS_EXTRACTED := "extracted"
@@ -23,11 +26,8 @@ const STATE_SYNC_SECONDS := 0.25
 ## The host's day clock goes out this often (every peer's sky runs on its own between the updates).
 const DAY_SYNC_SECONDS := 5.0
 const DROP_MERGE_RADIUS := 2.5
-## A drop is probed for its floor from this far above the point it fell from (metres; a soldier's feet sink a little).
-const DROP_PROBE_LIFT := 0.5
 ## Caches are put on the highest floor found this far above the terrain (metres).
 const FLOOR_PROBE_HEIGHT := 60.0
-const STATIC_LAYERS := 0xFFFFFFFF
 const SCATTER_SPREAD := 0.8
 ## The siege's own random stream (CybridSiege) is the raid seed xor this, so it never shifts the raid's other rolls.
 const SIEGE_SEED_SALT := 0x5EED51E6
@@ -36,6 +36,8 @@ var battle: Battle
 var built := {}
 var map: ExtractionMap
 var transports: ExtractionTransports
+## Host: the loot window's moves (take, take all, put back; engine/extraction/loot_transfer.gd).
+var loot: LootTransfer
 var rng := RandomNumberGenerator.new()
 ## Host: peer -> ExtractionInventory; peer -> raid status.
 var inventories := {}
@@ -87,6 +89,7 @@ func _init(p_battle: Battle, p_built: Dictionary) -> void:
 
 
 func _ready() -> void:
+	loot = LootTransfer.new(self)
 	hud = ExtractionHud.new(self)
 	battle.overlay.add_child(hud)
 	Net.player_left.connect(_on_player_left)
@@ -194,7 +197,7 @@ func make_loot_offer(soldier: Infantry) -> Dictionary:
 	if c == null:
 		return {}
 	return {"distance": Vector2(c.position.x - soldier.global_position.x, c.position.z - soldier.global_position.z).length(),
-		"text": ExtractionHud.make_loot_text(c), "apply": func() -> void: _request("_request_pickup", [])}
+		"text": ExtractionHud.make_loot_text(c), "apply": func() -> void: LootWindow.open(self, c.container_id)}
 
 
 ## Every peer: the local player's kit leaves his profile for the raid.
@@ -294,25 +297,22 @@ func _make_record(cache: Dictionary, p: Vector3) -> Dictionary:
 
 
 ## `p` on the top floor there: a building's floor or roof when one stands over the terrain, else the terrain (a
-## cache under a building could not be reached). Soldiers and vehicles are no floor.
+## cache under a building could not be reached), moved off a slope that cannot be stood
+## on (LootDropPlacement). Soldiers and vehicles are no floor.
 func make_ground_point(p: Vector3) -> Vector3:
 	var ground := MapBuilder.ground_height(battle, p)
-	return Vector3(p.x, maxf(_make_floor_y(Vector3(p.x, ground + FLOOR_PROBE_HEIGHT, p.z), ground), ground), p.z)
+	return LootDropPlacement.make_top_point(_make_space(), ExitSafety.make_unit_rids(battle), p, ground + FLOOR_PROBE_HEIGHT, ground)
 
 
-## Where something dropped at `p` lies (playtest X1: bags floated out of reach): on the first floor below the drop
-## (a building floor, a roof, else the terrain), never on a soldier's or vehicle's body.
+## Where something dropped at `p` lies (playtest X1: bags floated out of reach): on a floor a soldier can stand on
+## within pickup reach of `p`, never inside or under a pad, a wall or a slab (LootDropPlacement).
 func make_drop_point(p: Vector3) -> Vector3:
-	var ground := MapBuilder.ground_height(battle, p)
-	return Vector3(p.x, maxf(_make_floor_y(p + Vector3.UP * DROP_PROBE_LIFT, ground), ground), p.z)
+	return LootDropPlacement.make_point(_make_space(), ExitSafety.make_unit_rids(battle), p,
+		MapBuilder.ground_height(battle, p), float(ExtractionRules.data().get("pickup_reach_m", 3.0)))
 
 
-## Height of the first world surface below `from` (down to just under `ground`); `ground` when none is hit.
-func _make_floor_y(from: Vector3, ground: float) -> float:
-	var query := PhysicsRayQueryParameters3D.create(from, Vector3(from.x, ground - 1.0, from.z), STATIC_LAYERS)
-	query.exclude = ExitSafety.make_unit_rids(battle)
-	var hit := battle.get_world_3d().direct_space_state.intersect_ray(query)
-	return float(hit.position.y) if not hit.is_empty() else ground
+func _make_space() -> PhysicsDirectSpaceState3D:
+	return battle.get_world_3d().direct_space_state
 
 
 func make_player_team(peer: int) -> int:
@@ -401,7 +401,7 @@ func _process(delta: float) -> void:
 	_exfil_hold.advance(delta)
 	if battle.is_over() or my_status != STATUS_IN_RAID or DownedState.is_downed(battle.player):
 		return
-	if _inventory_hold.just_fired and not revive.is_local_reviving():
+	if _inventory_hold.just_fired and not revive.is_local_reviving() and LootWindow.find_open(self) == null:
 		InventoryPanel.toggle(self)
 	if _exfil_hold.just_fired:
 		_request("_request_exfil", [])
@@ -424,15 +424,34 @@ func _request(method: String, args: Array) -> void:
 		callv("rpc_id", [1, method] + args)
 
 
+## The loot window's buttons and drops: ask the host to move items between container `container_id` and the kit.
+func request_loot_take(container_id: int, item_id: String, units: int) -> void:
+	_request("_request_loot_take", [container_id, item_id, units])
+
+
+func request_loot_take_all(container_id: int) -> void:
+	_request("_request_loot_take_all", [container_id])
+
+
+func request_loot_put(container_id: int, item_id: String, units: int) -> void:
+	_request("_request_loot_put", [container_id, item_id, units])
+
+
 ## The inventory panel's Drop button.
 func request_drop(item_id: String, units: int) -> void:
 	_request("_request_drop", [item_id, units])
 
 
 @rpc("any_peer", "reliable")
-func _request_pickup() -> void:
+func _request_loot_take_all(container_id: int) -> void:
 	if is_inside_tree() and multiplayer.is_server():
-		_apply_pickup(multiplayer.get_remote_sender_id())
+		_apply_loot_take_all(multiplayer.get_remote_sender_id(), container_id)
+
+
+@rpc("any_peer", "reliable")
+func _request_loot_put(container_id: int, item_id: String, units: int) -> void:
+	if is_inside_tree() and multiplayer.is_server():
+		_apply_loot_put(multiplayer.get_remote_sender_id(), container_id, item_id, units)
 
 
 @rpc("any_peer", "reliable")
@@ -452,32 +471,21 @@ func _request_drop(item_id: String, units: int) -> void:
 ## Host: `peer` loots the nearest container: money and every item that fits.
 func _apply_pickup(peer: int) -> void:
 	var soldier := battle.occupancy.soldier_of(peer)
-	if not is_in_raid(peer) or soldier == null or not soldier.alive or soldier.stowed or DownedState.is_downed(soldier):
-		return
-	var c := find_container_near(soldier.global_position)
-	if c == null:
-		return
-	var inv: ExtractionInventory = inventories[peer]
-	var taken := []
-	inv.money += c.money
-	if c.money > 0:
-		taken.append(ExtractionRules.make_money_text(c.money))
-	var left := []
-	siege.apply_stacks_taken(peer, c.stacks)
-	for s in c.stacks:
-		var n := inv.apply_add(str(s[0]), int(s[1]))
-		if n > 0:
-			taken.append(ExtractionItems.make_stack_text(str(s[0]), n))
-			if str(s[0]) == RaidTasks.FLAG_ITEM:
-				callins.points.apply_flag_taken(peer, c.container_id)
-		if int(s[1]) - n > 0:
-			left.append([s[0], int(s[1]) - n])
-	_set_container(c.container_id, left, 0)
-	apply_equipment(peer)
-	ExtractionLoadout.apply_reload(soldier, inv)
-	send_inventory(peer)
-	var text := "Looted: %s" % ", ".join(PackedStringArray(taken)) if not taken.is_empty() else "Nothing fits."
-	notify(peer, text + (" (full)" if not left.is_empty() else ""))
+	var c := find_container_near(soldier.global_position) if soldier else null
+	if c != null:
+		loot.apply_take_all(peer, c.container_id)
+
+
+func _apply_loot_take(peer: int, container_id: int, item_id: String, units: int) -> void:
+	loot.apply_take(peer, container_id, item_id, units)
+
+
+func _apply_loot_take_all(peer: int, container_id: int) -> void:
+	loot.apply_take_all(peer, container_id)
+
+
+func _apply_loot_put(peer: int, container_id: int, item_id: String, units: int) -> void:
+	loot.apply_put(peer, container_id, item_id, units)
 
 
 func _apply_exfil(peer: int) -> void:
@@ -695,6 +703,11 @@ func add_container(fields: Dictionary, p: Vector3) -> void:
 	_send_all("_add_container", [_make_record(fields, make_drop_point(p))])
 
 
+## Host: container `id` now holds `stacks` and `money` (the loot window's moves; removed everywhere when empty).
+func apply_container_contents(id: int, stacks: Array, money: int) -> void:
+	_set_container(id, stacks, money)
+
+
 ## Host: container `id` now holds `stacks` and `money` (removed everywhere when empty).
 func _set_container(id: int, stacks: Array, money: int) -> void:
 	if stacks.is_empty() and money <= 0:
@@ -817,6 +830,7 @@ func notify_all(text: String) -> void:
 @rpc("authority", "reliable", "call_local")
 func _notify(text: String) -> void:
 	battle.overlay.show_message(text, NOTIFY_SECONDS)
+	notified.emit(text)
 
 
 ## Host: runs `method` on `peer`'s machine (here when it is the host's own player; nothing for bots).

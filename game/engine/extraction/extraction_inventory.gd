@@ -160,3 +160,14 @@ func make_capacity_text() -> String:
 ## True when one more unit of `id` would not fit.
 func is_full_for(id: String) -> bool:
 	return make_room_for(id, 1) < 1
+
+
+## Why not even one unit of `id` fits: "Too heavy: 8.0 kg, 2.5 kg free." or "No free slot." ("" when it fits).
+func make_refusal_for(id: String) -> String:
+	if make_room_for(id, 1) > 0:
+		return ""
+	var kg := float(ExtractionItems.item(id).get("kg", 0.0))
+	var free_kg := maxf(max_kg - make_used_kg(), 0.0)
+	if kg > 0.0 and free_kg + 0.0001 < kg:
+		return "Too heavy: %.1f kg, %.1f kg free." % [kg, free_kg]
+	return "No free slot."

@@ -907,8 +907,15 @@ func _check_pickup(battle: Battle, soldier: Infantry) -> void:
 	var cache_id := cache.container_id
 	_press("interact")
 	await _frames(3)
-	_expect(JSON.stringify(x.my_inventory.make_state()) != before, "interact moves the cache into the inventory")
+	var window := LootWindow.find_open(x)
+	_expect(window != null and window.container_id == cache_id, "interact opens the loot window on the cache")
+	if window:
+		window.take_all()
+	await _frames(3)
+	_expect(JSON.stringify(x.my_inventory.make_state()) != before, "Take all in the loot window moves the cache into the inventory")
 	_expect(not x.containers.has(cache_id) or (x.containers[cache_id] as LootContainer).make_item_count() < units, "the cache emptied (or holds what did not fit)")
+	LootWindow.close_open(x)
+	await _frames(2)
 
 
 func _check_panel(battle: Battle) -> void:
@@ -1309,6 +1316,7 @@ func _check_interrupt_and_bleed_out(battle: Battle, x: ExtractionDirector, me: I
 func _check_screen() -> void:
 	print("solo raid lobby:")
 	var launcher: Launcher = load("res://launcher.tscn").instantiate()
+	launcher.set_meta("start_mode", Launcher.JOIN_START_MODE)
 	get_tree().root.add_child(launcher)
 	get_tree().current_scene = launcher
 	await _frames(4)

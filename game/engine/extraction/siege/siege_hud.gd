@@ -8,10 +8,11 @@ const WARN_COLOR := Color(1.0, 0.3, 0.25)
 const TEXT_COLOR := Color(1.0, 0.85, 0.8)
 const DIM_COLOR := Color(1.0, 0.7, 0.6, 0.85)
 const TITLE_SIZE := 30
-const LINE_SIZE := 18
+const LINE_SIZE := 16
 const WARNING_SIZE := 38
-const TOP := 74.0
-const LINE := 24.0
+## Rows: the title, then a row per line (zone TOP_CENTRE of HudLayout, under the compass and the message).
+const TITLE_ROW := 38.0
+const LINE := 26.0
 const FLASH_HZ := 2.5
 
 var siege: CybridSiege
@@ -32,6 +33,10 @@ func _ready() -> void:
 
 func _process(_delta: float) -> void:
 	size = get_viewport_rect().size
+	var layout := HudLayout.of(self)
+	var lines := make_lines()
+	layout.declare(&"siege_banner", Vector2(HudLayout.ELEMENTS[&"siege_banner"].max.x, TITLE_ROW + LINE * (lines.size() - 1)) if not lines.is_empty() else Vector2.ZERO)
+	layout.declare(&"siege_warning", Vector2(HudLayout.ELEMENTS[&"siege_warning"].max) if _is_warning_up() else Vector2.ZERO)
 	queue_redraw()
 
 
@@ -77,15 +82,27 @@ static func make_clock_text(seconds: float) -> String:
 	return "%d:%02d" % [int(seconds) / 60, int(seconds) % 60]
 
 
+func _is_warning_up() -> bool:
+	return make_local_overshoot() > 0.0 and fmod(Time.get_ticks_msec() / 1000.0 * FLASH_HZ, 1.0) < 0.6
+
+
 func _draw() -> void:
+	var layout := HudLayout.of(self)
+	var banner := layout.rect_of(&"siege_banner")
 	var lines := make_lines()
+	var y := banner.position.y
 	for i in lines.size():
-		_draw_centered(str(lines[i][0]), TOP + LINE * i + (TITLE_SIZE if i > 0 else 0), TITLE_SIZE if i == 0 else LINE_SIZE, lines[i][1])
-	if make_local_overshoot() > 0.0 and fmod(Time.get_ticks_msec() / 1000.0 * FLASH_HZ, 1.0) < 0.6:
-		_draw_centered("OUTSIDE THE SAFE AREA", size.y * 0.3, WARNING_SIZE, WARN_COLOR)
+		var row := TITLE_ROW if i == 0 else LINE
+		var font_size := TITLE_SIZE if i == 0 else LINE_SIZE
+		_draw_centered(str(lines[i][0]), banner, y + font_size, font_size, lines[i][1])
+		y += row
+	var warning := layout.rect_of(&"siege_warning")
+	if warning.has_area():
+		_draw_centered("OUTSIDE THE SAFE AREA", warning, warning.position.y + WARNING_SIZE, WARNING_SIZE, WARN_COLOR)
 
 
-func _draw_centered(text: String, y: float, font_size: int, color: Color) -> void:
-	var w := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
-	draw_string_outline(font, Vector2((size.x - w) * 0.5, y), text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, 4, Color(0, 0, 0, 0.8))
-	draw_string(font, Vector2((size.x - w) * 0.5, y), text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, color)
+func _draw_centered(text: String, block: Rect2, y: float, font_size: int, color: Color) -> void:
+	var w := minf(font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x, block.size.x)
+	var at := Vector2(block.position.x + (block.size.x - w) * 0.5, y)
+	draw_string_outline(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, block.size.x, font_size, 4, Color(0, 0, 0, 0.8))
+	draw_string(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, block.size.x, font_size, color)

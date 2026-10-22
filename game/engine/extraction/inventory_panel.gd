@@ -143,7 +143,12 @@ func _rebuild() -> void:
 
 ## "   [IN HAND]", "   [READY]" (in a weapon slot), "   [WORN]", "   [INSURED]" after an item's name.
 func _make_marks(id: String, insured_id: String) -> String:
-	var s := director.battle.player as Infantry
+	return make_marks(director, id, insured_id)
+
+
+## The marks of `id` for the local soldier (the loot window lists the same kit with the same marks).
+static func make_marks(p_director: ExtractionDirector, id: String, insured_id: String) -> String:
+	var s := p_director.battle.player as Infantry
 	var marks := ""
 	if s and ExtractionLoadout.is_equipped(s, id):
 		marks += IN_HAND_MARK if ExtractionItems.kind_of(id) == "weapon" else WORN_MARK

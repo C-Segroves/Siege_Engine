@@ -77,6 +77,7 @@ func _playable_choices() -> Array:
 
 func _open_launcher() -> Launcher:
 	var launcher: Launcher = load(LAUNCHER_SCENE).instantiate()
+	launcher.set_meta("start_mode", Launcher.JOIN_START_MODE)   # the LAN browser is the first page, as when the library opens the launcher
 	add_child(launcher)
 	await _frames()
 	return launcher
@@ -267,7 +268,6 @@ func _check_finished_and_missing() -> void:
 	_expect(not Session.load_save("save_qa_missing"), "a save needing a game that is not installed is not loaded")
 	_expect(SaveGames.find_newest_continuable().is_empty(), "neither is offered by Continue")
 	var launcher := await _open_launcher()
-	_expect(_find_button(launcher, "Continue campaign") == null, "the main menu offers no Continue")
 	launcher.go("saves", {"mode": "load"})
 	await _frames()
 	var rows := launcher.current.find_children("*", "Button", true, false).filter(func(b: Button) -> bool: return b.text.contains("\n"))
@@ -326,6 +326,7 @@ func _check_killed_quit() -> void:
 	var mission := str(Session.campaign.current_mission())
 	Session.last_result = _make_result(false).merged({"pilot_killed": true})
 	var launcher: Launcher = load(LAUNCHER_SCENE).instantiate()
+	launcher.set_meta("start_mode", Launcher.JOIN_START_MODE)   # the LAN browser is the first page, as when the library opens the launcher
 	get_tree().root.add_child(launcher)
 	get_tree().current_scene = launcher   # the main menu (the library) replaces the launcher scene
 	await _frames()

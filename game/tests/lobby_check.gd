@@ -206,7 +206,7 @@ func _check_readonly_options() -> void:
 	print("read-only options:")
 	var rows := GameOptionsPanel.make_readonly_rows(GameOptionsModel.make_default_settings("vs"))
 	var labels := rows.map(func(r: Array) -> String: return str(r[0]))
-	_expect(labels.has("Mode") and labels.has("Map") and labels.has("Game mode") and labels.has("Kill limit"), "a client reads the mode, game mode, map and limits (%s)" % [labels])
+	_expect(labels.has("Game mode") and labels.has("Map") and not labels.has("Mode") and labels.has("Kill limit"), "a client reads the one game mode, the map and limits (%s)" % [labels])
 	var panel := GameOptionsPanel.new()
 	add_child(panel)
 	panel.refresh(GameOptionsModel.make_default_settings("vs"), false)
@@ -337,10 +337,12 @@ func _check_modes() -> void:
 
 # ------------------------------------------------------------------ the host's mode picker
 
-## A hosted lobby (a real LAN host: the picker is the host's way to every mode): picking each mode in Game Options shows that
-## mode's options (map, game mode, campaign buttons, Game options sheet rows) and leaves a lobby the host can start.
+## A hosted lobby (a real LAN host): the one Game mode picker is the host's way to every mode. It lists every versus game mode, co-op,
+## the co-op campaign, the raid and the training pages; picking one shows that mode's options (map list filtered to the maps that
+## can play it, campaign buttons, Game options sheet rows) and leaves a lobby the host can start. A mode no map offers is disabled
+## and says why.
 func _check_mode_picker() -> void:
-	print("the host's mode picker:")
+	print("the host's game mode picker:")
 	_close_lobby()
 	Net.password = ""
 	var err := Net.host()
@@ -355,27 +357,121 @@ func _check_mode_picker() -> void:
 	await _frames()
 	var lobby := _launcher.go("lobby", {}) as LobbyScreen
 	await _frames()
-	var picker := lobby.options.controls.get("mode") as OptionButton
-	var modes := MatchFlow.make_offered_modes()
-	_expect(picker != null and picker.item_count == modes.size() and modes.has("campaign") and modes.has("coop") and modes.has("vs"),
-		"the picker offers versus, co-op, the co-op campaign%s (%d modes)" % [" and the raid" if modes.has("extraction") else "", modes.size()])
-	for kind in modes:
-		picker = lobby.options.controls.get("mode") as OptionButton
-		picker.select(modes.find(kind))
-		picker.item_selected.emit(modes.find(kind))
+	var picker := lobby.options.controls.get("game_mode") as OptionButton
+	var choices := GameOptionsModel.make_mode_choices()
+	var ids := choices.map(func(c: Dictionary) -> String: return str(c.id))
+	_expect(picker != null and not lobby.options.controls.has("mode"), "one Game mode picker (no second Mode picker)")
+	var missing := ids.filter(func(id: String) -> bool: return lobby.options.find_choice_item(id) < 0)
+	_expect(missing.is_empty(), "the picker lists all %d choices (%s missing)" % [ids.size(), missing])
+	for id in ["vs:deathmatch", "vs:team_deathmatch", "vs:ctf", "coop", "campaign", "extraction"]:
+		_expect(ids.has(id), "the picker lists '%s'" % id)
+	var raid := GameOptionsModel.find_mode_choice("extraction")
+	_expect(bool(raid.enabled) == ExtractionRules.is_available() and (raid.enabled or str(raid.reason) != ""),
+		"the extraction raid is %s" % ["pickable (soldiers installed)" if raid.enabled else "disabled with a reason: %s" % raid.reason])
+	var groups := []
+	for c in choices:
+		if not groups.has(c.group):
+			groups.append(c.group)
+	_expect(groups.slice(0, 4) == ["Versus", "Co-op", "Campaign", "Extraction"], "the choices are grouped Versus / Co-op / Campaign / Extraction (%s)" % [groups])
+	_check_disabled_choices()
+	var enabled_kinds := {}
+	for c in choices:
+		var at := lobby.options.find_choice_item(str(c.id))
+		picker = lobby.options.controls.get("game_mode") as OptionButton
+		if not bool(c.enabled):
+			_expect(picker.is_item_disabled(at) and picker.get_item_text(at).contains(str(c.reason)) and str(c.reason) != "",
+				"'%s' is disabled and says why: %s" % [c.id, c.reason])
+			var before := Net.settings.duplicate(true)
+			picker.item_selected.emit(at)
+			await _frames()
+			_expect(Net.settings == before, "'%s': picking a disabled mode changes nothing" % c.id)
+			continue
+		if str(c.kind) == GameOptionsModel.TRAINING_KIND:
+			continue
+		picker.select(at)
+		picker.item_selected.emit(at)
 		await _frames()
-		_expect(str(Net.settings.mode) == kind, "%s: picked" % kind)
-		_expect(lobby.options.controls.has("options"), "%s: Game options..." % kind)
-		_expect(lobby.options.controls.has("map") != (kind == "campaign"), "%s: the map picker is %s" % [kind, "hidden" if kind == "campaign" else "shown"])
-		_expect(lobby.options.controls.has("game_mode") == (kind == "vs"), "%s: the game mode picker only for versus" % kind)
-		_expect(lobby.options.controls.has("save") == (kind == "campaign"), "%s: Save game / Hangar only for the campaign" % kind)
-		_expect((kind == "campaign") == Session.has_campaign(), "%s: the campaign session %s" % [kind, "runs" if kind == "campaign" else "is set aside"])
-		_expect((kind == "campaign") == lobby.briefing.visible, "%s: the briefing %s" % [kind, "shows" if kind == "campaign" else "is hidden"])
+		var kind := str(c.kind)
+		enabled_kinds[kind] = true
+		_expect(GameOptionsModel.make_choice_id(Net.settings) == str(c.id), "%s: picked (%s)" % [c.id, GameOptionsModel.make_choice_id(Net.settings)])
+		_expect(str(Net.settings.mode) == kind, "%s: the lobby mode is %s" % [c.id, kind])
+		if kind == GameOptionsModel.KIND_CAMPAIGN:
+			_expect(not lobby.options.controls.has("map"), "%s: no map picker" % c.id)
+		else:
+			var map := lobby.options.controls.map as MapPicker
+			_expect(map.shown_indices() == c.maps, "%s: the map list is exactly the %d maps that can play it (%d shown)" % [c.id, c.maps.size(), map.shown_indices().size()])
+			_expect(c.maps.has(int(Net.settings.world_idx)) and map.selected_index() == int(Net.settings.world_idx), "%s: the chosen map fits the mode" % c.id)
+			var mode_ids := GameModes.make_mode_ids_for_map(MapPicker.make_entries()[int(Net.settings.world_idx)])
+			_expect(mode_ids.has("coop_ai" if kind == "coop" else str(c.get("game_mode", kind))), "%s: the map really offers the mode (%s)" % [c.id, mode_ids])
+		_expect(lobby.options.controls.has("options"), "%s: Game options..." % c.id)
+		_expect(lobby.options.controls.has("save") == (kind == "campaign"), "%s: Save game / Hangar only for the campaign" % c.id)
+		_expect((kind == "campaign") == Session.has_campaign(), "%s: the campaign session %s" % [c.id, "runs" if kind == "campaign" else "is set aside"])
+		_expect((kind == "campaign") == lobby.briefing.visible, "%s: the briefing %s" % [c.id, "shows" if kind == "campaign" else "is hidden"])
+		if kind == "vs":
+			_expect(str(Net.settings.game_mode) == str(c.game_mode), "%s: the game mode is set" % c.id)
+			_expect(lobby.options.controls.has("teams") == LobbySettings.is_team_match(Net.settings), "%s: team controls match its teams" % c.id)
+			_expect(str(MatchFlow.make_match_config(Net.settings, Packs.pilotable()).get("game_mode", "")) == str(c.game_mode), "%s: it reaches the battle config" % c.id)
 		await _check_sheet_rows(lobby, kind)
-		_expect(MatchFlow.make_start_block_reason() == "" or Net.make_unready_names().size() > 0, "%s: nothing but readiness blocks the start" % kind)
-		await _shot("lobby_picker_%s" % kind)
-	await _check_versus_game_modes(lobby)
+		if LobbySettings.is_team_match(Net.settings):
+			lobby.options.assign_all_requested.emit()
+			await _frames()
+		_expect(MatchFlow.make_start_block_reason() == "" or Net.make_unready_names().size() > 0, "%s: nothing but readiness blocks the start (%s)" % [c.id, MatchFlow.make_start_block_reason()])
+		if kind != "vs" or str(c.game_mode) in ["deathmatch", "team_deathmatch", "ctf"]:
+			await _shot("lobby_picker_%s" % str(c.id).replace(":", "_"))
+	for kind in ["vs", "coop", "campaign"]:
+		_expect(enabled_kinds.has(kind), "%s was pickable" % kind)
+	await _check_map_kept(lobby)
+	await _check_open_picker_shot(lobby)
 	_close_lobby()
+
+
+## A lobby with no Tribes map, no arena and no soldiers: those modes stay listed, disabled, with the reason in their text.
+func _check_disabled_choices() -> void:
+	var maps := {"deathmatch": [0], "team_deathmatch": [0], "coop_ai": [0]}
+	var choices := GameOptionsModel.make_choices_from(maps, false)
+	var by_id := {}
+	for c in choices:
+		by_id[str(c.id)] = c
+	_expect(bool(by_id["vs:deathmatch"].enabled) and bool(by_id.coop.enabled) and bool(by_id.campaign.enabled), "modes with a map stay enabled")
+	_expect(not by_id["vs:ctf"].enabled and GameOptionsPanel.make_choice_text(by_id["vs:ctf"]) == "Capture the Flag  (needs a Tribes map)", "CTF without a Tribes map: '%s'" % GameOptionsPanel.make_choice_text(by_id["vs:ctf"]))
+	_expect(not by_id.extraction.enabled and GameOptionsPanel.make_choice_text(by_id.extraction).contains("needs Tribes 2"), "the raid without soldiers: '%s'" % GameOptionsPanel.make_choice_text(by_id.extraction))
+	_expect(not by_id["vs:duel"].enabled and str(by_id["vs:duel"].reason).contains("Battledrome"), "the arena duel without an arena says so")
+
+
+## The map choice is kept when it still fits the next mode, and moves to a fitting one when it does not.
+func _check_map_kept(lobby: LobbyScreen) -> void:
+	var dm := GameOptionsModel.find_mode_choice("vs:deathmatch")
+	var co := GameOptionsModel.find_mode_choice("coop")
+	var picker := lobby.options.controls.get("game_mode") as OptionButton
+	picker.item_selected.emit(lobby.options.find_choice_item("vs:deathmatch"))
+	await _frames()
+	var both: Array = dm.maps.filter(func(i: int) -> bool: return co.maps.has(i))
+	if both.is_empty():
+		return
+	Net.set_settings(GameOptionsModel.make_with_map(Net.settings, int(both.back())))
+	await _frames()
+	picker = lobby.options.controls.get("game_mode") as OptionButton
+	picker.item_selected.emit(lobby.options.find_choice_item("coop"))
+	await _frames()
+	_expect(int(Net.settings.world_idx) == int(both.back()), "switching to co-op keeps a map that still fits")
+	var raid := GameOptionsModel.find_mode_choice("extraction")
+	if bool(raid.enabled) and not raid.maps.has(int(both.back())):
+		picker = lobby.options.controls.get("game_mode") as OptionButton
+		picker.item_selected.emit(lobby.options.find_choice_item("extraction"))
+		await _frames()
+		_expect(raid.maps.has(int(Net.settings.world_idx)), "switching to the raid moves to an extraction map (%s)" % Net.settings.map)
+
+
+## A windowed run opens the picker's pop-up and renders it (looked at by eye).
+func _check_open_picker_shot(lobby: LobbyScreen) -> void:
+	if not _windowed or _shots == "":
+		return
+	var picker := lobby.options.controls.get("game_mode") as OptionButton
+	picker.show_popup()
+	await _frames(4)
+	await _shot("lobby_game_mode_picker_open")
+	picker.get_popup().hide()
+	await _frames()
 
 
 ## The Game options sheet of the lobby's mode shows the rows that mode uses (opponents and bots cap, a raid's relations ...).
@@ -390,25 +486,6 @@ func _check_sheet_rows(lobby: LobbyScreen, kind: String) -> void:
 	_expect(sheet.rows.score.visible == (kind in ["vs", "coop"]), "%s: the kill / score limit" % kind)
 	sheet.close()
 	await _frames()
-
-
-## Versus: every game mode the map offers can be picked, and a team mode adds the team controls.
-func _check_versus_game_modes(lobby: LobbyScreen) -> void:
-	var picker := lobby.options.controls.get("mode") as OptionButton
-	picker.select(MatchFlow.make_offered_modes().find("vs"))
-	picker.item_selected.emit(MatchFlow.make_offered_modes().find("vs"))
-	await _frames()
-	var ids := GameOptionsModel.make_game_modes(Net.settings).map(func(m: Dictionary) -> String: return str(m.id))
-	_expect(ids.size() >= 2, "versus offers several game modes (%s)" % [ids])
-	for id in ids:
-		var game_picker := lobby.options.controls.get("game_mode") as OptionButton
-		game_picker.select(ids.find(id))
-		game_picker.item_selected.emit(ids.find(id))
-		await _frames()
-		_expect(str(Net.settings.game_mode) == id, "game mode %s picked" % id)
-		_expect(lobby.options.controls.has("teams") == LobbySettings.is_team_match(Net.settings), "game mode %s: team controls match its teams" % id)
-		var cfg := MatchFlow.make_match_config(Net.settings, Packs.pilotable())
-		_expect(str(cfg.get("game_mode", "")) == id, "game mode %s reaches the battle config" % id)
 
 
 ## Right-drag orbits the view round the focused member, the light follows to the viewer's side, a turn of the ring glides

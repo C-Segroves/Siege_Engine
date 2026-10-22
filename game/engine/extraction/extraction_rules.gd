@@ -26,7 +26,7 @@ static func data() -> Dictionary:
 
 
 ## True when a raid can be played: it is fought on foot, so a soldier pack (Tribes / Tribes 2) must be installed.
-## Every place that offers the mode asks this (launcher menu, host screen, map game modes).
+## Every place that offers the mode asks this (host lobby, map game modes).
 static func is_available() -> bool:
 	return InfantryCatalog.make_default_pack() != ""
 

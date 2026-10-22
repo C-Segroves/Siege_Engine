@@ -1,7 +1,7 @@
 extends LauncherScreen
 ## Save / Load: every campaign save of the shared store (SaveGames; the original Earthsiege shell's careers
 ## and backups included), newest first, each with its name, kind, campaign, mission, date and playtime.
-## args: {"mode": "save" | "load", "return_to": screen Back opens (default "menu")}.
+## args: {"mode": "save" | "load", "return_to": screen Back opens (default none)}.
 ##   save  a name field and Save (an existing name asks before it is overwritten); a saved game's row
 ##         overwrites it (asked first). Saving happens between missions only: this screen is reached from
 ##         the briefing and the saga's side choice, never from the in-battle menu.
@@ -16,13 +16,13 @@ const OVERWRITE_QUESTION := "A save called '%s' already exists. Overwrite it?"
 const DELETE_QUESTION := "Delete the save '%s'? This cannot be undone."
 
 var _mode := MODE_LOAD
-var _return_to := "menu"
+var _return_to := ""
 var _name_edit: LineEdit
 
 
 func open(args: Dictionary) -> void:
 	_mode = str(args.get("mode", MODE_LOAD))
-	_return_to = str(args.get("return_to", "menu"))
+	_return_to = str(args.get("return_to", ""))
 	set_page_title("save game" if _mode == MODE_SAVE else "load game")
 	if _mode == MODE_SAVE:
 		MenuMusic.play_for_campaign("briefing")

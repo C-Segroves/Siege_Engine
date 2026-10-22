@@ -183,6 +183,13 @@ binds one control twice inside a context: the options screen offers Swap / Clear
   - `NameRow`: the player's name (saved by `PlayerProfile`, used in the lobby, chat and nameplates);
   - `OperatorSetup` (`engine/ui/operator/`): the one loadout screen (soldier, Herc, store, look) of the lobby and Options;
   - `TeamList`: the teams of a team match (colour, name, pilots and bots; pilots pick, the host assigns);
+  - `HudLayout` (`engine/ui/hud_layout.gd`): the zones of the overlay HUD (top-left status, target, top-centre compass,
+    centre banners, top-right radar and objectives, bottom-left / right / centre instruments, screen-wide effects). A
+    HUD element never places itself at fixed coordinates: it `declare`s its size every frame and draws into
+    `rect_of(id)`; a zone stacks its elements, so none overlap. A new element is a row of `HudLayout.ELEMENTS`;
+    `hud_layout_check` shows everything at once at 1280x720, 1920x1080 and a narrow window. Floating panels (chat,
+    missile cam) search for a spot clear of `make_occupied_rects`. The crosshair, world markers, modal panels and each
+    game's cockpit painters are not placed by it;
   - `ObjectivesPanel`: the translucent in-battle objectives side panel (`MissionObjectives` gathers the lines);
   - `CatalogBridge`: the front end's one door to other catalogs (infantry choices, game modes, map teams,
     extraction relation presets).

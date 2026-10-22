@@ -6,6 +6,8 @@ extends Control
 ## boarding hint of the OccupancyDirector ("E: enter the Raptor",
 ## "Light armor required", "E: get out of the Raptor") - the hint shows in vehicles too: in the cockpit's own
 ## message area while a cockpit / HUD shows (CockpitDisplay.hint), so it never covers that HUD's windows.
+## Every piece sits in the bottom-centre zone of HudLayout (soldier panel, notice, hint); the scope reticle and
+## the heal wash are screen-wide effects of the layout's FULL zone.
 
 const ENERGY_COLOR := Color(0.35, 0.75, 1.0)
 const HEALTH_COLOR := Color(0.35, 1.0, 0.45)
@@ -14,17 +16,19 @@ const TEXT_COLOR := Color(0.9, 1.0, 0.9)
 const HINT_COLOR := Color(1.0, 0.85, 0.35)
 const BAR_SIZE := Vector2(220, 12)
 const BAR_GAP := 22.0
-const MARGIN := 24.0
 const FONT_SIZE := 16
 const HINT_FONT_SIZE := 20
-const HINT_RISE := 160.0
 const LOW_FRACTION := 0.25
 const OK_COLOR := Color(0.45, 1.0, 0.55)
 const WARN_COLOR := Color(1.0, 0.8, 0.3)
 const NOTICE_FONT_SIZE := 22
-const NOTICE_RISE := 128.0
 const NOTICE_FADE_S := 0.5
-const KIT_WIDTH := 480.0
+const PANEL_WIDTH := 480.0
+const NOTICE_HEIGHT := 28.0
+const NOTICE_BASELINE := 22.0
+const HINT_MAX_LINES := 2
+## Panel rows: two bars, then the armour and weapon line and the kit line.
+const PANEL_HEIGHT := BAR_GAP * 4.0 + 4.0
 const HEAL_FLASH := Color(0.3, 1.0, 0.45, 0.14)
 ## Item kind -> the action that uses it; the pack's is PACK_ACTION.
 const KIT_ACTIONS := {"grenade": "grenade_throw", "concussion": "grenade_throw", "mine": "mine_drop", "repair_kit": "repair_kit_use"}
@@ -59,7 +63,31 @@ func _process(_delta: float) -> void:
 	var cockpit := _live_cockpit()
 	if cockpit:
 		cockpit.hint = hint
+	_declare_elements()
 	queue_redraw()
+
+
+## Tells the layout which instruments are up now and how big they are.
+func _declare_elements() -> void:
+	var layout := HudLayout.of(self)
+	var soldier := director.battle.player as Infantry
+	var alive := soldier != null and soldier.alive
+	layout.declare(&"soldier_panel", Vector2(PANEL_WIDTH, PANEL_HEIGHT) if alive else Vector2.ZERO)
+	layout.declare(&"notice_line", Vector2(PANEL_WIDTH, NOTICE_HEIGHT) if alive and _gear().is_notice_shown() else Vector2.ZERO)
+	layout.declare(&"hint_lines", make_hint_size() if is_drawing_hint() else Vector2.ZERO)
+	layout.declare(&"heal_flash", Vector2.ONE if alive and _heal_flash_left() > 0.0 else Vector2.ZERO)
+	layout.declare(&"scope_overlay", Vector2.ONE if alive and _is_scope_up(soldier) else Vector2.ZERO)
+
+
+## The hint's wrapped size, limited to the hint zone's largest.
+func make_hint_size() -> Vector2:
+	var most: Vector2 = HudLayout.ELEMENTS[&"hint_lines"].max
+	var wrapped := font.get_multiline_string_size(hint, HORIZONTAL_ALIGNMENT_CENTER, PANEL_WIDTH, HINT_FONT_SIZE)
+	return Vector2(PANEL_WIDTH, minf(wrapped.y, most.y))
+
+
+func _is_scope_up(soldier: Infantry) -> bool:
+	return soldier.scope.make_preview_rect(get_viewport_rect().size).size != Vector2.ZERO or is_scope_shown(director.battle, soldier)
 
 
 ## The battle's cockpit display, if it exists (null for soldiers and vehicles on the plain HUD).
@@ -77,46 +105,51 @@ func is_drawing_hint() -> bool:
 
 
 func _draw() -> void:
+	var layout := HudLayout.of(self)
 	var soldier := director.battle.player as Infantry
 	if soldier and soldier.alive:
-		_draw_heal_flash()
-		_draw_soldier(soldier)
-		_draw_scope(soldier)
-		_draw_notice()
+		_draw_heal_flash(layout.rect_of(&"heal_flash"))
+		_draw_soldier(soldier, layout.rect_of(&"soldier_panel"))
+		_draw_scope(soldier, layout.rect_of(&"scope_overlay"))
+		_draw_notice(layout.rect_of(&"notice_line"))
 	if is_drawing_hint():
-		var w := font.get_string_size(hint, HORIZONTAL_ALIGNMENT_LEFT, -1, HINT_FONT_SIZE).x
-		draw_string(font, Vector2((size.x - w) * 0.5, size.y - HINT_RISE), hint, HORIZONTAL_ALIGNMENT_LEFT, -1,
-			HINT_FONT_SIZE, HINT_COLOR)
+		var line := layout.rect_of(&"hint_lines")
+		draw_multiline_string(font, line.position + Vector2(0, font.get_ascent(HINT_FONT_SIZE)), hint, HORIZONTAL_ALIGNMENT_CENTER,
+			line.size.x, HINT_FONT_SIZE, HINT_MAX_LINES, HINT_COLOR)
 
 
-## The green wash of a repair kit just used (it fades with the notice).
-func _draw_heal_flash() -> void:
-	var left := float(_gear().heal_flash_until_ms - Time.get_ticks_msec()) / 1000.0
-	if left > 0.0:
+func _heal_flash_left() -> float:
+	return float(_gear().heal_flash_until_ms - Time.get_ticks_msec()) / 1000.0
+
+
+## The green wash of a repair kit just used (it fades with the notice), over `screen`.
+func _draw_heal_flash(screen: Rect2) -> void:
+	var left := _heal_flash_left()
+	if left > 0.0 and screen.has_area():
 		var c := HEAL_FLASH
 		c.a *= clampf(left / NOTICE_FADE_S, 0.0, 1.0)
-		draw_rect(Rect2(Vector2.ZERO, size), c)
+		draw_rect(screen, c)
 
 
-## "Shield Pack ON" or "No Repair Kit left": the answer to a pack_use / repair_kit_use press, centred above the bars.
-func _draw_notice() -> void:
+## "Shield Pack ON" or "No Repair Kit left": the answer to a pack_use / repair_kit_use press, centred in `line`.
+func _draw_notice(line: Rect2) -> void:
 	var gear := _gear()
-	if not gear.is_notice_shown():
+	if not gear.is_notice_shown() or not line.has_area():
 		return
 	var left := float(gear.notice_until_ms - Time.get_ticks_msec()) / 1000.0
 	var c := OK_COLOR if gear.notice_ok else WARN_COLOR
 	c.a = clampf(left / NOTICE_FADE_S, 0.0, 1.0)
 	var w := font.get_string_size(gear.notice_text, HORIZONTAL_ALIGNMENT_LEFT, -1, NOTICE_FONT_SIZE).x
-	draw_string(font, Vector2((size.x - w) * 0.5, size.y - NOTICE_RISE), gear.notice_text, HORIZONTAL_ALIGNMENT_LEFT, -1,
-		NOTICE_FONT_SIZE, c)
+	draw_string(font, line.position + Vector2((line.size.x - w) * 0.5, NOTICE_BASELINE), gear.notice_text, HORIZONTAL_ALIGNMENT_LEFT,
+		line.size.x, NOTICE_FONT_SIZE, c)
 
 
 func _gear() -> InfantryGearDirector:
 	return director.battle.infantry.gear
 
 
-func _draw_soldier(soldier: Infantry) -> void:
-	var origin := Vector2(size.x * 0.5 + MARGIN, size.y - MARGIN - BAR_GAP * 4.0)   # right of the HUD's weapon list
+func _draw_soldier(soldier: Infantry, panel: Rect2) -> void:
+	var origin := panel.position
 	_draw_bar(origin, "ENERGY", soldier.capacitor / maxf(soldier.capacitor_max, 1.0), ENERGY_COLOR)
 	_draw_bar(origin + Vector2(0, BAR_GAP), "HEALTH", soldier.integrity, HEALTH_COLOR)
 	var w := soldier.current_weapon()
@@ -133,9 +166,11 @@ static func is_scope_shown(battle: Node, soldier: Infantry) -> bool:
 
 ## The Laser Rifle scope: the ZoomHud box of a magnification just stepped (not zoomed), or the zoomed view's reticle
 ## (a fine cross with range ticks at the aim point) and its magnification and range readout.
-func _draw_scope(soldier: Infantry) -> void:
+func _draw_scope(soldier: Infantry, screen: Rect2) -> void:
+	if not screen.has_area():
+		return
 	var scope := soldier.scope
-	var box := scope.make_preview_rect(size)
+	var box := scope.make_preview_rect(screen.size)
 	if box.size != Vector2.ZERO:
 		draw_rect(box, RifleScope.PREVIEW_FILL)
 		draw_rect(box, RifleScope.PREVIEW_BORDER, false, 1.0)
@@ -143,7 +178,7 @@ func _draw_scope(soldier: Infantry) -> void:
 	if not is_scope_shown(director.battle, soldier):
 		return
 	var cam: Camera3D = director.battle.cameras.cockpit_cam
-	var c := size * 0.5
+	var c := screen.size * 0.5
 	if is_instance_valid(cam):
 		var p := soldier.aim_origin() + (-soldier.aim_basis().z) * RifleScope.REACH_M
 		if not cam.is_position_behind(p):
@@ -163,12 +198,9 @@ func _draw_scope(soldier: Infantry) -> void:
 
 
 ## The screen rects this HUD draws into on a window of size `s` (the chat panel's automatic placement avoids
-## them): the soldier's bars and texts and the hint line.
+## them): the soldier's bars and texts, the weapon list, the notice and the hint line at their largest.
 static func make_occupied_rects(s: Vector2) -> Array:
-	var origin := Vector2(s.x * 0.5 + MARGIN, s.y - MARGIN - BAR_GAP * 4.0)
-	return [Rect2(origin - Vector2(8, 8), Vector2(KIT_WIDTH, BAR_GAP * 4.0 + MARGIN)),
-		Rect2(s.x * 0.2, s.y - HINT_RISE - HINT_FONT_SIZE - 6, s.x * 0.6, HINT_FONT_SIZE + 14),
-		Rect2(s.x * 0.2, s.y - NOTICE_RISE - NOTICE_FONT_SIZE - 4, s.x * 0.6, NOTICE_FONT_SIZE + 10)]
+	return HudLayout.make_reserved_rects(s, HudLayout.SOLDIER_HUD_IDS)
 
 
 ## "[G] Grenade 5  [B] Mine 3  [H] Repair Kit 1  [R] Shield Pack ON": each item with the key that uses it.

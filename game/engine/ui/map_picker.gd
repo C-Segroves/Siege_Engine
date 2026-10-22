@@ -29,38 +29,62 @@ const ARENA_DEFAULTS := {"obstacles": "SEVERAL", "turrets": "FEW", "lighting": "
 
 var _options: OptionButton
 var _entries: Array = []
+var _shown: Array = []      # the entry indices the drop-down lists (all of them unless set_allowed narrowed it)
 
 
 func _init(label_text := "World") -> void:
 	super(label_text)
 	_entries = make_entries()
-	var names := _entries.map(func(e: Dictionary) -> String: return e.name)
-	_options = Widgets.option_button(names)
+	_options = Widgets.option_button([])
 	set_control(_options)
-	_options.item_selected.connect(func(i: int) -> void: map_changed.emit(i))
+	set_allowed(range(_entries.size()))
+	_options.item_selected.connect(func(i: int) -> void: map_changed.emit(int(_shown[i])))
 
 
+## The entry index of the selected map (not its row in a narrowed list), -1 when the list is empty.
 func selected_index() -> int:
-	return _options.selected
+	return int(_shown[_options.selected]) if _options.selected >= 0 and _options.selected < _shown.size() else -1
 
 
+## The entry indices the drop-down lists.
+func shown_indices() -> Array:
+	return _shown.duplicate()
+
+
+## Selects entry `i` (an entry index); ignored when the list does not show it.
 func select_index(i: int) -> void:
-	if i >= 0 and i < _entries.size():
-		_options.select(i)
+	var row := _shown.find(i)
+	if row >= 0:
+		_options.select(row)
 		map_changed.emit(i)
 
 
+## Narrows the drop-down to the entry indices `allowed` (the maps a game mode can be played on), keeping the selected map
+## when it is still listed. Emits nothing.
+func set_allowed(allowed: Array) -> void:
+	var keep := selected_index()
+	if allowed == _shown and _options.item_count == _shown.size():
+		return
+	_shown = allowed.duplicate()
+	_options.clear()
+	for i in _shown:
+		_options.add_item(str(_entries[int(i)].name))
+	_options.disabled = _shown.is_empty()
+	if not _shown.is_empty():
+		_options.select(maxi(_shown.find(keep), 0))
+
+
 func selected_name() -> String:
-	return str(_entries[_options.selected].name) if _options.selected >= 0 else ""
+	return str(_entries[selected_index()].name) if selected_index() >= 0 else ""
 
 
 func selected_config() -> Dictionary:
-	return config_at(_options.selected)
+	return config_at(selected_index())
 
 
 ## The selected entry {name, config, index}.
 func selected_entry() -> Dictionary:
-	return _entries[_options.selected] if _options.selected >= 0 else {}
+	return _entries[selected_index()] if selected_index() >= 0 else {}
 
 
 static func config_at(i: int) -> Dictionary:

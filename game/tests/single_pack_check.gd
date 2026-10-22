@@ -320,9 +320,6 @@ func _check_extraction_menu() -> void:
 	var launcher: Launcher = load(LAUNCHER).instantiate()
 	get_tree().root.add_child(launcher)
 	await _frames(SHOT_DELAY_FRAMES)
-	var offered := _find_button(launcher, "Extraction raid (solo)") != null
-	_record("extraction offered only with a Tribes pack", offered == _has_infantry(), "offered %s" % offered)
-	await _save_shot("launcher_menu")
 	var lobby: RoutedScreen = launcher.open_lobby("vs")
 	await _frames(4)
 	var in_host := _option_items(lobby).any(func(t: String) -> bool: return t.begins_with("Extraction"))

@@ -4,7 +4,7 @@ class_name LauncherAutomation
 ##   --autojoin=<ip>                                   join a host and mark ready
 ##   --page=<page> [--shot=<png>]                      open a page, screenshot + quit
 ##   [--map=<name part>] [--game_mode=<id part>] [--bots=<n>]   lobby pages: pick that map / game mode / bot count
-## Pages: menu | options | lobby[:<vs|team_vs|coop|campaign|skirmish|extraction>] (a LAN lobby; skirmish and extraction
+## Pages: options | lobby[:<vs|team_vs|coop|campaign|skirmish|extraction>] (a LAN lobby; skirmish and extraction
 ##        are offline) | host[:<kind>] (the same) | armory (the skirmish lobby) | extraction (the raid lobby) | browser |
 ##        saga | debrief | briefing:<es1|es2|starsiege|starsiege-cybrid> (that campaign's lobby) |
 ##        hangar:<same games> | training:<tribes|tribes2> | new_campaign | saves[:save|load] | killed:<same games as briefing>
@@ -16,6 +16,11 @@ const PLAYER_POLL := 0.25        # seconds between roster checks
 const START_DELAY := 0.5
 const SAGA_STAGES_TO_STARSIEGE := 2
 const STARSIEGE_PROVIDER := "res://games/starsiege/campaign_provider.gd"
+
+
+## True while this process still has automation arguments to act on (the launcher then opens no page of its own).
+static func is_pending() -> bool:
+	return not _consumed and (ScreenRouter.arg_value("autohost") != "" or ScreenRouter.arg_value("autojoin") != "" 		or ScreenRouter.arg_value("page") != "")
 
 
 ## The automation arguments are acted on once per process: a launcher reopened after a battle
@@ -128,7 +133,7 @@ static func _open_page(launcher: Launcher, page: String) -> void:
 			Session.last_result = {"success": true, "text": "Automation: all objectives complete."}
 			launcher.go("debrief")
 		"options":
-			launcher.go("options", {"home": "menu"})
+			launcher.go("options", {"home": "home"})
 		"training":
 			launcher.go("training", {"pack": detail if detail != "" else "tribes"})
 		"killed":

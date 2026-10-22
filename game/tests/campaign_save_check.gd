@@ -2,11 +2,10 @@ extends Node
 ## Headless check of campaign saves and the launcher's campaign entries (QA #5, #6, #13, #17):
 ## - every game's campaign (Earthsiege, Earthsiege 2, Starsiege human / cybrid) saves and loads as
 ##   itself (provider recorded in the save); saves from before that are recognised by their fields;
-## - opening the launcher menu does not load the autosave; Continue campaign loads the newest save explicitly and
+## - opening the launcher does not load the autosave; Continue campaign loads the newest save explicitly and
 ##   an Earthsiege 2 save continues with its own briefing;
 ## - a co-op client sets its own campaign aside and picks only from the host's offer;
 ## - the Hangar's Build picker defaults to the campaign's own Herc;
-## - the launcher's Back says where it goes; its Quit asks first.
 ##   godot --headless --audio-driver Dummy --path game res://tests/campaign_save_check.tscn
 ## The player's saves are backed up and restored (saved_campaign_guard).
 
@@ -31,7 +30,6 @@ func _run() -> void:
 	await _check_explicit_continue()
 	await _check_coop_client()
 	await _check_build_defaults()
-	await _check_launcher_footer()
 	_clear_store()
 	_autosave_guard.restore()
 	print("campaign_save_check: %d failures" % _fails)
@@ -92,13 +90,12 @@ func _check_explicit_continue() -> void:
 	Session.autosave()
 	Session.clear_campaign()
 	var launcher: Launcher = load(LAUNCHER_SCENE).instantiate()
+	launcher.set_meta("start_mode", Launcher.JOIN_START_MODE)   # the LAN browser is the first page, as when the library opens the launcher
 	add_child(launcher)
 	await _frames()
-	_expect(Session.campaign == null, "opening the launcher menu does not load the autosave")
-	var cont := _find_button(launcher, "Continue campaign")
-	_expect(cont != null, "Continue campaign offered for the autosave")
-	if cont:
-		cont.pressed.emit()
+	_expect(Session.campaign == null, "opening the launcher does not load the autosave")
+	_expect(not SaveGames.find_newest_continuable().is_empty(), "Continue campaign is offered for the autosave")
+	if launcher.continue_newest():
 		await _frames()
 		_expect(Session.campaign is CampaignES2 and launcher.current_name == "lobby",
 			"Continue campaign loads the Earthsiege 2 save into its campaign lobby (%s)" % launcher.current_name)
@@ -112,6 +109,7 @@ func _check_explicit_continue() -> void:
 
 func _check_coop_client() -> void:
 	var launcher: Launcher = load(LAUNCHER_SCENE).instantiate()
+	launcher.set_meta("start_mode", Launcher.JOIN_START_MODE)   # the LAN browser is the first page, as when the library opens the launcher
 	add_child(launcher)
 	await _frames()
 	Session.start_saga()
@@ -144,6 +142,7 @@ func _check_build_defaults() -> void:
 		if Session.garage() == null:
 			continue   # on-foot campaigns (Tribes) have no garage and no Herc to build
 		var launcher: Launcher = load(LAUNCHER_SCENE).instantiate()
+		launcher.set_meta("start_mode", Launcher.JOIN_START_MODE)   # the LAN browser is the first page, as when the library opens the launcher
 		add_child(launcher)
 		await _frames()
 		launcher.open_hangar("lobby")
@@ -156,21 +155,6 @@ func _check_build_defaults() -> void:
 		launcher.queue_free()
 		await _frames()
 
-
-func _check_launcher_footer() -> void:
-	Session.launcher_home = "res://library.tscn"
-	var launcher: Launcher = load(LAUNCHER_SCENE).instantiate()
-	add_child(launcher)
-	await _frames()
-	_expect(launcher.current.back_button.text == "Back to library", "launcher Back says it goes to the library ('%s')" % launcher.current.back_button.text)
-	var quit := _find_button(launcher, "Quit")
-	if quit:
-		quit.pressed.emit()
-		await _frames()
-	_expect(launcher.find_children("*", "ConfirmDialog", true, false).size() == 1, "launcher Quit asks first")
-	Net.stop_discovery()
-	launcher.queue_free()
-	await _frames()
 
 
 func _find_button(root: Node, text: String) -> Button:

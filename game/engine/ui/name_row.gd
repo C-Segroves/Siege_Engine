@@ -1,6 +1,6 @@
 class_name NameRow
 extends OptionRow
-## The player's name (launcher menu, lobby, options): typing renames the player at once (Net.player_name) and
+## The player's name (lobby, options): typing renames the player at once (Net.player_name) and
 ## saves it (PlayerProfile); `named` fires with the new name.
 
 signal named(player_name: String)

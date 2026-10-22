@@ -13,6 +13,10 @@ const BAR_SIZE := Vector2(320, 14)
 const TITLE_FONT_SIZE := 42
 const FONT_SIZE := 18
 const MARKER_SIZE := 8.0
+## Rows of the downed block: title, text, progress bar; of the reviving block: prompt, progress bar.
+const TITLE_ROW := 50.0
+const TEXT_ROW := 26.0
+const BAR_ROW := 20.0
 
 var revive: ExtractionRevive
 var font: Font
@@ -32,7 +36,20 @@ func _ready() -> void:
 
 func _process(_delta: float) -> void:
 	size = get_viewport_rect().size
+	_declare_elements()
 	queue_redraw()
+
+
+## Tells the layout which block is up: the veil and the downed block, or the reviving prompt.
+func _declare_elements() -> void:
+	var layout := HudLayout.of(self)
+	var me := revive.director.battle.player as Infantry
+	var downed := me != null and DownedState.is_downed(me)
+	var reviving := me != null and not downed and not revive.make_local_revive_state().is_empty()
+	var most: Vector2 = HudLayout.ELEMENTS[&"revive_banner"].max
+	layout.declare(&"downed_veil", Vector2.ONE if downed else Vector2.ZERO)
+	layout.declare(&"revive_banner", Vector2(most.x, TITLE_ROW + TEXT_ROW + BAR_ROW) if downed else
+		(Vector2(most.x, TEXT_ROW + BAR_ROW) if reviving else Vector2.ZERO))
 
 
 func _draw() -> void:
@@ -57,24 +74,28 @@ func make_downed_text(me: Infantry) -> String:
 
 
 func _draw_downed(me: Infantry) -> void:
-	draw_rect(Rect2(Vector2.ZERO, size), VEIL_COLOR)
-	_draw_centered("DOWNED", size.y * 0.32, TITLE_FONT_SIZE, TEXT_COLOR)
-	_draw_centered(make_downed_text(me), size.y * 0.32 + TITLE_FONT_SIZE, FONT_SIZE, TEXT_COLOR)
+	var layout := HudLayout.of(self)
+	draw_rect(layout.rect_of(&"downed_veil"), VEIL_COLOR)
+	var block := layout.rect_of(&"revive_banner")
+	_draw_centered("DOWNED", block, block.position.y + TITLE_FONT_SIZE, TITLE_FONT_SIZE, TEXT_COLOR)
+	_draw_centered(make_downed_text(me), block, block.position.y + TITLE_ROW + FONT_SIZE, FONT_SIZE, TEXT_COLOR)
 	var state: Dictionary = revive.states.get(me.net_id, {})
 	if int(state.get("reviver", 0)) != 0:
-		_draw_bar(size.y * 0.32 + TITLE_FONT_SIZE * 1.6, float(state.progress))
+		_draw_bar(block, block.position.y + TITLE_ROW + TEXT_ROW, float(state.progress))
 
 
 func _draw_reviving() -> void:
 	var r := revive.make_local_revive_state()
-	if r.is_empty():
+	var block := HudLayout.of(self).rect_of(&"revive_banner")
+	if r.is_empty() or block.size == Vector2.ZERO:
 		return
-	_draw_centered("Reviving %s - keep holding %s" % [str(r.name), InfantryInteraction.make_key_text()], size.y * 0.62, FONT_SIZE, BAR_COLOR)
-	_draw_bar(size.y * 0.62 + FONT_SIZE * 0.8, float(r.progress))
+	_draw_centered("Reviving %s - keep holding %s" % [str(r.name), InfantryInteraction.make_key_text()], block, block.position.y + FONT_SIZE,
+		FONT_SIZE, BAR_COLOR)
+	_draw_bar(block, block.position.y + TEXT_ROW, float(r.progress))
 
 
-func _draw_bar(y: float, fraction: float) -> void:
-	var at := Vector2((size.x - BAR_SIZE.x) * 0.5, y)
+func _draw_bar(block: Rect2, y: float, fraction: float) -> void:
+	var at := Vector2(block.position.x + (block.size.x - BAR_SIZE.x) * 0.5, y)
 	draw_rect(Rect2(at, BAR_SIZE), BAR_BACK)
 	draw_rect(Rect2(at, Vector2(BAR_SIZE.x * clampf(fraction, 0.0, 1.0), BAR_SIZE.y)), BAR_COLOR)
 
@@ -96,7 +117,8 @@ func _draw_markers(me: Infantry) -> void:
 			HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE - 4, TEXT_COLOR)
 
 
-func _draw_centered(text: String, y: float, font_size: int, color: Color) -> void:
-	var w := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
-	draw_string_outline(font, Vector2((size.x - w) * 0.5, y), text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, 4, Color(0, 0, 0, 0.8))
-	draw_string(font, Vector2((size.x - w) * 0.5, y), text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, color)
+func _draw_centered(text: String, block: Rect2, y: float, font_size: int, color: Color) -> void:
+	var w := minf(font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x, block.size.x)
+	var at := Vector2(block.position.x + (block.size.x - w) * 0.5, y)
+	draw_string_outline(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, block.size.x, font_size, 4, Color(0, 0, 0, 0.8))
+	draw_string(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, block.size.x, font_size, color)

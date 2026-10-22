@@ -10,13 +10,16 @@ There is one navigation stack per router: `ScreenRouter.go / back / replace / go
 - **back:** returns to the remembered page.
 - **replace:** a page that refreshes itself (Saves after a delete, Options after a data-folder change), or a flow
   step that must not be returned to (Debriefing → End). It is not remembered.
-- **Main menu:** the **library**, the app's front door. The one exception is the original Earthsiege shell's
-  MULTIPLAYER entry, which opens the launcher's own menu as its main menu.
+- **Main menu:** the **library home**, the app's front door (there is no other menu page). The one exception is the
+  original Earthsiege shell's MULTIPLAYER entry, whose "main menu" is the LAN browser (with a Host LAN game button).
   - `Launcher.go_main_menu` goes there.
   - Back with nothing remembered also goes there (`Launcher.back_from_root`).
+- **Leaving a match** (any mode, solo or LAN, host or client; results Continue; the battle menu's Leave / Quit to main
+  menu) returns to the library home on its **Play** tab (`Session.show_play_tab`). A launcher opened after a match
+  with no session left goes there at once; an open LAN or offline session returns to its lobby instead.
 
 So Back always returns to the screen you came from. From any page the library opened (Host, Join,
-campaign pages, the launcher menu) that is the library.
+campaign pages) that is the library home.
 
 Tests: `tests/ui_nav_check.gd` covers every path below (`_check_back_paths`, `_check_launcher_routes`,
 `_check_library_routes`, the killed prompt). `tests/fix_d_check.gd` covers the shape viewer.
@@ -25,7 +28,14 @@ Tests: `tests/ui_nav_check.gd` covers every path below (`_check_back_paths`, `_c
 
 | Screen | Buttons | Back / Esc / pad B |
 |---|---|---|
-| Home | Import disc, Remove pack, Add soundtrack folder, soundtrack → Jukebox, Continue campaign → Lobby (campaign), New campaign → New campaign, Load game → Saves, Host LAN game → Lobby (versus), Join LAN game → Browser, Co-op missions (LAN) → Lobby (co-op), Co-op campaign (LAN) → Lobby (campaign), Skirmish, training, extraction → launcher Menu, Metaltech: Earthsiege → original shell, Shape viewer, Options, Tested game versions → Versions; primary: Arena / versus → Lobby (versus) | "Quit" asks first |
+Home has three tabs (`TabPages`, pad LB / RB): **Play**, **Your library**, **Options & tools**. Every mode (skirmish, co-op,
+co-op campaign, extraction, Tribes training) is picked in the host lobby's Game Options.
+
+| Screen | Buttons | Back / Esc / pad B |
+|---|---|---|
+| Home, Play tab | Continue campaign → Lobby (campaign), New campaign → New campaign, Load game → Saves, Host LAN game → Lobby, Join LAN game → Browser; primary: Host LAN game | "Quit" asks first |
+| Home, Your library | Import disc, Remove pack, content toggles, Add soundtrack folder, soundtrack → Jukebox | same |
+| Home, Options & tools | Play intro, Shape viewer, Options (pilot name, Operator Setup), Tested game versions → Versions | same |
 | Jukebox | Stop / play tracks | Home |
 | Options | settings, Operator Setup (the active character slot) | Home |
 | Versions | each installed game's detected release (tested / untested), the tested-versions table; also from Options (Tested game versions) | the page it came from |
@@ -33,14 +43,15 @@ Tests: `tests/ui_nav_check.gd` covers every path below (`_check_back_paths`, `_c
 
 ## Launcher (`launcher.tscn`)
 
+The launcher has no menu page of its own: it opens on the page the library asked for (`start_mode`: lobby, Browser, a
+campaign page), or, after a match with no open session, goes straight back to the library home.
 Every game is set up in the one standard **Lobby** (`LobbyScreen`, docs/design/lobby_loadout_economy.md section 5), hosted over
 LAN or, for skirmish, the single player campaign and the solo raid, as an offline session (`Launcher.open_lobby(kind, solo)`).
 
 | Screen | Buttons (→ target) | Back / Esc / pad B |
 |---|---|---|
-| Menu | Pilot name, Continue campaign → Lobby (campaign), New campaign, Load game → Saves, Tribes training → Training, Extraction raid (solo) → Lobby (offline raid), Host LAN game → Lobby (versus; the host switches to co-op or an extraction raid in Game Options), Host co-op campaign (LAN) → Lobby (campaign), Join LAN game → Browser, Play intro, Shape viewer, Library, Options, Quit (asks); primary: Skirmish → Lobby (offline) | "Back to library" (or "Back to original shell") |
-| Browser | a server → Lobby; primary: Join address → Lobby | the page it came from (Menu, or the library) |
-| Lobby | Game Options (the host edits; Save game and Hangar in a campaign), Operator Setup, the squad cards, chat, goals or the campaign briefing; primary: host Start match / Start mission (disabled until everyone is ready and on a team), client Ready / Not ready | "Leave" ends the session and returns to the page it came from (Menu / Browser / library). A single player campaign lobby saves and goes to the main menu. After a battle the lobby is the first page, so Leave goes to the main menu |
+| Browser | a server → Lobby; primary: Join address → Lobby; under the original shell's MULTIPLAYER entry also Host LAN game → Lobby | the page it came from (the library home, or the original shell) |
+| Lobby | Game Options (the host edits: one **Game mode** picker lists every versus mode, co-op, co-op campaign, extraction raid and the training pages, with unavailable modes disabled and the reason shown; the Map list shows only the maps that mode can be played on; Save game and Hangar in a campaign), Operator Setup, the squad cards, chat, goals or the campaign briefing; primary: host Start match / Start mission (disabled until everyone is ready and on a team), client Ready / Not ready | "Leave" ends the session and returns to the page it came from (Browser / library home). A single player campaign lobby saves and goes to the main menu. After a battle the lobby is the first page, so Leave goes to the main menu |
 | Training | mission list; primary: Start training → battle | the page it came from |
 | New campaign | pilot name, campaign choice; primary: Start campaign → Lobby (campaign) | the page it came from |
 | Saves (load) | Delete (refreshes in place); primary: New campaign → New campaign; a save → Lobby (campaign) | the page it came from |

@@ -64,8 +64,16 @@ static func _is_under(at: Vector3, pos: Vector3, radius: float) -> bool:
 
 func _add_crate(order: CallinOrder) -> void:
 	order.object_id = callins.make_object_id()
-	callins.send_all("_crate_add", [{"id": order.object_id, "kind": order.kind, "variant": order.variant, "team": order.team, "pos": order.lz,
+	callins.send_all("_crate_add", [{"id": order.object_id, "kind": order.kind, "variant": order.variant, "team": order.team, "pos": make_crate_point(order.lz),
 		"uses": maxi(int(CallinRules.rule(order.kind).get("uses", 1)), 1), "hp": float(CallinRules.rule(order.kind).get("hp", 250.0))}])
+
+
+## Where the crate stands: the landing point itself, else the nearest standable floor within reach (never in or under
+## a slab of the landing zone; LootDropPlacement).
+func make_crate_point(lz: Vector3) -> Vector3:
+	var battle := callins.battle
+	return LootDropPlacement.make_point(battle.get_world_3d().direct_space_state, ExitSafety.make_unit_rids(battle), lz,
+		MapBuilder.ground_height(battle, lz), float(ExtractionRules.data().get("pickup_reach_m", 3.0)))
 
 
 func _add_station(order: CallinOrder) -> void:

@@ -2,9 +2,10 @@ class_name ExtractionHud
 extends Control
 ## The raid's instruments over the battle HUD (ExtractionDirector; every peer, for its local player):
 ##   top left    money, load (kg and slots), the exfil calls (zone, state, time, distance), the raid keys
-##   centre      "X: loot Supply cache (5)" when a container is within reach
-##   world       markers on the caches near the player and on every extraction zone
-##   banner      EXTRACTED / KILLED IN ACTION when the local player's raid is over
+##               (the raid_status element of HudLayout: it stacks in its own zone, clear of the target panel)
+##   hint        "X: loot Supply cache (5)" when a container is within reach (InfantryHud's hint line)
+##   world       markers on the caches near the player and on every extraction zone (they follow the world)
+##   banner      EXTRACTED / KILLED IN ACTION when the local player's raid is over (the centre banner element)
 
 const TEXT_COLOR := Color(0.9, 1.0, 0.9)
 const DIM_COLOR := Color(0.7, 0.8, 0.7, 0.85)
@@ -17,11 +18,13 @@ const CONTACT_COLOR := Color(1.0, 0.3, 0.3)
 const BAG_COLOR := Color(1.0, 0.45, 0.3)
 const BANNER_COLOR := Color(1.0, 0.85, 0.35)
 const DEAD_COLOR := Color(1.0, 0.35, 0.3)
-const MARGIN := Vector2(24, 34)
 const LINE := 20.0
+const BASELINE := 15.0
+## Status lines that fit the raid_status element; the raid keys line always stays.
+const MAX_STATUS_LINES := 9
+const BANNER_ROW_PAD := 8.0
 const FONT_SIZE := 16
 const HINT_FONT_SIZE := 20
-const HINT_RISE := 200.0
 const BANNER_FONT_SIZE := 40
 const MARKER_SIZE := 6.0
 const CACHE_MARKER_RANGE := 90.0
@@ -50,7 +53,19 @@ func _ready() -> void:
 func _process(_delta: float) -> void:
 	size = get_viewport_rect().size
 	hint = make_pickup_hint()
+	_declare_elements()
 	queue_redraw()
+
+
+## Tells the layout how big the status block and the banner are now.
+func _declare_elements() -> void:
+	var layout := HudLayout.of(self)
+	var lines := make_status_lines()
+	var widest := 0.0
+	for line in lines:
+		widest = maxf(widest, font.get_string_size(str(line[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE).x)
+	layout.declare(&"raid_status", Vector2(widest, LINE * lines.size()) if not lines.is_empty() else Vector2.ZERO)
+	layout.declare(&"centre_banner", make_banner_size())
 
 
 func _local_soldier() -> Infantry:
@@ -87,14 +102,15 @@ static func make_loot_text(c: LootContainer) -> String:
 
 func _draw() -> void:
 	_draw_markers()
-	var at := MARGIN
+	var block := HudLayout.of(self).rect_of(&"raid_status")
+	var at := block.position + Vector2(0, BASELINE)
 	for line in make_status_lines():
-		draw_string(font, at, str(line[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, FONT_SIZE, line[1])
+		draw_string(font, at, str(line[0]), HORIZONTAL_ALIGNMENT_LEFT, block.size.x, FONT_SIZE, line[1])
 		at.y += LINE
-	_draw_banner()
+	_draw_banner(HudLayout.of(self).rect_of(&"centre_banner"))
 
 
-## [[text, colour], ...] for the top-left block.
+## [[text, colour], ...] for the top-left block, at most MAX_STATUS_LINES (the call-in lines give way first).
 func make_status_lines() -> Array:
 	var inv := director.my_inventory
 	var lines := [["RAID   %s   load %.1f / %.0f kg   slots %d / %d" % [ExtractionRules.make_money_text(inv.money),
@@ -107,6 +123,13 @@ func make_status_lines() -> Array:
 		lines.append(["%s loot   %s inventory   %s call exfil   %s call-ins" % [InfantryInteraction.make_key_text(),
 			OccupancyHint.make_key_text("inventory_toggle"), OccupancyHint.make_key_text("exfil_call"),
 			OccupancyHint.make_key_text("callin_menu")], DIM_COLOR])
+	return _make_trimmed(lines)
+
+
+## `lines` cut to MAX_STATUS_LINES by dropping the lines just before the last (the raid keys).
+static func _make_trimmed(lines: Array) -> Array:
+	while lines.size() > MAX_STATUS_LINES:
+		lines.remove_at(lines.size() - 2)
 	return lines
 
 
@@ -122,24 +145,51 @@ func make_exfil_text(e: Dictionary) -> String:
 	return text
 
 
-func _draw_banner() -> void:
+## [[text, font size, colour], ...] of the banner when the raid is over: EXTRACTED / KILLED IN ACTION, what was kept, what was lost.
+func make_banner_lines() -> Array:
 	match director.my_status:
 		ExtractionDirector.STATUS_EXTRACTED:
-			_draw_centered("EXTRACTED - your haul is in your stash", size.y * 0.4, BANNER_FONT_SIZE, BANNER_COLOR)
+			return [["EXTRACTED - your haul is in your stash", BANNER_FONT_SIZE, BANNER_COLOR]]
 		ExtractionDirector.STATUS_DEAD:
-			_draw_centered("KILLED IN ACTION - your gear is lost", size.y * 0.4, BANNER_FONT_SIZE, DEAD_COLOR)
-			if not director.my_lost.is_empty():
-				_draw_centered("Lost with you: %s  (buy back %d cr each)" % [", ".join(PackedStringArray(director.my_lost.map(RaidOperator.make_unlock_text))),
-					EconomyRules.rebuy_price()], size.y * 0.4 + BANNER_FONT_SIZE * 2.0, HINT_FONT_SIZE, DEAD_COLOR)
-			if not director.my_kept.is_empty():
-				_draw_centered("Insured and kept: %s" % ExtractionItems.make_stack_text(str(director.my_kept[0][0]), int(director.my_kept[0][1])),
-					size.y * 0.4 + BANNER_FONT_SIZE, HINT_FONT_SIZE, BANNER_COLOR)
+			return _make_dead_lines()
+	return []
 
 
-func _draw_centered(text: String, y: float, font_size: int, color: Color) -> void:
-	var w := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
-	draw_string_outline(font, Vector2((size.x - w) * 0.5, y), text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, 4, Color(0, 0, 0, 0.8))
-	draw_string(font, Vector2((size.x - w) * 0.5, y), text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, color)
+func _make_dead_lines() -> Array:
+	var lines := [["KILLED IN ACTION - your gear is lost", BANNER_FONT_SIZE, DEAD_COLOR]]
+	if not director.my_kept.is_empty():
+		lines.append(["Insured and kept: %s" % ExtractionItems.make_stack_text(str(director.my_kept[0][0]), int(director.my_kept[0][1])),
+			HINT_FONT_SIZE, BANNER_COLOR])
+	if not director.my_lost.is_empty():
+		lines.append(["Lost with you: %s  (buy back %d cr each)" % [", ".join(PackedStringArray(director.my_lost.map(RaidOperator.make_unlock_text))),
+			EconomyRules.rebuy_price()], HINT_FONT_SIZE, DEAD_COLOR])
+	return lines
+
+
+## The banner's size: its widest line (limited to the zone) and a row per line.
+func make_banner_size() -> Vector2:
+	var lines := make_banner_lines()
+	var most: Vector2 = HudLayout.ELEMENTS[&"centre_banner"].max
+	var size_now := Vector2.ZERO
+	for line in lines:
+		size_now.x = maxf(size_now.x, font.get_string_size(str(line[0]), HORIZONTAL_ALIGNMENT_LEFT, -1, int(line[1])).x)
+		size_now.y += int(line[1]) + BANNER_ROW_PAD
+	return Vector2(minf(size_now.x, most.x), minf(size_now.y, most.y))
+
+
+func _draw_banner(banner: Rect2) -> void:
+	var y := banner.position.y
+	for line in make_banner_lines():
+		y += int(line[1]) + BANNER_ROW_PAD * 0.5
+		_draw_centered(str(line[0]), banner, y, int(line[1]), line[2])
+		y += BANNER_ROW_PAD * 0.5
+
+
+func _draw_centered(text: String, banner: Rect2, y: float, font_size: int, color: Color) -> void:
+	var w := minf(font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x, banner.size.x)
+	var at := Vector2(banner.position.x + (banner.size.x - w) * 0.5, y)
+	draw_string_outline(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, banner.size.x, font_size, 4, Color(0, 0, 0, 0.8))
+	draw_string(font, at, text, HORIZONTAL_ALIGNMENT_LEFT, banner.size.x, font_size, color)
 
 
 func _draw_markers() -> void:

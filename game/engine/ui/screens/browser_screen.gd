@@ -18,6 +18,8 @@ func open(_args: Dictionary) -> void:
 	set_page_title("join a game" if WebPlatform.is_active() else "join a LAN game")
 	set_back("Back", _leave)
 	set_primary("Join address", _join_typed_address)
+	if launcher().multiplayer_only:
+		content.add_child(Widgets.button("Host LAN game", func() -> void: launcher().open_lobby(GameOptionsModel.KIND_VERSUS)))
 	if not WebPlatform.is_active():
 		content.add_child(Widgets.section("LAN games (auto-discovered)"))
 		_servers = VBoxContainer.new()

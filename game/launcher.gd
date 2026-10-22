@@ -1,6 +1,6 @@
 class_name Launcher
 extends ScreenRouter
-## Launcher (res://launcher.tscn): the menu, campaigns (debriefing, saga choice), the LAN browser, options. Every game
+## Launcher (res://launcher.tscn): campaigns (debriefing, saga choice), the LAN browser, options. Every game
 ## about to start is set up in the standard lobby (LobbyScreen: skirmish, campaign, co-op, versus, extraction, solo
 ## through an offline session, hosted or joined over LAN; docs/design/lobby_loadout_economy.md section 5.6). The ES1
 ## shell opens it with `multiplayer_only = true` for its MULTIPLAYER entry; the library opens it with meta "start_mode"
@@ -8,7 +8,7 @@ extends ScreenRouter
 
 const SCREENS_DIR := "res://engine/ui/screens/"
 const SCREEN_FILES := {
-	"menu": "launcher_menu.gd", "browser": "browser_screen.gd", "lobby": "lobby_screen.gd",
+	"browser": "browser_screen.gd", "lobby": "lobby_screen.gd",
 	"debrief": "debrief_screen.gd", "end": "end_screen.gd", "saga_choice": "saga_choice_screen.gd",
 	"options": "options_screen.gd", "hangar": "hangar_screen.gd", "training": "training_screen.gd",
 	"new_campaign": "new_campaign_screen.gd", "saves": "saves_screen.gd", "killed": "killed_screen.gd",
@@ -23,15 +23,12 @@ const LOBBY_START_KINDS := {
 }
 ## Library entry that opens the LAN browser (meta "start_mode").
 const JOIN_START_MODE := "join"
-## Library entry that opens the launcher's own menu (skirmish, training, extraction).
-const MENU_START_MODE := "menu"
 const BATTLE_SCENE := "res://games/es1/battle.tscn"
 const SELF_SCENE := "res://launcher.tscn"
 const MULTIPLAYER_TITLE := "MULTIPLAYER"
 const ES1_SHELL_SCENE := "res://es1_shell.tscn"
-const HOME_NAMES := {"res://es1_shell.tscn": "original shell", "res://library.tscn": "library"}
 
-## Only the LAN pages and the lobby; "Back" returns to the original shell.
+## Only the LAN pages and the lobby (it opens on the LAN browser); "Back" returns to the original shell.
 var multiplayer_only := false
 var _leaving_to_front_end := false
 
@@ -70,22 +67,19 @@ func back_with_status(text: String) -> void:
 	_show_status(text)
 
 
-## The main menu: the front end that opened the launcher (the library), or the launcher's own menu under the
-## original shell's MULTIPLAYER entry. `text` is shown there.
+## The main menu: the front end that opened the launcher (the library home), or the LAN browser under the original
+## shell's MULTIPLAYER entry. `text` is shown there.
 func go_main_menu(text := "") -> void:
-	if Session.launcher_home == ES1_SHELL_SCENE:
-		go_root("menu").set_status(text)
+	if multiplayer_only:
+		go_root("browser").set_status(text)
 		return
 	Session.front_end_status = text
 	leave_to_front_end()
 
 
-## Back with no screen remembered: the main menu (go_main_menu), or the front end from the launcher's own menu.
+## Back with no screen remembered: the front end that opened the launcher.
 func back_from_root() -> void:
-	if current_name != "menu" and Session.launcher_home == ES1_SHELL_SCENE:
-		go_root("menu")
-	else:
-		leave_to_front_end()
+	leave_to_front_end()
 
 
 ## The LAN session ended: a pilot still in the lobby goes back to where he came from (the host or browser page).
@@ -104,12 +98,12 @@ func _show_status(text: String) -> void:
 
 
 ## The campaign's next page: the death prompt after a killed pilot's battle, the saga side choice, the
-## campaign lobby (the briefing, the Herc, Start mission), or the menu when no campaign runs.
+## campaign lobby (the briefing, the Herc, Start mission), or the main menu when no campaign runs.
 func show_campaign() -> void:
 	if Session.must_replay():
 		go("killed")
 	elif not Session.has_campaign():
-		go("menu")
+		go_main_menu()
 	elif Session.saga != null and Session.saga.needs_choice():
 		go("saga_choice")
 	elif Net.is_online() or _has_solo_campaign_session():
@@ -168,17 +162,13 @@ func continue_newest() -> bool:
 	return true
 
 
-## Back to the front end this launcher was opened from (original shell or library).
+## Back to the front end this launcher was opened from (original shell or the library home, on its Play tab).
 func leave_to_front_end() -> void:
 	_leaving_to_front_end = true
+	Session.show_play_tab()
 	Net.stop_discovery()
 	Session.front_end = Session.launcher_home
 	get_tree().change_scene_to_file(Session.launcher_home)
-
-
-## "Back to library" / "Back to original shell": the label of the button that calls leave_to_front_end.
-func make_home_label() -> String:
-	return "Back to %s" % HOME_NAMES.get(Session.launcher_home, "main menu")
 
 
 func _remember_home() -> void:
@@ -199,7 +189,7 @@ func _on_joined() -> void:
 func _show_front_end_status() -> void:
 	if Session.front_end_status != "" and current != null:
 		current.set_status(Session.front_end_status)
-	Session.front_end_status = ""
+		Session.front_end_status = ""
 
 
 func _open_first_screen() -> void:
@@ -218,12 +208,19 @@ func _open_page_after_battle() -> void:
 		_open_campaign_page(start_mode)
 	elif start_mode == JOIN_START_MODE:
 		go("browser")
-	elif start_mode == MENU_START_MODE:
-		go("menu")
 	elif LOBBY_START_KINDS.has(start_mode):
 		open_lobby(LOBBY_START_KINDS[start_mode].kind, LOBBY_START_KINDS[start_mode].solo)
-	else:
-		go("menu")
+	elif multiplayer_only:
+		go("browser")
+	elif not LauncherAutomation.is_pending():
+		_leave_when_current.call_deferred()
+
+
+## A match was left and no session is open: the front end's home (the library home), once this launcher is the app's
+## scene (a launcher a test adds under another scene stays).
+func _leave_when_current() -> void:
+	if is_inside_tree() and get_tree().current_scene == self:
+		leave_to_front_end()
 
 
 ## The library's Continue / New campaign / Load game.

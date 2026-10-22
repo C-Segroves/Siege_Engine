@@ -11,19 +11,45 @@ const CYAN := Color(0.4, 0.9, 1.0)
 const RADAR_RANGE := 1200.0         # metres
 const RADAR_RADIUS := 110.0         # pixels
 const AIM_DISTANCE := 300.0         # metres ahead of the torso for the crosshair
-const BAR_HEIGHT := 200.0
-const BAR_BOTTOM_MARGIN := 260.0
+const BAR_HEIGHT := 160.0
+const BAR_WIDTH := 18.0
+## The reverse-throttle extension under the throttle bar.
+const REVERSE_EXTENSION := 40.0
+const CAP_BAR_HEIGHT := 80.0
 const MPS_TO_KPH := 3.6
 const PITCH_LADDER_PX_PER_RAD := 120.0
 ## The speed readout sits above the THR label, clear of the CAP bar and the reverse (amber) extension.
 const SPEED_READOUT_RISE := 28.0
-## The target's model in its damage colours, untextured (TargetView + TargetFlatPaint), under its name and range.
-const TARGET_VIEW_RECT := Rect2(20, 88, 160, 180)
-const MESSAGE_WIDTH := 520
-## Weapon rows the occupied-rect estimate allows for (the list grows upwards from the bottom).
-const WEAPON_ROWS := 6
+const SPEED_TEXT_ASCENT := 14.0
+## The target panel (zone TARGET): name and friend-or-foe word, range, health bar, then the target's model in its
+## damage colours, untextured (TargetView + TargetFlatPaint). Rows are offsets inside the panel.
+const TARGET_VIEW_SIZE := Vector2i(160, 118)
+const TARGET_TITLE_BASELINE := 16.0
+const TARGET_RANGE_BASELINE := 36.0
+const TARGET_BAR_TOP := 42.0
+const TARGET_BAR_SIZE := Vector2(160, 10)
+const TARGET_VIEW_TOP := 56.0
+const TARGET_FONT_SIZE := 16
+const TARGET_PANEL_SIZE := Vector2(172, TARGET_VIEW_TOP + TARGET_VIEW_SIZE.y)
+const MESSAGE_WIDTH := 480
+const MESSAGE_HEIGHT := 26.0
+const MESSAGE_BASELINE := 18.0
+## Weapon rows the weapon list shows (it grows upwards from the bottom of its zone).
+const WEAPON_ROWS := 5
+const WEAPON_ROW_HEIGHT := 18.0
+const WEAPON_LIST_WIDTH := 360.0
 ## Compass tape (HudCompass) across the top centre, above the torso twist bar.
-const COMPASS_RECT := Rect2(-120, 6, 240, 22)
+const COMPASS_SIZE := Vector2(240, 22)
+const TORSO_BAR_HALF_WIDTH := 120.0
+const TORSO_BAR_HEIGHT := 48.0
+## How far the flyer's horizon line may leave the torso bar's middle.
+const HORIZON_REACH := 20.0
+const RADAR_BLOCK := Vector2(RADAR_RADIUS * 2.0, RADAR_RADIUS * 2.0)
+const THROTTLE_BLOCK := Vector2(250, SPEED_TEXT_ASCENT + SPEED_READOUT_RISE + BAR_HEIGHT + REVERSE_EXTENSION)
+## Armour block: the ARMOR label above its bar, the shield label under the shield bars.
+const ARMOUR_LABEL_RISE := 22.0
+const ARMOUR_BLOCK := Vector2(96, ARMOUR_LABEL_RISE + BAR_HEIGHT + 22.0)
+const ARMOUR_BAR_LEFT := 44.0
 const COMPASS_FONT_SIZE := 11
 ## Room right of the tape for the waypoint's "WP n  d m".
 const COMPASS_TEXT_WIDTH := 130.0
@@ -40,7 +66,7 @@ func _ready() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	font = ThemeDB.fallback_font
-	target_view = TargetView.new(Vector2i(TARGET_VIEW_RECT.size), TargetFlatPaint.new())
+	target_view = TargetView.new(TARGET_VIEW_SIZE, TargetFlatPaint.new())
 	add_child(target_view)
 
 
@@ -57,30 +83,43 @@ func _process(delta: float) -> void:
 	messages = messages.filter(func(m): return m[1] > 0.0)
 	target_view.apply_target(herc.target if herc != null and is_instance_valid(herc) and visible else null)
 	target_view.advance(delta)
+	_declare_elements()
 	queue_redraw()
+
+
+## Tells the layout which panels this HUD shows now and how big they are.
+func _declare_elements() -> void:
+	var layout := HudLayout.of(self)
+	var shown := herc != null and is_instance_valid(herc) and visible
+	var vehicle := shown and not herc is Infantry
+	layout.declare(&"compass", Vector2(COMPASS_SIZE.x + COMPASS_TEXT_WIDTH, COMPASS_SIZE.y) if shown else Vector2.ZERO)
+	layout.declare(&"torso_bar", Vector2(TORSO_BAR_HALF_WIDTH * 2.0, TORSO_BAR_HEIGHT) if vehicle else Vector2.ZERO)
+	layout.declare(&"message_line", Vector2(MESSAGE_WIDTH, MESSAGE_HEIGHT) if shown and not messages.is_empty() else Vector2.ZERO)
+	layout.declare(&"radar", RADAR_BLOCK if shown else Vector2.ZERO)
+	layout.declare(&"throttle_block", THROTTLE_BLOCK if vehicle else Vector2.ZERO)
+	layout.declare(&"armour_block", ARMOUR_BLOCK if vehicle else Vector2.ZERO)
+	layout.declare(&"target_panel", TARGET_PANEL_SIZE if shown and TargetInfo.is_live(herc.target) else Vector2.ZERO)
+	var rows := mini(herc.weapons.size(), WEAPON_ROWS) if shown else 0
+	layout.declare(&"weapon_list", Vector2(WEAPON_LIST_WIDTH, WEAPON_ROW_HEIGHT * rows + 4.0) if rows > 0 else Vector2.ZERO)
 
 
 func _draw() -> void:
 	if herc == null:
 		return
-	var s := size
-	var by := s.y - BAR_BOTTOM_MARGIN
+	var layout := HudLayout.of(self)
 	if not (herc is Infantry and InfantryHud.is_scope_shown(herc.get_parent(), herc)):
-		_draw_crosshair(s * 0.5)   # the zoomed Laser Rifle draws its own reticle (InfantryHud)
-	var on_foot := herc is Infantry   # a soldier has InfantryHud's energy / health bars instead of the vehicle's
-	if not on_foot:
-		_draw_throttle(30.0, by)
-		_draw_armor_and_shields(s.x - 48.0, by)
-	if herc is Flyer:
-		_draw_flight(herc as Flyer, Vector2(s.x * 0.5, 40), Vector2(30.0 + 70.0, by))
-	elif not on_foot:
-		_draw_torso_twist(Vector2(s.x * 0.5, 40))
-	HudCompass.draw(self, make_compass_rect(s), herc, HeadingFrame.make_current_waypoint(herc, herc.get_parent()),
-		{"font": font, "font_size": COMPASS_FONT_SIZE, "color": GREEN, "marker_color": AMBER})
-	_draw_radar(Vector2(s.x - 150, 150), RADAR_RADIUS)
-	_draw_target()
-	_draw_weapons(Vector2(s.x * 0.5 - 200, s.y - 30.0))   # on foot too: the carried weapons and their rounds
-	_draw_messages(Vector2(s.x * 0.5 - 260, 90.0))
+		_draw_crosshair(size * 0.5)   # the zoomed Laser Rifle draws its own reticle (InfantryHud); the crosshair follows the aim: no zone
+	if layout.is_shown(&"throttle_block"):
+		_draw_throttle(layout.rect_of(&"throttle_block"))
+	if layout.is_shown(&"armour_block"):
+		_draw_armor_and_shields(layout.rect_of(&"armour_block"))
+	if layout.is_shown(&"torso_bar"):
+		_draw_torso_bar(layout.rect_of(&"torso_bar"))
+	_draw_compass(layout.rect_of(&"compass"))
+	_draw_radar(layout.rect_of(&"radar").get_center(), RADAR_RADIUS)
+	_draw_target(layout.rect_of(&"target_panel"))
+	_draw_weapons(layout.rect_of(&"weapon_list"))
+	_draw_messages(layout.rect_of(&"message_line"))
 
 
 ## Crosshair at the aim point (screen centre without a camera).
@@ -95,91 +134,113 @@ func _draw_crosshair(c: Vector2) -> void:
 		draw_line(aim_pt + d * 6, aim_pt + d * 20, GREEN, 1.5)
 
 
-## Throttle bar (reverse below it in amber), speed and the beam capacitor.
-func _draw_throttle(bx: float, by: float) -> void:
-	draw_rect(Rect2(bx, by, 18, BAR_HEIGHT), GREEN, false, 1.5)
+## Throttle bar (reverse below it in amber), speed and the beam capacitor, inside `block` (THROTTLE_BLOCK).
+func _draw_throttle(block: Rect2) -> void:
+	var bx := block.position.x + 4.0
+	var by := block.position.y + SPEED_TEXT_ASCENT + SPEED_READOUT_RISE
+	var fill := BAR_HEIGHT - 4.0
+	draw_rect(Rect2(bx, by, BAR_WIDTH, BAR_HEIGHT), GREEN, false, 1.5)
 	var tf := herc.throttle
 	if tf >= 0:
-		draw_rect(Rect2(bx + 2, by + BAR_HEIGHT - 196 * tf, 14, 196 * tf), GREEN)
+		draw_rect(Rect2(bx + 2, by + BAR_HEIGHT - fill * tf, BAR_WIDTH - 4.0, fill * tf), GREEN)
 	else:
-		draw_rect(Rect2(bx + 2, by + BAR_HEIGHT, 14, 40 * -tf), AMBER)
+		draw_rect(Rect2(bx + 2, by + BAR_HEIGHT, BAR_WIDTH - 4.0, REVERSE_EXTENSION * -tf), AMBER)
 	draw_string(font, Vector2(bx - 4, by - 8), "THR", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, GREEN)
 	draw_string(font, Vector2(bx - 4, by - SPEED_READOUT_RISE), "%d KPH" % int(absf(herc.speed) * MPS_TO_KPH),
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 16, GREEN)
 	var cf := herc.capacitor / maxf(herc.capacitor_max, 1.0)
-	draw_rect(Rect2(bx + 30, by + 120, 8, 80), AMBER, false, 1.0)
-	draw_rect(Rect2(bx + 31, by + BAR_HEIGHT - 78 * cf, 6, 78 * cf), AMBER)
-	draw_string(font, Vector2(bx + 24, by + 114), "CAP", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, AMBER)
+	draw_rect(Rect2(bx + 30, by + BAR_HEIGHT - CAP_BAR_HEIGHT, 8, CAP_BAR_HEIGHT), AMBER, false, 1.0)
+	draw_rect(Rect2(bx + 31, by + BAR_HEIGHT - (CAP_BAR_HEIGHT - 2.0) * cf, 6, (CAP_BAR_HEIGHT - 2.0) * cf), AMBER)
+	draw_string(font, Vector2(bx + 24, by + BAR_HEIGHT - CAP_BAR_HEIGHT - 6.0), "CAP", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, AMBER)
+	if herc is Flyer:
+		_draw_flight_readout(herc as Flyer, Vector2(bx + 70.0, by))
 
 
-## Armor bar (green / amber / red by integrity) and the front / rear shield bars.
-func _draw_armor_and_shields(ax: float, by: float) -> void:
+## Armor bar (green / amber / red by integrity) and the front / rear shield bars, inside `block` (ARMOUR_BLOCK).
+func _draw_armor_and_shields(block: Rect2) -> void:
+	var ax := block.position.x + ARMOUR_BAR_LEFT
+	var by := block.position.y + ARMOUR_LABEL_RISE
+	var fill := BAR_HEIGHT - 4.0
 	var af := clampf(herc.integrity, 0.0, 1.0)
 	var acol := GREEN if af > 0.5 else (AMBER if af > 0.25 else RED)
-	draw_rect(Rect2(ax, by, 18, BAR_HEIGHT), acol, false, 1.5)
-	draw_rect(Rect2(ax + 2, by + BAR_HEIGHT - 196 * af, 14, 196 * af), acol)
+	draw_rect(Rect2(ax, by, BAR_WIDTH, BAR_HEIGHT), acol, false, 1.5)
+	draw_rect(Rect2(ax + 2, by + BAR_HEIGHT - fill * af, BAR_WIDTH - 4.0, fill * af), acol)
 	draw_string(font, Vector2(ax - 18, by - 8), "ARMOR", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, acol)
 	var half := maxf(herc.shield_max * 0.5, 1.0)
-	var sf := herc.shield_front / half
-	var sr := herc.shield_rear / half
-	draw_rect(Rect2(ax - 30, by, 8, 98), CYAN, false, 1.0)
-	draw_rect(Rect2(ax - 29, by + 98 - 96 * sf, 6, 96 * sf), CYAN)
-	draw_rect(Rect2(ax - 30, by + 102, 8, 98), CYAN, false, 1.0)
-	draw_rect(Rect2(ax - 29, by + BAR_HEIGHT - 96 * sr, 6, 96 * sr), CYAN)
-	draw_string(font, Vector2(ax - 44, by + 216), "SHLD F/R", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, CYAN)
+	var sf := clampf(herc.shield_front / half, 0.0, 1.0)
+	var sr := clampf(herc.shield_rear / half, 0.0, 1.0)
+	var bar := BAR_HEIGHT * 0.5 - 2.0
+	draw_rect(Rect2(ax - 30, by, 8, bar), CYAN, false, 1.0)
+	draw_rect(Rect2(ax - 29, by + bar - (bar - 2.0) * sf, 6, (bar - 2.0) * sf), CYAN)
+	draw_rect(Rect2(ax - 30, by + bar + 4.0, 8, bar), CYAN, false, 1.0)
+	draw_rect(Rect2(ax - 29, by + BAR_HEIGHT - (bar - 2.0) * sr, 6, (bar - 2.0) * sr), CYAN)
+	draw_string(font, Vector2(ax - 44, by + BAR_HEIGHT + 16.0), "SHLD F/R", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, CYAN)
 
 
-func _draw_torso_twist(tw: Vector2) -> void:
-	draw_line(tw - Vector2(120, 0), tw + Vector2(120, 0), GREEN, 1.0)
-	var tx := -herc.torso_yaw / herc.torso_limit * 120.0
+## The torso twist scale of a Herc, or a flyer's bank / pitch horizon, in `bar` (the TORSO_BAR element).
+func _draw_torso_bar(bar: Rect2) -> void:
+	var tw := bar.get_center()
+	if herc is Flyer:
+		_draw_horizon(herc as Flyer, tw)
+		return
+	draw_line(tw - Vector2(TORSO_BAR_HALF_WIDTH, 0), tw + Vector2(TORSO_BAR_HALF_WIDTH, 0), GREEN, 1.0)
+	var tx := -herc.torso_yaw / herc.torso_limit * TORSO_BAR_HALF_WIDTH
 	draw_line(tw + Vector2(tx, -8), tw + Vector2(tx, 8), AMBER, 3.0)
 	draw_line(tw + Vector2(0, -5), tw + Vector2(0, 5), GREEN, 1.0)
 
 
-## Flyers: bank / pitch ladder in place of the torso twist, altitude above the ground and vertical
-## speed next to the throttle (red above the ceiling).
-func _draw_flight(fl: Flyer, horizon: Vector2, readout: Vector2) -> void:
-	var tilt := Vector2(cos(fl.torso_yaw), sin(fl.torso_yaw)) * 120.0
-	var lift := Vector2(0, fl.pitch * PITCH_LADDER_PX_PER_RAD)
+func _draw_compass(band: Rect2) -> void:
+	HudCompass.draw(self, Rect2(band.position, COMPASS_SIZE), herc, HeadingFrame.make_current_waypoint(herc, herc.get_parent()),
+		{"font": font, "font_size": COMPASS_FONT_SIZE, "color": GREEN, "marker_color": AMBER})
+
+
+## Flyers: the bank / pitch horizon in place of the torso twist (kept inside the torso bar).
+func _draw_horizon(fl: Flyer, horizon: Vector2) -> void:
+	var tilt := Vector2(cos(fl.torso_yaw), sin(fl.torso_yaw)) * TORSO_BAR_HALF_WIDTH
+	var lift := Vector2(0, clampf(fl.pitch * PITCH_LADDER_PX_PER_RAD, -HORIZON_REACH, HORIZON_REACH))
+	tilt.y = clampf(tilt.y, -HORIZON_REACH, HORIZON_REACH)
 	draw_line(horizon - tilt + lift, horizon + tilt + lift, GREEN, 1.5)
 	draw_line(horizon + Vector2(-8, 0), horizon + Vector2(8, 0), AMBER, 2.0)
+
+
+## Altitude above the ground and vertical speed next to the throttle (red above the ceiling).
+func _draw_flight_readout(fl: Flyer, readout: Vector2) -> void:
 	var alt := fl.make_altitude()
 	var col := RED if alt > fl.flight.make_ceiling() else GREEN
-	draw_string(font, readout, "ALT %d m" % int(alt), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, col)
-	draw_string(font, readout + Vector2(0, 20), "V/S %+.1f m/s" % fl.velocity.y, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, GREEN)
+	draw_string(font, readout + Vector2(0, 12), "ALT %d m" % int(alt), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, col)
+	draw_string(font, readout + Vector2(0, 32), "V/S %+.1f m/s" % fl.velocity.y, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, GREEN)
 	if fl.flight.landed:
-		draw_string(font, readout + Vector2(0, 40), "LANDED", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, AMBER)
+		draw_string(font, readout + Vector2(0, 52), "LANDED", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, AMBER)
 
 
-func _draw_weapons(at: Vector2) -> void:
-	var wy := at.y
-	for w in herc.weapons:
+## The carried weapons and their rounds, bottom row first, in `list` (the WEAPON_LIST element).
+func _draw_weapons(list: Rect2) -> void:
+	if list.size == Vector2.ZERO:
+		return
+	var wy := list.end.y - 4.0
+	for i in mini(herc.weapons.size(), WEAPON_ROWS):
+		var w: Weapon = herc.weapons[i]
 		var ammo_txt: String = "" if w.ammo < 0 else " %d" % w.ammo
-		draw_string(font, Vector2(at.x, wy), "%s%s" % [w.display_name, ammo_txt], HORIZONTAL_ALIGNMENT_LEFT, -1, 14,
-			GREEN if w.ready_to_fire() else AMBER)
-		wy -= 18
+		draw_string(font, Vector2(list.position.x, wy), "%s%s" % [w.display_name, ammo_txt], HORIZONTAL_ALIGNMENT_LEFT,
+			WEAPON_LIST_WIDTH, 14, GREEN if w.ready_to_fire() else AMBER)
+		wy -= WEAPON_ROW_HEIGHT
 
 
 ## The newest message only: the chat panel (BattleChat) keeps the whole history.
-func _draw_messages(at: Vector2) -> void:
-	if not messages.is_empty():
-		draw_string(font, at, messages[-1][0], HORIZONTAL_ALIGNMENT_LEFT, MESSAGE_WIDTH, 18, AMBER)
+func _draw_messages(line: Rect2) -> void:
+	if line.size != Vector2.ZERO and not messages.is_empty():
+		draw_string(font, line.position + Vector2(0, MESSAGE_BASELINE), messages[-1][0], HORIZONTAL_ALIGNMENT_LEFT, MESSAGE_WIDTH, 18, AMBER)
 
 
 ## The screen rects this HUD draws into on a window of size `s` (the chat panel's automatic placement avoids
-## them, ChatPlacement): target box and picture, radar, throttle and flight readouts, armour and shields, the
-## weapon list, the message line and the crosshair.
+## them, ChatPlacement): every element of the plain HUD at its largest size, and the crosshair.
 static func make_occupied_rects(s: Vector2) -> Array:
-	var by := s.y - BAR_BOTTOM_MARGIN
-	return [Rect2(16, 20, 172, TARGET_VIEW_RECT.end.y - 16), Rect2(s.x - 150 - RADAR_RADIUS, 150 - RADAR_RADIUS,
-		RADAR_RADIUS * 2.0, RADAR_RADIUS * 2.0), Rect2(20, by - SPEED_READOUT_RISE - 18, 250, BAR_HEIGHT + 90),
-		Rect2(s.x - 100, by - 24, 100, BAR_HEIGHT + 48), Rect2(s.x * 0.5 - 200, s.y - 30 - 18 * WEAPON_ROWS, 360, 18 * WEAPON_ROWS + 8),
-		Rect2(s.x * 0.5 - 260, 70, MESSAGE_WIDTH, 26), Rect2(s.x * 0.5 - 130, 0, 260 + COMPASS_TEXT_WIDTH, 60), Rect2(s.x * 0.5 - 24, s.y * 0.5 - 24, 48, 48)]
+	return HudLayout.make_reserved_rects(s, HudLayout.PLAIN_HUD_IDS) + [make_crosshair_rect(s)]
 
 
-## The compass band on a window of size `s`.
-static func make_compass_rect(s: Vector2) -> Rect2:
-	return Rect2(COMPASS_RECT.position + Vector2(s.x * 0.5, 0.0), COMPASS_RECT.size)
+## The crosshair's rect (screen centre) on a window of size `s`.
+static func make_crosshair_rect(s: Vector2) -> Rect2:
+	return Rect2(s * 0.5 - Vector2(24, 24), Vector2(48, 48))
 
 
 ## Offset (pixels from the radar centre, heading up) of world point `at` on a radar of radius `r` (HeadingFrame).
@@ -229,8 +290,9 @@ func _draw_radar(center: Vector2, r: float) -> void:
 			UnitSymbols.draw_labeled_marker(self, center + p, str(m.label), m.color, font, 11)
 
 
-## Target box, name with its friend-or-foe word, range and health, in its friend-or-foe colour (A5).
-func _draw_target() -> void:
+## The target panel in `panel` (the TARGET_PANEL element, zone TARGET) and the box around the target in the world:
+## name with its friend-or-foe word, range and health in its friend-or-foe colour (A5), then its model.
+func _draw_target(panel: Rect2) -> void:
 	var t: Node3D = herc.target
 	if not TargetInfo.is_live(t) or camera == null:
 		return
@@ -241,11 +303,15 @@ func _draw_target() -> void:
 		var sp := camera.unproject_position(p)
 		var box := clampf(4000.0 / maxf(d, 1.0), 14.0, 80.0)
 		draw_rect(Rect2(sp - Vector2(box, box), Vector2(box, box) * 2), col, false, 1.5)
+	if panel.size == Vector2.ZERO:
+		return
 	var title := "%s: %s" % [TargetInfo.make_iff_text(herc, t), TargetInfo.make_name(t)]
-	draw_string(font, Vector2(20, 40), title, HORIZONTAL_ALIGNMENT_LEFT, -1, 16, col)
-	draw_string(font, Vector2(20, 60), "RANGE: %d m" % int(d), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, col)
-	draw_rect(Rect2(20, 70, 160, 10), col, false, 1.0)
-	draw_rect(Rect2(21, 71, 158 * TargetInfo.make_integrity(t), 8), col)
+	draw_string(font, panel.position + Vector2(0, TARGET_TITLE_BASELINE), title, HORIZONTAL_ALIGNMENT_LEFT, panel.size.x, TARGET_FONT_SIZE, col)
+	draw_string(font, panel.position + Vector2(0, TARGET_RANGE_BASELINE), "RANGE: %d m" % int(d), HORIZONTAL_ALIGNMENT_LEFT, -1, TARGET_FONT_SIZE, col)
+	var bar := Rect2(panel.position + Vector2(0, TARGET_BAR_TOP), TARGET_BAR_SIZE)
+	draw_rect(bar, col, false, 1.0)
+	draw_rect(Rect2(bar.position + Vector2.ONE, Vector2((bar.size.x - 2.0) * TargetInfo.make_integrity(t), bar.size.y - 2.0)), col)
 	if target_view.has_target():
-		draw_texture(target_view.get_texture(), TARGET_VIEW_RECT.position)
-		draw_rect(TARGET_VIEW_RECT, Color(AMBER, 0.5), false, 1.0)
+		var view := Rect2(panel.position + Vector2(0, TARGET_VIEW_TOP), Vector2(TARGET_VIEW_SIZE))
+		draw_texture(target_view.get_texture(), view.position)
+		draw_rect(view, Color(AMBER, 0.5), false, 1.0)

@@ -492,6 +492,7 @@ func _remove_vehicle(net_id: int) -> void:
 
 
 func _leave_battle_state() -> void:
+	Session.show_play_tab()
 	get_tree().paused = false
 	_music.stop()
 	Sfx.stop_music(0.5)

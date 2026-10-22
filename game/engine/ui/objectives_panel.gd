@@ -4,10 +4,11 @@ extends PanelContainer
 ## battle's objectives (MissionObjectives: every game's campaigns, training, extraction raids, the match rule);
 ## a completed objective turns green and is ticked. Updated a few times a second; objectives_toggle (J) or the
 ## Options setting (DisplaySettings) shows / hides it.
-## Placement (apply_placement): the first spot clear of the HUD in use - the cockpit's instruments and panel, the
-## plain HUD's meters - the chat and the missile cam window (`occupied_provider`, screen rects; ChatPlacement.
-## is_clear), searched from the top-right corner downwards, then leftwards; narrower (wrapping) when the full width
-## fits nowhere. It draws over the cockpit art (BattleOverlay keeps it the overlay's last child).
+## Placement (apply_placement): with the plain HUD up it is the `objectives` element of HudLayout (top-right zone,
+## under the radar; trailing lines are hidden when the zone's height is short). Over a cockpit it is the first spot
+## clear of the cockpit's instruments and panel, the chat and the missile cam window (`occupied_provider`, screen
+## rects; ChatPlacement.is_clear), searched from the top-right corner downwards, then leftwards; narrower (wrapping)
+## when the full width fits nowhere. It draws over the cockpit art (BattleOverlay keeps it the overlay's last child).
 
 const TOGGLE_ACTION := "objectives_toggle"
 const REFRESH_SECONDS := 0.5
@@ -29,6 +30,7 @@ var occupied_provider := Callable()
 var placed_rect := Rect2()
 var _place_t := 0.0
 var _width := WIDTH
+var _zone_size := Vector2.ZERO   # the declared size while the panel sits in its HudLayout zone
 var _lines: VBoxContainer
 var _shown := []
 var _refresh_t := 0.0
@@ -54,6 +56,7 @@ func _init(p_battle: Battle) -> void:
 
 
 func _process(delta: float) -> void:
+	_keep_zone_place()
 	_refresh_t -= delta
 	if _refresh_t > 0.0:
 		return
@@ -67,8 +70,53 @@ func _process(delta: float) -> void:
 		apply_placement(get_viewport_rect().size)
 
 
-## Moves the panel to its free spot on a screen of size `screen` (narrower when the full width fits nowhere).
+## Moves the panel to its place on a screen of size `screen`: its HudLayout zone under the plain HUD's radar, else
+## the free spot among a cockpit's windows (narrower when the full width fits nowhere).
 func apply_placement(screen: Vector2) -> void:
+	var layout := HudLayout.of(self)
+	if layout.is_shown(&"radar"):
+		_apply_zone_placement(layout, screen)
+		return
+	layout.withdraw(&"objectives")
+	_zone_size = Vector2.ZERO
+	_apply_free_placement(screen)
+
+
+## Keeps the zone declaration alive every frame and follows the stack (the radar above may come and go).
+func _keep_zone_place() -> void:
+	if _zone_size == Vector2.ZERO:
+		return
+	var layout := HudLayout.of(self)
+	layout.declare(&"objectives", _zone_size if visible and modulate.a > 0.0 else Vector2.ZERO)
+	var r := layout.rect_of(&"objectives")
+	if r.has_area():
+		placed_rect = r
+		position = r.position
+
+
+## The `objectives` element of the layout: full width, as many lines as the zone's height holds.
+func _apply_zone_placement(layout: HudLayout, screen: Vector2) -> void:
+	var most: Vector2 = HudLayout.ELEMENTS[&"objectives"].max
+	layout.screen = screen
+	_apply_width(most.x)
+	_show_lines_fitting(most.y)
+	_zone_size = Vector2(most.x, get_combined_minimum_size().y)
+	layout.declare(&"objectives", _zone_size)
+	_apply_rect(layout.rect_of(&"objectives"), most.x)
+
+
+## Shows as many of the lines, from the first, as fit in `height`.
+func _show_lines_fitting(height: float) -> void:
+	for label in _lines.get_children():
+		(label as Control).visible = true
+	var labels := _lines.get_children()
+	while get_combined_minimum_size().y > height and not labels.is_empty():
+		(labels.pop_back() as Control).visible = false
+
+
+func _apply_free_placement(screen: Vector2) -> void:
+	for label in _lines.get_children():
+		(label as Control).visible = true
 	var occupied: Array = occupied_provider.call(screen) if occupied_provider.is_valid() else []
 	for w in WIDTHS:
 		var sz := make_panel_size(float(w))
