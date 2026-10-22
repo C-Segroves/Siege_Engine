@@ -300,7 +300,7 @@ func _make_record(cache: Dictionary, p: Vector3) -> Dictionary:
 ## cache under a building could not be reached), moved off a slope that cannot be stood
 ## on (LootDropPlacement). Soldiers and vehicles are no floor.
 func make_ground_point(p: Vector3) -> Vector3:
-	var ground := MapBuilder.ground_height(battle, p)
+	var ground := MapTerrain.make_collision_height(battle, p)
 	return LootDropPlacement.make_top_point(_make_space(), ExitSafety.make_unit_rids(battle), p, ground + FLOOR_PROBE_HEIGHT, ground)
 
 
@@ -308,7 +308,7 @@ func make_ground_point(p: Vector3) -> Vector3:
 ## within pickup reach of `p`, never inside or under a pad, a wall or a slab (LootDropPlacement).
 func make_drop_point(p: Vector3) -> Vector3:
 	return LootDropPlacement.make_point(_make_space(), ExitSafety.make_unit_rids(battle), p,
-		MapBuilder.ground_height(battle, p), float(ExtractionRules.data().get("pickup_reach_m", 3.0)))
+		MapTerrain.make_collision_height(battle, p), float(ExtractionRules.data().get("pickup_reach_m", 3.0)))
 
 
 func _make_space() -> PhysicsDirectSpaceState3D:

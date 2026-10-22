@@ -23,6 +23,12 @@ const START_IN_VEHICLE := "vehicle"
 const START_GAP := 1.5
 ## Soldiers stand this far above the ground when placed (they settle onto it).
 const GROUND_CLEARANCE := 0.3
+## A soldier over a terrain hole with a floor within this far below keeps his height (the inside of a base), else he is put on the hole's rim.
+const FLOOR_REACH := 3.0
+const FLOOR_PROBE_LIFT := 0.5
+## A start whose floor lies further below than this is set on the floor (a long fall would hurt him); the floor is looked for this deep.
+const MAX_START_DROP := 4.0
+const DROP_SEARCH := 400.0
 ## Seconds before a soldier killed in a mode without respawning vehicles comes back (BattleRules.RESPAWN_TIME).
 const RESPAWN_TIME := BattleRules.RESPAWN_TIME
 
@@ -158,13 +164,35 @@ func apply_start_place(spec: Dictionary) -> void:
 
 ## `p` lifted onto the terrain (soldiers fall onto floors above it by themselves). Over a terrain hole (the entrance
 ## of an underground base) onto the hole's rim height: the soldier drops into the base instead of starting below it
-## with nothing under him.
+## with nothing under him. A start that would drop further than MAX_START_DROP onto the floor below it (a Tribes drop
+## point the mission file puts high above its ground) is set on that floor instead.
 func make_on_ground(p: Vector3) -> Vector3:
-	var ground := MapBuilder.ground_height(battle, Vector3(p.x, -INF, p.z))
-	if ground == -INF:
-		var rim := MapTerrain.make_surface_height(battle, p)
-		ground = rim if rim < INF else p.y
-	return Vector3(p.x, maxf(p.y, ground) + GROUND_CLEARANCE, p.z)
+	return make_ground_point(battle, p)
+
+
+## make_on_ground for the world `parent` (a battle, or the map under test in the spawn audit).
+static func make_ground_point(parent: Node3D, p: Vector3) -> Vector3:
+	var ground := MapTerrain.make_collision_height(parent, Vector3(p.x, -INF, p.z))
+	var y := p.y
+	if ground > -INF:
+		y = maxf(p.y, ground)
+	elif find_floor_below(parent, p, FLOOR_REACH) == -INF:
+		var rim := MapTerrain.make_surface_height(parent, p)   # (a base's own floor under the point keeps its height)
+		y = maxf(p.y, rim) if rim < INF else p.y
+	var landing := find_floor_below(parent, Vector3(p.x, y, p.z), DROP_SEARCH)
+	if landing > -INF and y - landing > MAX_START_DROP:
+		y = landing
+	return Vector3(p.x, y + GROUND_CLEARANCE, p.z)
+
+
+## The height of the first solid surface up to `reach` below `p` (in the physics space of `parent`); -INF when there is
+## none or the space does not hold the map's bodies yet.
+static func find_floor_below(parent: Node3D, p: Vector3, reach: float) -> float:
+	if not parent.is_inside_tree():
+		return -INF
+	var ray := PhysicsRayQueryParameters3D.create(p + Vector3.UP * FLOOR_PROBE_LIFT, p + Vector3.DOWN * reach)
+	var hit := parent.get_world_3d().direct_space_state.intersect_ray(ray)
+	return (hit.position as Vector3).y if not hit.is_empty() else -INF
 
 
 # ------------------------------------------------------------------ every peer: building soldiers

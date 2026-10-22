@@ -1241,6 +1241,8 @@ func _pair(battle: Battle, me: Infantry, mate: Infantry) -> void:
 	_place(mate, battle.infantry.make_on_ground(spot + Vector3(1.6, 0, 0)))
 	var settled := func() -> bool: return me.is_on_floor() and mate.is_on_floor() and (me.velocity + mate.velocity).length() < 0.5
 	await _wait_for(settled, 20.0)
+	await _frames(30)   # (on a hillside a soldier is on the floor for a frame between slides: settle twice)
+	await _wait_for(settled, 20.0)
 	await _frames(10)
 	_expect(me.global_position.distance_to(mate.global_position) < 2.5, "the teammate stands beside him (%.1f m)" % me.global_position.distance_to(mate.global_position))
 

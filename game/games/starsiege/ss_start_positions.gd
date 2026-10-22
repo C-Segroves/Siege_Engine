@@ -30,12 +30,15 @@ func make_player_spawn(k: int) -> Transform3D:
 
 
 ## Where a vehicle placed at mission position `p` starts: on the terrain (or `p` when that is above
-## it), `lift` metres up, then raised onto any building it would start inside.
+## it, standing on a floor there: a position the file puts in the air comes down onto the surface below it, one the file
+## buries in the terrain comes up onto it, SpawnClearance.make_supported_origin), `lift` metres up, then raised onto any
+## building it would start inside.
 func make_start_position(p: Vector3, lift: float) -> Vector3:
 	var g := ground_height_at(p)
 	var start := p
 	if not (p.y < g - UNDERGROUND_MARGIN and _get_clearance().is_under_cover(p + Vector3.UP * lift)):
 		start.y = maxf(p.y, g)
+	start = _get_clearance().make_supported_origin(start)   # (underground only while a floor of the tunnel is under it)
 	start.y += lift
 	return _get_clearance().make_clear_origin(start)
 

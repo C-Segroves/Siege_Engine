@@ -264,6 +264,59 @@ static func _is_leaving(n: Node) -> bool:
 	return false
 
 
+## The height a body must stand at to rest on the terrain's collision at `p`'s x/z: the height of the collision triangle
+## there (the squares are split along the diagonal of _chunk_mesh, which the heightmap shape shares; on the coarse squares of
+## Earthsiege 2 it differs from the bilinear height by metres). `p.y` over a hole or off the terrain (see ground_height).
+static func make_collision_height(parent: Node3D, p: Vector3) -> float:
+	for t in make_live_terrains(parent):
+		var d: Dictionary = t.get_meta("terrain")
+		var fx := (p.x - float(d.x0)) / float(d.sq)
+		var fz := (p.z - float(d.z0)) / float(d.sq)
+		if fx < 0 or fz < 0 or fx > int(d.w) - 1 or fz > int(d.h) - 1:
+			continue
+		if _height_in(d, fx, fz, INF) == INF:
+			return p.y   # (a hole)
+		return _make_triangle_height(d, fx, fz)
+	return p.y
+
+
+## The height of the collision triangle over grid position fx / fz (squares split from corner (x+1, z) to (x, z+1)).
+static func _make_triangle_height(d: Dictionary, fx: float, fz: float) -> float:
+	var w := int(d.w)
+	var x0 := mini(int(fx), w - 2)
+	var z0 := mini(int(fz), int(d.h) - 2)
+	var u := fx - x0
+	var v := fz - z0
+	var hts: PackedFloat32Array = d.heights
+	var h00 := hts[z0 * w + x0]
+	var h10 := hts[z0 * w + x0 + 1]
+	var h01 := hts[(z0 + 1) * w + x0]
+	var h11 := hts[(z0 + 1) * w + x0 + 1]
+	if u + v <= 1.0:
+		return h00 + u * (h10 - h00) + v * (h01 - h00)
+	return h11 + (1.0 - u) * (h01 - h11) + (1.0 - v) * (h10 - h11)
+
+
+## The grid square size (metres) of the terrain under `p` (0 off the terrain).
+static func make_square_size(parent: Node3D, p: Vector3) -> float:
+	for t in make_live_terrains(parent):
+		var d: Dictionary = t.get_meta("terrain")
+		var fx := (p.x - float(d.x0)) / float(d.sq)
+		var fz := (p.z - float(d.z0)) / float(d.sq)
+		if fx >= 0 and fz >= 0 and fx <= int(d.w) - 1 and fz <= int(d.h) - 1:
+			return float(d.sq)
+	return 0.0
+
+
+## The steepest rise per metre of the terrain between `p` and the four points `radius` metres round it (0 off the terrain).
+static func make_rise(parent: Node3D, p: Vector3, radius: float) -> float:
+	var here := ground_height(parent, p)
+	var steepest := 0.0
+	for offset in [Vector3(radius, 0, 0), Vector3(-radius, 0, 0), Vector3(0, 0, radius), Vector3(0, 0, -radius)]:
+		steepest = maxf(steepest, absf(ground_height(parent, p + offset) - here) / radius)
+	return steepest
+
+
 ## The heightfield's height at `p`'s x/z, over terrain holes too (their samples are still there; a base's entrance
 ## sits at about that height), INF off every terrain.
 static func make_surface_height(parent: Node3D, p: Vector3) -> float:
@@ -274,25 +327,6 @@ static func make_surface_height(parent: Node3D, p: Vector3) -> float:
 		if fx >= 0 and fz >= 0 and fx <= int(d.w) - 1 and fz <= int(d.h) - 1:
 			return _sample_heights(d, fx, fz)
 	return INF
-
-
-## The highest of the four grid heights around `p`'s x/z (-INF off the terrain): the collision triangles of that
-## square never rise above it.
-static func make_highest_corner(parent: Node3D, p: Vector3) -> float:
-	for t in make_live_terrains(parent):
-		var d: Dictionary = t.get_meta("terrain")
-		var fx := (p.x - float(d.x0)) / float(d.sq)
-		var fz := (p.z - float(d.z0)) / float(d.sq)
-		if fx < 0 or fz < 0 or fx > int(d.w) - 1 or fz > int(d.h) - 1:
-			continue
-		var x0 := mini(int(fx), int(d.w) - 2)
-		var z0 := mini(int(fz), int(d.h) - 2)
-		var hi := -INF
-		for dz in 2:
-			for dx in 2:
-				hi = maxf(hi, d.heights[(z0 + dz) * int(d.w) + x0 + dx])
-		return hi
-	return -INF
 
 
 ## The nearest point of solid terrain (not over a hole) to `p`'s x/z, searched in rings of squares out to `reach`

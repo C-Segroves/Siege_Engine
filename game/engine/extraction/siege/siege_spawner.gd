@@ -11,8 +11,8 @@ extends RefCounted
 
 const META_UNIT := "siege_unit"
 const SKILL_FALLBACK := 0.5
-## Spots tried around a gate for one with level enough ground; the steepest ground a unit may be set down on (rise per metre).
-const PLACE_TRIES := 12
+## The steepest ground a soldier may be set down on (rise per metre within STANDABLE_REACH_M metres): a face steeper than
+## that and he slips into the heightfield and falls out of the world (the gates lie on the map's edge, where the mountains are).
 const STANDABLE_REACH_M := 2.0
 const STANDABLE_RISE := 0.8
 
@@ -137,27 +137,12 @@ func count_alive(kind := "") -> int:
 	return n
 
 
-func _make_place(gate: Vector3) -> Transform3D:
+func _make_place(gate: Vector3, vehicle := false) -> Transform3D:
 	var spread := float(CybridRules.section("waves").get("gate_spread_m", 40.0))
-	var p := Vector3.ZERO
-	for attempt in PLACE_TRIES:
-		var a := rng.randf() * TAU
-		p = battle.infantry.make_on_ground(gate + Vector3(cos(a), 0.0, sin(a)) * rng.randf_range(0.2, 1.0) * spread)
-		if is_standable(p):
-			break
-	p = SpawnClearance.make(battle).make_clear_origin(p)
+	var bounds: MapBounds = battle.bounds.bounds if battle.bounds != null else null
+	var p := ExtractionSquads.make_place_around(battle, rng, gate, spread, vehicle, bounds).origin
 	var toward := director.map.make_center() - Vector2(p.x, p.z)
 	return Transform3D(Basis(Vector3.UP, atan2(-toward.x, -toward.y)), p)
-
-
-## True when the ground around `p` is not a cliff: a soldier set down on a face steeper than STANDABLE_RISE slips into the
-## heightfield and falls out of the world (the gates lie on the map's edge, where the mountains are).
-func is_standable(p: Vector3) -> bool:
-	for offset in [Vector3(STANDABLE_REACH_M, 0, 0), Vector3(-STANDABLE_REACH_M, 0, 0), Vector3(0, 0, STANDABLE_REACH_M), Vector3(0, 0, -STANDABLE_REACH_M)]:
-		var rise := absf(MapBuilder.ground_height(battle, p + offset) - MapBuilder.ground_height(battle, p))
-		if rise > STANDABLE_REACH_M * STANDABLE_RISE:
-			return false
-	return true
 
 
 ## Room for one more unit under the bot cap (the garrisons give way); false when there is none.
@@ -205,7 +190,7 @@ func _spawn_herc(vehicle_id: String, gate: Vector3) -> Herc:
 	if not _make_room():
 		return null
 	var skill := float(CybridRules.section("waves").get("hercs", {}).get("skill", SKILL_FALLBACK))
-	var h := _send_vehicle(vehicle_id, _make_place(gate), {"skill": skill})
+	var h := _send_vehicle(vehicle_id, _make_place(gate, true), {"skill": skill})
 	if h != null:
 		_note(h, "hercs", _find_pilot(h))
 	return h

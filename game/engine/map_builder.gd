@@ -9,8 +9,10 @@ const INDOOR_SPAWN_GAP := 3.0
 ## Explicit "above_terrain" beyond this keeps the spawn's own height.
 const RAISED_SPAWN_HEIGHT := 2.0
 const SPAWN_LIFT := 0.5
-## How far above the bilinear height a spawn is lifted so it starts above the collision triangles of a steep square.
-const MAX_TRIANGLE_RISE := 3.0
+## A start over a terrain hole with a building's floor within this far below it stands on that floor (a deck over the hole).
+const HOLE_FLOOR_REACH := 12.0
+## A start with no ground under it (over a hole, or beside the heightfield) moves to the nearest solid ground within this far.
+const OFF_TERRAIN_REACH := 600.0
 ## Herc spawns closer than this are duplicates; infantry fallbacks use the wider spacing.
 const SPAWN_MERGE_DISTANCE := 3.0
 ## Group of the map's buildings (the "interiors" list): surfaces a Tribes deployable may be placed on.
@@ -127,20 +129,21 @@ static func _build_stations(parent: Node3D, m: Dictionary, pal: String) -> Array
 ## driving vehicle can't leave (Tribes 2 pads are built for hover craft). "herc" spawns the exporter
 ## placed on a pad count as the pad. Maps without other Herc starts use the infantry spawns (drop
 ## points are often inside bases; a Herc goes on the terrain above them), and the pads when there
-## are none at all. Every vehicle spawn is lifted out of any solid it would start inside (SpawnClearance).
+## are none at all. A Herc start under cover (inside a base) or on a slope moves to the nearest open level ground, and
+## every vehicle spawn is lifted out of any solid it would start inside (SpawnClearance).
 static func _make_spawns(parent: Node3D, m: Dictionary) -> Dictionary:
 	var pads: Array[Transform3D] = []
 	var ground: Array[Transform3D] = []
 	var infantry: Array[Transform3D] = []
 	var clearance := SpawnClearance.make(parent)
 	for s in m.get("spawns", []):
-		var xf := make_spawn_transform(parent, s)
+		var xf := make_spawn_transform(parent, s, clearance)
 		match String(s.get("kind", "herc")):
 			"vehicle_pad":
 				xf.origin = clearance.make_clear_origin(xf.origin)
 				_append_unique(pads, xf, SPAWN_MERGE_DISTANCE)
 			"herc":
-				xf.origin = clearance.make_clear_origin(xf.origin)
+				xf.origin = clearance.make_clear_origin(clearance.make_level_ground_origin(xf.origin))
 				_append_unique(ground, xf, SPAWN_MERGE_DISTANCE)
 			"infantry":
 				infantry.append(xf)
@@ -163,10 +166,10 @@ static func _make_team_spawns(parent: Node3D, m: Dictionary) -> Dictionary:
 		for s in m.get("spawns", []):
 			var kind := String(s.get("kind", "herc"))
 			if s.get("team") != null and int(s.team) == team and by_kind.has(kind):
-				by_kind[kind].append(make_spawn_transform(parent, s))
+				by_kind[kind].append(make_spawn_transform(parent, s, clearance))
 		var points: Array[Transform3D] = []
 		for xf in by_kind.herc:
-			_append_unique(points, Transform3D(xf.basis, clearance.make_clear_origin(xf.origin)), SPAWN_MERGE_DISTANCE)
+			_append_unique(points, Transform3D(xf.basis, clearance.make_clear_origin(clearance.make_level_ground_origin(xf.origin))), SPAWN_MERGE_DISTANCE)
 		if points.is_empty():
 			points = _make_infantry_fallbacks(parent, by_kind.infantry, clearance)
 		if points.is_empty():
@@ -182,7 +185,7 @@ static func _make_infantry_fallbacks(parent: Node3D, infantry: Array[Transform3D
 	for t in infantry:
 		var hx: Transform3D = t
 		hx.origin.y = ground_height(parent, hx.origin) + SPAWN_LIFT
-		hx.origin = clearance.make_clear_origin(clearance.make_open_ground_origin(hx.origin))
+		hx.origin = clearance.make_clear_origin(clearance.make_level_ground_origin(hx.origin))
 		_append_unique(out, hx, FALLBACK_SPAWN_MERGE_DISTANCE)
 	return out
 
@@ -209,22 +212,33 @@ static func _append_unique(list: Array[Transform3D], xf: Transform3D, merge_dist
 
 
 ## Spawns on raised pads / inside bases keep their original height; others sit on the terrain.
-## Without explicit fields, a spawn well above/below the terrain is in a base (raised or underground).
-static func make_spawn_transform(parent: Node3D, s: Dictionary) -> Transform3D:
+## Without explicit fields, a spawn well above/below the terrain is in a base (raised or underground). A kept height with
+## no floor under it (a drop point the file puts in the air) comes down onto the highest surface below
+## (SpawnClearance.make_supported_origin; `clearance` the map's, made here when not given).
+static func make_spawn_transform(parent: Node3D, s: Dictionary, clearance: SpawnClearance = null) -> Transform3D:
 	var xf := _xf(s)
 	var gh := ground_height(parent, xf.origin)
 	var keep := bool(s.get("indoor", false)) or absf(float(s.get("above_terrain", 0.0))) > RAISED_SPAWN_HEIGHT
 	if not s.has("indoor") and not s.has("above_terrain") and absf(xf.origin.y - gh) > INDOOR_SPAWN_GAP:
 		keep = true
+	if xf.origin.y - gh > INDOOR_SPAWN_GAP:
+		keep = true   # well above the terrain whatever the fields say (an AA drop point inside a tower): it stands on what is under it
 	if keep:
+		xf.origin = (clearance if clearance != null else SpawnClearance.make(parent)).make_supported_origin(xf.origin)
 		xf.origin.y += SPAWN_LIFT
 	elif gh == xf.origin.y:
-		# Over a terrain hole (a base's entrance) or off the terrain: the nearest solid ground, never the open pit.
-		var solid := MapTerrain.make_nearest_solid_ground(parent, xf.origin)
-		xf.origin = (solid if solid != Vector3.INF else xf.origin) + Vector3.UP * SPAWN_LIFT
+		# Over a terrain hole (a base's entrance) or off the terrain: on the floor of a building just under the point (a
+		# bridge or deck over the hole), else the nearest solid ground, never the open pit.
+		var clear: SpawnClearance = clearance if clearance != null else SpawnClearance.make(parent)
+		var floor_y := clear.make_floor_height_below(xf.origin, HOLE_FLOOR_REACH)
+		if floor_y > -INF:
+			xf.origin.y = floor_y + SPAWN_LIFT
+		else:
+			var solid := MapTerrain.make_nearest_solid_ground(parent, xf.origin, OFF_TERRAIN_REACH)
+			xf.origin = (solid if solid != Vector3.INF else xf.origin) + Vector3.UP * SPAWN_LIFT
 	else:
 		# Above the collision triangles too, which on a steep square rise over the bilinear height.
-		xf.origin.y = minf(maxf(gh, MapTerrain.make_highest_corner(parent, xf.origin)), gh + MAX_TRIANGLE_RISE) + SPAWN_LIFT
+		xf.origin.y = MapTerrain.make_collision_height(parent, xf.origin) + SPAWN_LIFT
 	return xf
 
 

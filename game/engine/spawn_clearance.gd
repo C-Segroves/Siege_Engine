@@ -17,6 +17,10 @@ const FOOTPRINT_RADIUS := 2.5
 const FOOTPRINT_OFFSETS: Array[Vector3] = [Vector3.ZERO, Vector3(1, 0, 0), Vector3(-1, 0, 0), Vector3(0, 0, 1), Vector3(0, 0, -1)]
 ## Lift attempts before giving up on a stack of surfaces (logs an error).
 const MAX_LIFTS := 6
+## A spawn kept at its file height stands on a floor at most this far below it, else it hangs in the air.
+const SUPPORT_REACH := 3.0
+## Under the terrain a spawn is inside a base while a building's floor lies at most this far below it.
+const BASE_FLOOR_REACH := 10.0
 ## Gap kept between a raised spawn and the surface it stands on.
 const STANDING_GAP := 0.5
 ## A face whose normal has at least this upward component can be stood on.
@@ -27,7 +31,12 @@ const WALKABLE_NORMAL_Y := 0.5
 const OPEN_SKY_HEIGHT := 40.0
 ## Footprint radius of the open-sky test: a Herc's widest collision capsule (Herc.CAPSULE_MAX_RADIUS).
 const OPEN_FOOTPRINT_RADIUS := 4.0
-## Search for open ground round a covered point: rings this far apart, out to OPEN_SEARCH_RADIUS.
+## Level ground: the terrain rises by at most this much per metre within OPEN_FOOTPRINT_RADIUS of the point (a Herc slides
+## off steeper ground; about 31 degrees).
+const OPEN_MAX_RISE := 0.6
+## Terrain squares larger than this are coarse (make_terrain_rise).
+const COARSE_SQUARE_M := 16.0
+## Search for open ground round a covered or steep point: rings this far apart, out to OPEN_SEARCH_RADIUS.
 const OPEN_SEARCH_STEP := 10.0
 const OPEN_SEARCH_RADIUS := 80.0
 const OPEN_SEARCH_DIRECTIONS := 8
@@ -38,7 +47,7 @@ const FACING_DIRECTIONS := 16
 const FACING_PROBE_HEIGHTS: Array[float] = [2.0, 6.0]
 const FACING_CENTRE_WEIGHT := 5.0
 
-## [{"mesh": TriangleMesh, "to_local": Transform3D, "aabb": AABB (world)}]
+## [{"mesh": TriangleMesh, "to_local": Transform3D, "aabb": AABB (world), "terrain": bool}]
 var _solids: Array[Dictionary] = []
 var _parent: Node3D
 
@@ -55,7 +64,7 @@ static func make(parent: Node3D) -> SpawnClearance:
 
 func _add_body(body: StaticBody3D) -> void:
 	for col in body.get_children():
-		if col is CollisionShape3D and col.shape is ConcavePolygonShape3D:
+		if col is CollisionShape3D and not col.is_queued_for_deletion() and col.shape is ConcavePolygonShape3D:   # (a prop built without collision frees its shapes at the end of the frame)
 			var faces: PackedVector3Array = (col.shape as ConcavePolygonShape3D).get_faces()
 			if faces.size() < 3:
 				continue
@@ -63,7 +72,7 @@ func _add_body(body: StaticBody3D) -> void:
 			if not mesh.create_from_faces(faces):
 				continue
 			var xf: Transform3D = body.global_transform * col.transform
-			_solids.append({"mesh": mesh, "to_local": xf.affine_inverse(), "aabb": xf * _faces_aabb(faces)})
+			_solids.append({"mesh": mesh, "to_local": xf.affine_inverse(), "aabb": xf * _faces_aabb(faces), "terrain": body.is_in_group("terrain")})
 
 
 static func _faces_aabb(faces: PackedVector3Array) -> AABB:
@@ -73,16 +82,62 @@ static func _faces_aabb(faces: PackedVector3Array) -> AABB:
 	return box
 
 
-## `origin`, raised onto the top of whatever solid would trap a vehicle standing there.
+## `origin`, raised onto the top of whatever solid would trap a vehicle standing there. The terrain only counts over the
+## spawn point itself: its slope rising beside a vehicle on a hillside traps nothing (lifting onto it climbed the hill).
 func make_clear_origin(origin: Vector3) -> Vector3:
 	var out := origin
 	for i in MAX_LIFTS:
-		var hits := _surfaces_in_columns(out, FOOTPRINT_RADIUS, VEHICLE_HEADROOM)
+		var hits := _surfaces_in_columns(out, FOOTPRINT_RADIUS, VEHICLE_HEADROOM, false)
 		if hits.is_empty():
 			return out
 		out.y = _make_landing_height(hits) + STANDING_GAP
 	push_error("SpawnClearance: no free space above the spawn at %s" % origin)
 	return out
+
+
+## Where a spawn kept at its file height (a raised pad, the inside of a base) really stands: `origin` itself when a
+## walkable surface lies within SUPPORT_REACH below it, else the top of the highest surface below it - a building's roof
+## or floor, else the terrain (the nearest solid ground over a hole) - so a drop point the file puts in the air (a Tribes 2
+## spawn sphere high above its terrain) lands on the ground it belongs to. Under the terrain surface the point is inside a
+## base only while a building's floor lies within BASE_FLOOR_REACH below it; with none it is buried in the heightfield
+## (the file's height and ours differ) and comes up onto the terrain.
+func make_supported_origin(origin: Vector3) -> Vector3:
+	var surface := MapTerrain.make_surface_height(_parent, origin)
+	if surface == INF:
+		return origin
+	if origin.y <= surface:
+		var base_floor := make_floor_height_below(origin, BASE_FLOOR_REACH)
+		if base_floor > -INF:
+			return origin if origin.y - base_floor <= SUPPORT_REACH else Vector3(origin.x, base_floor, origin.z)
+		return _make_terrain_origin(origin, surface)
+	var floor_y := make_floor_height_below(origin, origin.y - surface + SUPPORT_REACH)
+	if floor_y >= origin.y - SUPPORT_REACH:
+		return origin
+	if floor_y > -INF:
+		return Vector3(origin.x, floor_y, origin.z)
+	return _make_terrain_origin(origin, surface)
+
+
+## The point on the terrain's collision at `origin`'s x/z (the nearest solid ground over a hole; `origin` when there is none).
+func _make_terrain_origin(origin: Vector3, surface: float) -> Vector3:
+	if MapTerrain.ground_height(_parent, Vector3(origin.x, -INF, origin.z)) > -INF:
+		return Vector3(origin.x, MapTerrain.make_collision_height(_parent, origin), origin.z)
+	var solid := MapTerrain.make_nearest_solid_ground(_parent, origin)
+	return solid if solid != Vector3.INF else origin
+
+
+## The height of the highest walkable building surface up to `reach` below `origin` (-INF when there is none; the terrain
+## is not one of them unless it is a trimesh).
+func make_floor_height_below(origin: Vector3, reach: float) -> float:
+	var bottom := origin + Vector3.DOWN * reach
+	var top := origin + Vector3.UP * FLOOR_TOLERANCE
+	var best := -INF
+	for s in _solids:
+		if (s.aabb as AABB).intersects_segment(bottom, top):
+			for hit in _column_hits(s, bottom, top):
+				if hit.walkable:
+					best = maxf(best, hit.y)
+	return best
 
 
 ## `xf` turned so the vehicle does not start facing a wall: kept when FACING_CLEAR_M ahead are free of buildings,
@@ -120,20 +175,47 @@ func make_clear_distance(origin: Vector3, dir: Vector3) -> float:
 	return best
 
 
-## `origin` when it is under open sky, else the nearest terrain point round it that is (an
-## infantry drop point inside a base: the Herc starts on the ground next to the base).
+## `origin` when it is under open sky, else the nearest terrain point round it that is (an infantry drop point inside a
+## base: the Herc starts on the ground next to the base).
 func make_open_ground_origin(origin: Vector3) -> Vector3:
-	if not is_under_cover(origin):
+	return _find_ground(origin, func(p: Vector3) -> bool: return not is_under_cover(p))
+
+
+## make_open_ground_origin on level ground as well (a Herc slides off a steeper slope; is_open_ground).
+func make_level_ground_origin(origin: Vector3) -> Vector3:
+	return _find_ground(origin, is_open_ground)
+
+
+## `origin` when `accepts` it, else the nearest terrain point round it (rings of OPEN_SEARCH_STEP out to OPEN_SEARCH_RADIUS,
+## at the height above the terrain `origin` has, at most STANDING_GAP: a start on a raised platform lands on the ground) that
+## it accepts; `origin` when there is none.
+func _find_ground(origin: Vector3, accepts: Callable) -> Vector3:
+	if accepts.call(origin):
 		return origin
-	var lift := origin.y - MapTerrain.ground_height(_parent, origin)
+	var lift := clampf(origin.y - MapTerrain.ground_height(_parent, origin), 0.0, STANDING_GAP)
 	for ring in range(1, int(OPEN_SEARCH_RADIUS / OPEN_SEARCH_STEP) + 1):
 		for k in OPEN_SEARCH_DIRECTIONS:
 			var angle := TAU * k / OPEN_SEARCH_DIRECTIONS
 			var p := origin + Vector3(cos(angle), 0.0, sin(angle)) * OPEN_SEARCH_STEP * ring
 			p.y = MapTerrain.ground_height(_parent, p) + lift
-			if not is_under_cover(p):
+			if accepts.call(p):
 				return p
 	return origin
+
+
+## Whether `origin` is under open sky (not is_under_cover) on level ground (make_terrain_rise at most OPEN_MAX_RISE).
+func is_open_ground(origin: Vector3) -> bool:
+	return not is_under_cover(origin) and make_terrain_rise(origin) <= OPEN_MAX_RISE
+
+
+## The steepest rise per metre of the terrain between `origin` and the four points round it: OPEN_FOOTPRINT_RADIUS away, or
+## half a grid square on a coarse heightfield (Earthsiege 2's squares hold cliffs a bilinear height at 4 m does not show).
+func make_terrain_rise(origin: Vector3) -> float:
+	var radius := OPEN_FOOTPRINT_RADIUS
+	var square := MapTerrain.make_square_size(_parent, origin)
+	if square > COARSE_SQUARE_M:
+		radius = square * 0.5
+	return MapTerrain.make_rise(_parent, origin, radius)
 
 
 ## Whether a surface lies above the Herc footprint at `origin` (within OPEN_SKY_HEIGHT).
@@ -153,14 +235,17 @@ static func _make_landing_height(hits: Array[Dictionary]) -> float:
 
 
 ## Every surface crossing the footprint columns (`radius` round `origin`) from just above the floor
-## up to `height`: [{"y": float, "walkable": bool}].
-func _surfaces_in_columns(origin: Vector3, radius: float, height: float) -> Array[Dictionary]:
+## up to `height`: [{"y": float, "walkable": bool}]. With `terrain_beside` false the terrain is left out of the columns
+## round the middle one.
+func _surfaces_in_columns(origin: Vector3, radius: float, height: float, terrain_beside := true) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	for offset in FOOTPRINT_OFFSETS:
 		var base := origin + offset * radius
 		var bottom := base + Vector3.UP * FLOOR_TOLERANCE
 		var top := base + Vector3.UP * height
 		for s in _solids:
+			if s.terrain and not terrain_beside and offset != Vector3.ZERO:
+				continue
 			if (s.aabb as AABB).intersects_segment(bottom, top):
 				out.append_array(_column_hits(s, bottom, top))
 	return out

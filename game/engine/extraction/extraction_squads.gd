@@ -9,6 +9,12 @@ extends RefCounted
 const VEHICLES_KEY := "faction_vehicles"
 const GUARD_RADIUS_FACTOR := 2.5
 const VEHICLE_SPREAD := 2.0
+## Random spots tried for a start (make_place_around).
+const PLACE_TRIES := 24
+## The circle spots are drawn from widens to this many times the spread over the tries.
+const PLACE_WIDEN := 3.0
+## A spot under cover is worse than any slope (make_place_around).
+const COVER_COST := 100.0
 const SIZES := ["LIGHT", "MEDIUM", "HEAVY"]
 
 var battle: Battle
@@ -97,11 +103,38 @@ func _spawn_squad(faction: Dictionary, team: int, area: Vector3) -> void:
 			_spawn_vehicle(str(pool[rng.randi_range(0, pool.size() - 1)]), faction, team, area, radius, squad)
 
 
-func _make_place(area: Vector3, spread: float) -> Transform3D:
-	var a := rng.randf() * TAU
-	var p := battle.infantry.make_on_ground(area + Vector3(cos(a), 0.0, sin(a)) * rng.randf_range(0.3, 1.0) * spread)
-	p = SpawnClearance.make(battle).make_clear_origin(p)
-	return Transform3D(Basis(Vector3.UP, rng.randf() * TAU), p)
+func _make_place(area: Vector3, spread: float, vehicle := false) -> Transform3D:
+	var bounds: MapBounds = battle.bounds.bounds if battle.bounds != null else null
+	return make_place_around(battle, rng, area, spread, vehicle, bounds)
+
+
+## A start within `spread` metres of `area` in the world `parent`: on the ground, out of any building, inside `bounds`
+## (null: anywhere), on ground a soldier stands on (SiegeSpawner.STANDABLE_RISE) or, for a `vehicle`, level ground
+## (SpawnClearance.OPEN_MAX_RISE). Of PLACE_TRIES random spots (the circle widening to PLACE_WIDEN times `spread`) the first
+## that is fit, else the least steep one. A caller placing many starts passes the world's `shared_clearance` (made once).
+static func make_place_around(parent: Node3D, rng: RandomNumberGenerator, area: Vector3, spread: float, vehicle := false,
+		bounds: MapBounds = null, shared_clearance: SpawnClearance = null) -> Transform3D:
+	var clearance := shared_clearance if shared_clearance != null else SpawnClearance.make(parent)
+	var best := Vector3.ZERO
+	var best_rise := INF
+	for attempt in PLACE_TRIES:
+		var a := rng.randf() * TAU
+		var reach := spread * lerpf(1.0, PLACE_WIDEN, float(attempt) / PLACE_TRIES)
+		var spot := area + Vector3(cos(a), 0.0, sin(a)) * rng.randf_range(0.3, 1.0) * reach
+		var surface := MapTerrain.make_surface_height(parent, spot)
+		spot.y = surface if surface < INF else area.y   # (the area's own height would leave a spot on lower ground hanging)
+		var p := clearance.make_clear_origin(BattleInfantry.make_ground_point(parent, spot))
+		if bounds != null and bounds.is_outside(p):
+			continue
+		var rise := clearance.make_terrain_rise(p) if vehicle else MapTerrain.make_rise(parent, p, SiegeSpawner.STANDABLE_REACH_M)
+		var covered := vehicle and clearance.is_under_cover(p)   # (a Herc needs the sky above it as well)
+		var cost := rise + (COVER_COST if covered else 0.0)
+		if cost < best_rise:
+			best = p
+			best_rise = cost
+		if not covered and rise <= (SpawnClearance.OPEN_MAX_RISE if vehicle else SiegeSpawner.STANDABLE_RISE):
+			break
+	return Transform3D(Basis(Vector3.UP, rng.randf() * TAU), best if best_rise < INF else area)
 
 
 func _spawn_soldier(faction: Dictionary, pack: String, team: int, area: Vector3, k: int, squad: Dictionary) -> InfantryBot:
@@ -141,7 +174,7 @@ func _spawn_vehicle(vehicle_id: String, faction: Dictionary, team: int, area: Ve
 	_vehicles_left -= 1
 	var vdef := Packs.vehicle(vehicle_id)
 	var spec := {"net_id": battle.spawner.allocate_id(), "vehicle": vehicle_id, "team": team, "owner": 1,
-		"xf": _make_place(area, radius * VEHICLE_SPREAD), "loadout": vdef.get("loadout", []),
+		"xf": _make_place(area, radius * VEHICLE_SPREAD, true), "loadout": vdef.get("loadout", []),
 		"name": "%s %s" % [str(faction.name), str(vdef.get("name", vehicle_id))],
 		"ai": {"skill": float(squad.get("skill", 0.45))}, "protection": 0.0}
 	battle.send_spawn(spec)

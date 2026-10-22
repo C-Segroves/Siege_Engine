@@ -15,6 +15,9 @@ extends RefCounted
 ## below that terrain (an underground base lowers the floor; a bridge or a floating base never raises it).
 
 const FELL_THROUGH_DEPTH := 100.0
+## The area grows this far (metres) past a start it left out: the importers' areas are the bounding box of the map's objects
+## or of its level, so a start lies exactly on an edge (which the rectangle does not contain) or past it.
+const START_MARGIN := 1.0
 
 var area := Rect2()
 var has_area := false
@@ -43,7 +46,34 @@ static func make_for(parent: Node3D, built: Dictionary) -> MapBounds:
 		b.apply_area(terrain)
 	elif built.has("world"):
 		b.apply_area(Rect2(-WorldBuilder.GROUND_PLANE_SIZE * 0.5, WorldBuilder.GROUND_PLANE_SIZE))
+	b.apply_starts(make_starts_of(built))
 	return b
+
+
+## Every start of the built map (the Herc, vehicle pad, soldier and team starts): Vector3 points.
+static func make_starts_of(built: Dictionary) -> Array:
+	var lists: Array = [built.get("herc_spawns", []), built.get("pad_spawns", []), built.get("infantry_spawns", [])]
+	lists.append_array((built.get("team_spawns", {}) as Dictionary).values())
+	var out := []
+	for list in lists:
+		for xf in list:
+			out.append((xf as Transform3D).origin)
+	return out
+
+
+## The area made to contain every start of `starts` (Vector3 points): grown to them plus START_MARGIN when one is left out.
+func apply_starts(starts: Array) -> void:
+	if not has_area:
+		return
+	var rect := area
+	var grew := false
+	for o in starts:
+		var p := Vector2(o.x, o.z)
+		if not rect.has_point(p):
+			rect = rect.expand(p)
+			grew = true
+	if grew:
+		apply_area(rect.grow(START_MARGIN))
 
 
 func apply_area(rect: Rect2) -> void:

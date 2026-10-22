@@ -19,6 +19,8 @@ const GUIDANCE := ES2UnitCatalog.GUIDANCE
 const ARRIVAL_UNITS := {2: [150000.0, PI / 2.0, 0.0], 3: [150000.0, PI / 8.0, PI / 8.0],
 	4: [90000.0, PI / 8.0, PI], 5: [150000.0, PI / 4.0, 0.0]}
 const DEFAULT_HERC_TYPE := "MONGOOSE"
+## A unit starts this far above the terrain (on_unit_ground).
+const UNIT_LIFT := 0.5
 const DEFAULT_STRUCTURE_HP := 15000.0
 ## Seconds the objectives line (the one queued message) stays up.
 const OBJECTIVES_MESSAGE_SECONDS := 10.0
@@ -173,6 +175,15 @@ func on_ground(p: Vector3) -> Vector3:
 	return q
 
 
+## The point a unit starts at: on the terrain's collision, which on a steep square of the coarse heightmap rises above the
+## bilinear height (MapTerrain.make_collision_height), and half a metre up.
+func on_unit_ground(p: Vector3) -> Vector3:
+	var q := p
+	if battle and battle.is_inside_tree():
+		q.y = MapTerrain.make_collision_height(battle, p)
+	return q + Vector3.UP * UNIT_LIFT
+
+
 func _build_structures() -> void:
 	var bases = Assets.load_json("gameplay/bases.json", "es2")
 	var rows: Array = bases.get("records", bases.get("bases", [])) if bases is Dictionary else []
@@ -251,7 +262,7 @@ func radio_pack() -> String:
 
 func player_spawn(k: int) -> Transform3D:
 	var xf := super.player_spawn(k)
-	xf.origin = on_ground(xf.origin) + Vector3.UP * 0.5
+	xf.origin = on_unit_ground(xf.origin)
 	return xf
 
 
@@ -374,7 +385,7 @@ func _spawn_herc(spawn: Dictionary, mi: int, k: int, leader: Herc, wingman := {}
 		info.skill = float(wingman.skill)
 		info.health = 100        # the garage Herc's own condition applies (BattleSpawner)
 		info["garage"] = wingman.garage
-	var unit: Herc = battle.spawn_ai(vid, int(g.get("team", 1)), Transform3D(Basis(Vector3.UP, yaw), on_ground(pos) + Vector3.UP * 0.5),
+	var unit: Herc = battle.spawn_ai(vid, int(g.get("team", 1)), Transform3D(Basis(Vector3.UP, yaw), on_unit_ground(pos)),
 		loadout, str(wingman.get("name", "")), info)
 	if unit == null:
 		return null
