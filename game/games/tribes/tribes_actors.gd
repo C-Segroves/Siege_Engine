@@ -170,13 +170,13 @@ func brain_of(id: int) -> TribesBot:
 func order_engage(client: int, target: int) -> void:
 	var brain := brain_of(client)
 	if brain:
-		brain.apply_engage(soldier_of(target))
+		brain.apply_order(AIOrder.make(AIOrder.ATTACK, Vector3.ZERO, soldier_of(target)))
 
 
 func order_move(client: int, p: Vector3) -> void:
 	var brain := brain_of(client)
 	if brain:
-		brain.apply_move(p)
+		brain.apply_order(AIOrder.make(AIOrder.MOVE, p))
 
 
 # ------------------------------------------------------------------ inventory

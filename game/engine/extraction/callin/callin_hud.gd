@@ -3,7 +3,7 @@ extends RefCounted
 ## What the raid HUD shows of the call-ins (CallinDirector hands it to ExtractionHud): the text lines (the balance, the laser
 ## designation in progress with its verdict, the caller's orders) and the world
 ## markers of the caller's own zones. The radar sweep's contacts are not markers: they are real radar contacts
-## (CallinSweep, RadarContacts.apply_swept).
+## (CallinSweep, ContactTable.apply_swept).
 
 
 ## The call-in lines of the raid HUD: the balance, the caller's own orders and a running sweep ([text]).

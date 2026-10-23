@@ -170,12 +170,43 @@ Same method for each: golden trace, then a shared primitive in `engine/`, then p
   - Candidates come from the "vehicles" group, not EntityTable / InterestGrid cells: those exist on the network server only and carry no
     dormant / stowed / cloak state. Swapping the candidate source is one function (the loop in `pick`) when the cells grow those flags.
   - Test: `tests/target_selector_check` (seeded layout against a brute-force reference, then each rule).
-- **Sensors:**
-  - Sources: the ES1/ES2 `is_safe` / detection and range constants, `ss_sensors.gd`, `tribes_sensor_net.gd`, `tribes_contacts.gd`, `sensor_towers.gd`, `radar_contacts.gd`, `line_of_sight.gd`.
-  - Becomes `SensorSource` + `ContactTable` + a per-game `SensorProfile`.
-- **AI orders:**
-  - Sources: `es2_group_orders.gd`, `ss_unit_director.gd`, `command_map/command_orders.gd`, AA `vm_order`, `infantry_bot.gd` objective, T2 AI tasks, `game_mode_ai.gd`; three copies of the formation offsets.
-  - Becomes `AIOrder` + `OrderQueue` + `Formation`.
+- **Sensors (done 2026-10-23):**
+  - `engine/sensors/` holds the one detection code: `SensorSource` (range, view cone, line of sight, jams / detects-jammed / detects-cloaked + minimum
+    speed; parsed from the Tribes `sensor` / `player_sensor` data blocks), `ContactTable` (per-team detected set with last-seen times;
+    team-shared reveals: the call-in sweep `apply_swept` and the com tower reach; the script-hidden mark), `SensorProfile` (per-game data: alert
+    range, safe ranges, scan range / cone / time, tower reach, passive-radar shares, the soldiers' own sensor), `ProximityAlert` (ES1/ES2
+    "noticed" and "unsafe"), plus the moved `RadarContacts`, `RadarMode`, `SensorTowers`, `SensorLink`, `LineOfSight`.
+  - Profiles: `EsSensorProfile` (DBSIM 0xf744 / 0x4137b4 detect 195 m, safe 312 / 390 m; ES2 scan 60 m +20 m structure, 45 degrees, 4 s), `SSSensors.make_profile`
+    (scan 600 m, 2 s, remake approximation), Tribes = the pack's base_equipment.json blocks through `SensorSource.make_from_spec`; the remake defaults
+    (tower 1500 m, passive 0.34 / 0.5) are `SensorProfile.DEFAULT_*`.
+  - Deleted: `EsRanges`, `MissionTargets.is_noticed`, the duplicated `is_safe` range test of ES1 / ES2 (the order-target rule of ES1 stays in `Es1WinRules`),
+    `TribesSensorNet._senses` / `_soldier_sees` / `_has_sight` (now `SensorSource.senses`), the sweep / hidden metas of `RadarContacts`, `SCAN_*` consts.
+    `TargetSelector` RADAR visibility reads `ContactTable.is_swept`; `RadarContacts` reads `ContactTable` for hidden / swept / tower reveals.
+  - Left as is: `tribes_contacts.gd` is trigger / item touch (the player's soldier touching things), not detection; `CloakRules` stays in `engine/stealth` (the
+    cloak-side half of the same rules, called by `SensorSource`); `BotSleep` / `InterestProbes` keep their per-step tower cache (`SensorTowers.begin_cache`).
+  - Known change: a base sensor's range is now measured from its eye (1 m up), as a soldier's always was.
+  - Test: `tests/sensors_check` (source, table, alert), plus cloak / scope / command_map / bot_lod / tribes_base / callin checks.
+- **AI orders (done 2026-10-23):**
+  - `engine/ai/ai_order.gd` (`AIOrder`: kind, target, point, radius, urgent, hold, formation slot, path/loop, tag/source) is the one order. Command kinds
+    (attack, move, defend, hold, escort, formation, regroup) become the brains' `objective` dictionary through `to_objective()` (`InfantryBot` and
+    `AIPilot` still read that dictionary); pilot kinds (search, guard, patrol, travel, sleep, ram) are set on an `AIPilot` by `apply_to_pilot()`.
+    `engine/ai/order_queue.gd` (`OrderQueue`) is a group's order list. `engine/ai/formation.gd` (`Formation`) holds the slot offsets.
+  - Routed through it: the command map (`CommandOrders.make_ai_order`; `CommandGoal` keeps the done/failed rules and its kind names are `AIOrder`'s),
+    game-mode goals (`GameModeBrains.make_objective`), ES2 group order lists (`ES2GroupOrders`: a queue of `AIOrder` per group, the record as `source`
+    for its DBSIM completion rule), Starsiege `order()` (`SSUnitDirector`: attack, guard, travel, hold position, formation), AA `vm_order`
+    (`AIOrder` per soldier, resolved each refresh) and the Tribes training bots (`TribesBot.apply_order`).
+  - Formations, each keeping its original: Earthsiege 1/2 `formations.json` (ES2 clamps the formation and fans out-of-table Herc slots 30 m), Starsiege
+    `newFormation` (first triple = leader slot; 12 x 16 m steps beyond the list; 15 x 20 m for the player's wingmen), the player squad's start slots
+    (25 m, `Formation.squad_slot`), the command map's rows of three (remake addition, `Formation.rows_slot`).
+  - Deleted: the three `_formation_offset` / `_slot_vector` table copies, `MissionRuntimeBase.squad_slot_offset` and `SQUAD_SPACING`, the SS formation
+    arrays and step, the command provider's slot arithmetic, `ES2GroupOrders.group_order` / `make_ai_settings`, AA `ORDER_META` dictionaries.
+  - Not moved: `InfantryBot` target search and REPAIR task; the Tribes 2 marker table in `game_mode_ai.gd` (it produces goals, which now convert through
+    `AIOrder`); `AIPilot.order_from_original` (the ES1 spawn-info code); `SSFlyerOrders`.
+- **Additive animations (done 2026-10-23):**
+  - `engine/infantry/infantry_animation_layers.gd` (`InfantryAnimationLayers`, driven by `InfantryAnimation.apply_layers`) composes the look, head and recoil layers onto the base locomotion pose: arm sequence and head scrubbed by the look pitch, `headside` by the head yaw off the body, recoil once per shot. Keys are sampled once per (sequence, 1/64 cycle) and cached; nodes a layer moves that the base sequence does not key are restored first, so deltas never accumulate. `ShapeCycles.make_node_transforms` reads keys without posing.
+  - Per-game data in `InfantryLayerSpec`: Tribes 1 "looks" (a pose, replaces the nodes it keys); Tribes 2 `look` / `lookms` (missile launcher) / `looksn` (laser rifle) / `looknw` (unarmed), `head`, `headside`, `light_recoil` for the spinfusor, grenade launcher, missile launcher, mortar and plasma only (weapons.cs, weapons/*.cs stateRecoil / armThread; Torque blend keys are identity-neutral deltas); Aerial Assault `look` / `lookms` / `looksn`, `head`, `headside`, `recoil` (rest pose with the delta composed on top, tools/aa_soldier.py). Vengeance skeletons carry no such sequences: no layers.
+  - Assumptions to revisit: Aerial Assault's missile launcher uses `looksn` and every AA weapon recoils (no AA scripts to cite); the sequences run over the soldier's +-80 degree pitch (Torque +-1.4 rad); the head yaw is 0 because the remake's body turns with the aim; Tribes 1 `looks` is scrubbed like the Torque ones.
+  - MID / FAR bots (`far_lod`) skip the layers. Test: `tests/infantry_additive_check` (head and arm bone turn up vs down against the sequence keys, hold, recoil, FAR skip); windowed `tests/infantry_additive_shots`.
 - **Damage:**
   - Sources: the `apply_hit` copies in `es1/structure.gd`, `ss_structure.gd`, `tribes_base_object.gd`, `bd/arena_turret.gd`, `infantry.gd`, plus scripted damage in the Tribes, SS, TV and AA runtimes.
   - Becomes `DamageTarget` + `DamageEvent`. Damage goes last, because it crosses networking and killcam.

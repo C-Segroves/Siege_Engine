@@ -64,9 +64,6 @@ func make_brains() -> Dictionary:
 func make_objective(goal: Dictionary) -> Dictionary:
 	if goal.is_empty():
 		return {}
-	var out := {"point": goal.point, "urgent": goal.urgent, "radius": goal.radius, "hold": goal.hold}
 	var hunt: Node = director.battle.vehicles.get(int(goal.get("hunt", 0)))
-	var target: Node = hunt if is_instance_valid(hunt) else director.make_objective_node(int(goal.get("attack_object", 0)))
-	if target != null:
-		out["target"] = target
-	return out
+	var target: Node3D = (hunt as Node3D) if is_instance_valid(hunt) else director.make_objective_node(int(goal.get("attack_object", 0)))
+	return AIOrder.make_plan(AIOrder.ATTACK, goal.point, goal.urgent, goal.radius, goal.hold, target).to_objective()

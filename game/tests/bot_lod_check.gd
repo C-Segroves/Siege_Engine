@@ -128,9 +128,9 @@ func _expect_tier(bot: Array, want: int, what: String) -> void:
 
 
 ## The bots are the human's allies, so his radar shows them (RadarMode.can_see) within its range, or anywhere on a
-## map with a sensor net; a hidden one is unseen (RadarContacts.apply_hidden).
+## map with a sensor net; a hidden one is unseen (ContactTable.apply_hidden).
 func _hide(bot: Array, hidden := true) -> void:
-	RadarContacts.apply_hidden(bot[0], hidden)
+	ContactTable.apply_hidden(bot[0], hidden)
 
 
 func _free_bots(bots: Array) -> void:

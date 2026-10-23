@@ -336,7 +336,7 @@ func _set_team(_n: String, a: Array):
 func _set_vehicle_radar_visible(_n: String, a: Array):
 	var n := tree.node_of(tree.resolve(_arg(a, 0)))
 	if n != null:
-		RadarContacts.apply_hidden(n, not SSScript.truthy(_arg(a, 1, "true")))
+		ContactTable.apply_hidden(n, not SSScript.truthy(_arg(a, 1, "true")))
 	return ""
 
 

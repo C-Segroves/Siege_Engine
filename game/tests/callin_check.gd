@@ -768,7 +768,7 @@ func _check_sweep_and_alert(battle: Battle, x: ExtractionDirector, c: CallinDire
 	_expect(sweep_told.has(MATE_PEER) and sweep_told.has(1), "the host tells the caller and his teammate the contacts")
 	_expect(not sweep_told.has(NEAR_PEER) and not sweep_told.has(FAR_PEER), "enemy players get nothing")
 	RadarContacts.apply_range(me, 1.0)
-	_expect(RadarContacts.make_units(battle.get_tree()).has(roamer) and RadarContacts.is_swept(roamer) and RadarContacts.is_on_scope(me, roamer), "the swept unit is a real radar contact, on the scope whatever the range")
+	_expect(RadarContacts.make_units(battle.get_tree()).has(roamer) and ContactTable.is_swept(roamer) and RadarContacts.is_on_scope(me, roamer), "the swept unit is a real radar contact, on the scope whatever the range")
 	_expect(Targeting.make_candidates(me).has(roamer), "and T can target it")
 	_expect(not c.make_markers().any(func(m: Dictionary) -> bool: return bool(m.contact)), "the sweep adds no HUD markers any more")
 	_expect(roamer_brain.objective.has(CallinAlert.META_KEY), "it is loud: a roaming soldier within 200 m investigates the spot")
@@ -778,7 +778,7 @@ func _check_sweep_and_alert(battle: Battle, x: ExtractionDirector, c: CallinDire
 	_expect(await _wait_for(func() -> bool: return not order.is_open(), 6.0), "the sweep ends after its time")
 	_expect(c.sweep_left <= 0.0 and c.sweep_contacts.is_empty(), "and its markers go")
 	await get_tree().create_timer(1.0).timeout
-	_expect(not RadarContacts.is_swept(roamer), "its contacts are no longer marked when it ends")
+	_expect(not ContactTable.is_swept(roamer), "its contacts are no longer marked when it ends")
 	RadarContacts.apply_range(me, RadarContacts.DEFAULT_RANGE)
 	for h in [roamer, guard, distant]:
 		battle.remove_vehicle((h as Infantry).net_id)

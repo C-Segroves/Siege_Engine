@@ -3,13 +3,9 @@ extends RefCounted
 ## Earthsiege 2 mission rules: the detection flags (alert regions), the scan test, the objective
 ## tests (DBSIM 0x413280; docs/formats/es2.md 10.3) and the mission status with its automatic end.
 
-## Detection and "safe" (DBSIM 0x4137b4, armed enemies only here): the ranges are EsRanges'.
-## Scan missions (header word 3): face the target within SCAN_RANGE (+ structure slack) for SCAN_TIME.
+## Detection and "safe" (DBSIM 0x4137b4, armed enemies only here): the ranges are EsSensorProfile's.
+## Scan missions (header word 3): face the target within the profile's scan range for its scan time.
 const SCAN_MODES := [3, 7]
-const SCAN_RANGE := 60.0
-const SCAN_RANGE_STRUCTURE_EXTRA := 20.0
-const SCAN_CONE_DEGREES := 45.0
-const SCAN_TIME := 4.0
 ## The scan's own lines: a progress line every 4th rules tick, then the completion.
 const SCAN_PROGRESS_TICKS := 4
 const SCAN_PROGRESS_TEXT := "Scanning target... %d%%"
@@ -96,10 +92,11 @@ static func _make_goal_text(o: Dictionary) -> String:
 	return String(o.get("text", "")) if o.get("text") != null else ""
 
 
-## The scan: face the target within range for SCAN_TIME (one stage, no text of its own), with its progress lines.
+## The scan: face the target within range for the scan time (one stage, no text of its own), with its progress lines.
 func _make_scan() -> ScanObjective:
-	var scan := ScanObjective.new("scan", "", "", SCAN_RANGE, [{"seconds": SCAN_TIME, "text": ""}])
-	scan.cone_degrees = SCAN_CONE_DEGREES
+	var profile := EsSensorProfile.make()
+	var scan := ScanObjective.new("scan", "", "", profile.scan_range_m, [{"seconds": profile.scan_seconds, "text": ""}])
+	scan.cone_degrees = profile.scan_cone_degrees
 	scan.progress_format = SCAN_PROGRESS_TEXT
 	scan.progress_every = SCAN_PROGRESS_TICKS
 	scan.progress_seconds = SCAN_PROGRESS_SECONDS
@@ -115,7 +112,7 @@ func is_safe(u: Node3D) -> bool:
 	if u == null:
 		return true
 	for v in rt.active_vehicles():
-		if v.team != u.team and not v.weapons.is_empty() and EsRanges.is_in_safe_range(v, u):
+		if v.team != u.team and not v.weapons.is_empty() and ProximityAlert.is_unsafe_from(v, u, EsSensorProfile.make()):
 			return false
 	return true
 
@@ -129,7 +126,7 @@ func update_detection() -> void:
 			units.append(s)
 	for u in units:
 		var key: int = u.get_instance_id()
-		if detected.has(key) or not MissionTargets.is_noticed(u, vs, EsRanges.DETECT_RANGE_UNITS):
+		if detected.has(key) or not ProximityAlert.is_noticed(u, vs, EsSensorProfile.make()):
 			continue
 		detected[key] = true
 		var ar := rt.alert_region_of(u)
@@ -169,7 +166,7 @@ func is_facing_scan_target(me: Node3D, reach: float, cone: float) -> bool:
 		if is_instance_valid(t) and t.alive and t != me:
 			var to: Vector3 = t.global_position - me.global_position
 			var fwd: Vector3 = -me.aim_basis().z
-			var range := reach + SCAN_RANGE_STRUCTURE_EXTRA * float(t is Structure)
+			var range := reach + EsSensorProfile.make().scan_structure_extra_m * float(t is Structure)
 			if to.length() < range and absf(Vector2(fwd.x, fwd.z).angle_to(Vector2(to.x, to.z))) < cone:
 				near = true
 	return near

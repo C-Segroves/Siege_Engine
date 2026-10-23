@@ -97,6 +97,21 @@ static func ground_travel(inst: ShapeInstance, index: int) -> float:
 	return absf(_es_ground(inst, index).x) * Assets.UNIT * inst.scale.x
 
 
+## The local transforms of the nodes Darkstar sequence `index` keys at cycle position `phase` (0..1): node index -> Transform3D.
+## Reads the keys only, the instance is not posed (the additive layers of InfantryAnimationLayers). Empty for a 3Space shape.
+static func make_node_transforms(inst: ShapeInstance, index: int, phase: float) -> Dictionary:
+	var out := {}
+	if index < 0 or index >= count(inst) or not is_darkstar(inst):
+		return out
+	var ground := _darkstar_ground_index(inst)
+	var pos := clampf(phase, 0.0, 1.0)
+	for track in inst.shape.ds_sequences[index].tracks:
+		var ni := int(track.node)
+		if ni != ground and ni >= 0 and ni < inst.nodes.size() and not track.keys.is_empty():
+			out[ni] = _track_transform(inst, track.keys, pos)
+	return out
+
+
 ## Node indices that sequence `index` writes when posed.
 static func animated_nodes(inst: ShapeInstance, index: int) -> Dictionary:
 	var out := {}

@@ -12,20 +12,20 @@ extends RefCounted
 ## An order's kind and its point / target become the brains' `objective` ({point, urgent, radius, hold, target}:
 ## InfantryBot and AIPilot read exactly these keys) or, for formation, the AIPilot leader.
 
-const ATTACK := "attack"
-const MOVE := "move"
-const DEFEND := "defend"
-const HOLD := "hold"
-const ESCORT := "escort"
-const FORMATION := "formation"
-const REGROUP := "regroup"
-const KINDS := [ATTACK, MOVE, DEFEND, HOLD, ESCORT, FORMATION, REGROUP]
+const ATTACK := AIOrder.ATTACK
+const MOVE := AIOrder.MOVE
+const DEFEND := AIOrder.DEFEND
+const HOLD := AIOrder.HOLD
+const ESCORT := AIOrder.ESCORT
+const FORMATION := AIOrder.FORMATION
+const REGROUP := AIOrder.REGROUP
+const KINDS := AIOrder.COMMAND_KINDS
 ## Kinds that end on their own (the others last until replaced).
 const FINISHING := [ATTACK, MOVE, REGROUP]
 
 ## How close a place counts as reached (metres): soldiers and vehicles.
-const ARRIVE_RADIUS := 15.0
-const ESCORT_RADIUS := 10.0
+const ARRIVE_RADIUS := AIOrder.ARRIVE_RADIUS
+const ESCORT_RADIUS := AIOrder.ESCORT_RADIUS
 ## An attacked place counts as cleared when no enemy is this close to it (metres).
 const CLEAR_RADIUS := 60.0
 
@@ -37,19 +37,7 @@ static func is_known(kind: String) -> bool:
 ## The brain objective of `kind` at `point`, against `target` (a Node3D or null); {} for formation (the leader
 ## does it).
 static func make_objective(kind: String, point: Vector3, target: Node3D) -> Dictionary:
-	match kind:
-		ATTACK:
-			var out := {"point": point, "urgent": false, "radius": ARRIVE_RADIUS, "hold": true}
-			if target:
-				out["target"] = target
-			return out
-		MOVE, REGROUP:
-			return {"point": point, "urgent": true, "radius": ARRIVE_RADIUS, "hold": true}
-		DEFEND, HOLD:
-			return {"point": point, "urgent": false, "radius": ARRIVE_RADIUS, "hold": true}
-		ESCORT:
-			return {"point": point, "urgent": false, "radius": ESCORT_RADIUS, "hold": true}
-	return {}
+	return AIOrder.make(kind, point, target if kind == ATTACK else null).to_objective()
 
 
 ## True when an order of `kind` with its live `target` (null when none or gone) and point is done for `unit`.

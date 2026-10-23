@@ -55,8 +55,6 @@ var detected: Dictionary:
 	get: return rules.detected
 var scan_flag: bool:
 	get: return rules.scan_flag
-var group_order: Dictionary:
-	get: return orders.group_order
 var group_done_paths: Dictionary:
 	get: return orders.group_done_paths
 
@@ -218,19 +216,14 @@ func _es2_structure_transform(s: Dictionary, group_slot) -> Transform3D:
 
 ## ES2 formations (ES1 table as fallback); out-of-table Herc slots fan out 30 m apart.
 func _formation_offset(kind: String, form: int, k: int, yaw: float) -> Vector3:
-	var f = Assets.load_json("gameplay/formations.json", "es2")
-	if not f is Dictionary:
-		f = Assets.load_json("gameplay/formations.json", "es1")
-	if not f is Dictionary or (k == 0 and kind == "mech"):
-		return Vector3.ZERO
-	var forms: Array = f.get(_formation_key(kind), [])
-	if forms.is_empty():
-		return Vector3.ZERO
-	var slots: Array = forms[clampi(form, 0, forms.size() - 1)]
-	var si := k - 1 if kind == "mech" else k
-	if si < 0 or si >= slots.size():
-		return Vector3((k % 2 * 2 - 1) * 30.0 * ((k + 1) / 2), 0, 30.0 * ((k + 1) / 2)) if kind == "mech" else Vector3.ZERO
-	return _slot_vector(slots[si], yaw)
+	var table = Assets.load_json("gameplay/formations.json", "es2")
+	if not table is Dictionary:
+		table = Assets.load_json("gameplay/formations.json", "es1")
+	var key := _formation_key(kind)
+	var formation := Formation.make_from_table_entry(table, key, form, yaw, true)
+	if kind == "mech" and table is Dictionary and not (table.get(key, []) as Array).is_empty():
+		formation.overflow_fan = Formation.ES2_FAN_SPACING
+	return make_slot_offset(formation, kind, k)
 
 
 # ------------------------------------------------------------------ units (host)
@@ -272,7 +265,7 @@ func _spawn_dormant_group(gi: int, arrival: int) -> void:
 
 func _spawn_group(gi: int, arrival := 0) -> void:
 	var g: Dictionary = m.groups[gi]
-	var ai := orders.make_ai_settings(orders.current_order(gi))
+	var ai := orders.make_ai_order(orders.current_order(gi))
 	var path := _group_path(g, ai)
 	var spawn := {"gi": gi, "g": g, "path": path, "ai": ai, "arrival": arrival,
 		"base": _group_base_position(g, path), "yaw": _group_yaw(g, path), "skill": _es2_skill()}
@@ -282,7 +275,7 @@ func _spawn_group(gi: int, arrival := 0) -> void:
 
 
 ## The current order's path, else the group's own path, on the ground.
-func _group_path(g: Dictionary, ai: Dictionary) -> Array[Vector3]:
+func _group_path(g: Dictionary, ai: AIOrder) -> Array[Vector3]:
 	var path: Array[Vector3] = []
 	for p in ai.path:
 		path.append(p)
@@ -375,7 +368,7 @@ func _spawn_herc(spawn: Dictionary, mi: int, k: int, leader: Herc, wingman := {}
 	var alerted := int(h.get("flag0", 0)) != 0
 	var flying := _is_flying_herc(h)
 	var info := {"skill": clampf(spawn.skill + (0.05 if alerted else 0.0), 0.2, 0.95), "group": spawn.gi,
-		"order": int(spawn.ai.order), "path": spawn.path, "leader": leader.net_id if leader else 0,
+		"order": ES2GroupOrders.make_es1_code(spawn.ai), "path": spawn.path, "leader": leader.net_id if leader else 0,
 		"formation_slot": k, "health": int(h.get("health", 100))}
 	if flying:
 		info["flyer"] = true
@@ -395,7 +388,7 @@ func _spawn_herc(spawn: Dictionary, mi: int, k: int, leader: Herc, wingman := {}
 	return unit
 
 
-static func _set_pilot_start(unit: Herc, ai: Dictionary, alerted: bool) -> void:
+static func _set_pilot_start(unit: Herc, ai: AIOrder, alerted: bool) -> void:
 	for p in unit.get_children():
 		if p is AIPilot:
 			p.loop_path = ai.loop

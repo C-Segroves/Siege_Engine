@@ -13,6 +13,7 @@ const BATTLE_SCENE := "res://games/es1/battle.tscn"
 const CONNECT_SECONDS := 30.0
 const UNSTOW_SECONDS := 150.0
 const FACTION_TEAM := 399
+const LANDED_METRES := 3.0
 const HOSTILE_OFFSET := Vector3(60.0, 0.0, 0.0)
 const SWEEP_SECONDS := 12.0
 const SWEEP_DELAY_SECONDS := 4.0
@@ -150,6 +151,11 @@ func _run_sweep(peers: Dictionary) -> String:
 	ExtractionRules.data().callins.kinds.radar_sweep.duration_s = SWEEP_SECONDS
 	c.points.balances[1] = RAID_POINTS
 	var me := _battle.player as Infantry
+	# Out of the dropship is not yet on the ground (it opens high up): the sweep reaches 300 m from the caller, so he must have landed
+	# before the hostile is put on the ground 60 m away
+	var landed := func() -> bool: return me.global_position.y - _battle.infantry.make_on_ground(me.global_position + HOSTILE_OFFSET).y < LANDED_METRES
+	if not await _wait_for(landed, UNSTOW_SECONDS):
+		return "the host's soldier never landed (at %s)" % me.global_position
 	_spawn_hostile(me.global_position + HOSTILE_OFFSET)
 	var told := {}
 	c.tap = func(peer: int, method: String, args: Array) -> void:
@@ -192,7 +198,7 @@ func _run_mate() -> void:
 		_finish(false, "the teammate never saw the swept faction soldier")
 		return
 	var unit := _battle.vehicles.get(int(_hostile_contacts()[0].id)) as Infantry
-	var marked := await _wait_for(func() -> bool: return RadarContacts.is_swept(unit), 3.0)
+	var marked := await _wait_for(func() -> bool: return ContactTable.is_swept(unit), 3.0)
 	_finish(marked, "the contact reached the teammate but is not marked on its radar")
 
 
@@ -211,7 +217,7 @@ func _run_enemy() -> void:
 		if not c.sweep_contacts.is_empty() or c.sweep_left > 0.0:
 			_finish(false, "the enemy got %d sweep contacts" % c.sweep_contacts.size())
 			return
-		if _battle.vehicles.values().any(func(u: Node) -> bool: return is_instance_valid(u) and RadarContacts.is_swept(u)):
+		if _battle.vehicles.values().any(func(u: Node) -> bool: return is_instance_valid(u) and ContactTable.is_swept(u)):
 			_finish(false, "the enemy has a unit marked swept on its radar")
 			return
 		await get_tree().physics_frame

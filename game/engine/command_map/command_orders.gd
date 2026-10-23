@@ -198,11 +198,19 @@ func clear_order(id: int) -> void:
 
 ## The brain objective ({point, urgent, radius, hold, target}) of `id`'s order now ({} for none / formation).
 func make_objective(id: int) -> Dictionary:
+	var ai_order := make_ai_order(id)
+	return ai_order.to_objective() if ai_order != null else {}
+
+
+## `id`'s order now as the shared AIOrder (null for none).
+func make_ai_order(id: int) -> AIOrder:
 	var order: Dictionary = orders.get(id, {})
 	if order.is_empty():
-		return {}
+		return null
 	var target := make_target(order)
-	return CommandGoal.make_objective(str(order.kind), make_point(order, target), target)
+	var ai_order := AIOrder.make(str(order.kind), make_point(order, target), target if str(order.kind) == AIOrder.ATTACK else null)
+	ai_order.formation = int(order.get("slot", 0)) if str(order.kind) == AIOrder.FORMATION else -1
+	return ai_order
 
 
 ## The order's live target: the combatant, the structure, the commander for orders on himself.
@@ -251,7 +259,7 @@ func _apply_formation(id: int, pilot: AIPilot, order: Dictionary) -> void:
 		_saved_leaders[id] = [pilot.leader, pilot.formation_offset]
 	pilot.objective = {}
 	pilot.leader = leader if is_instance_valid(leader) else null
-	pilot.formation_offset = provider.make_formation_offset(int(order.get("slot", 0)))
+	pilot.formation_offset = provider.make_formation_offset(make_ai_order(id).formation)
 
 
 func _release_brains(id: int) -> void:

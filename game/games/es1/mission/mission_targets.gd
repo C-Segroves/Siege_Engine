@@ -101,12 +101,3 @@ func _record_of(u: Node) -> Dictionary:
 		return rt.m.structures[int(u.net_id)]
 	return {}
 
-
-## Detection (alert regions): an enemy among `vehicles` within `range_units` original units of `u` or
-## targeting it, or `u` (a Herc) already hit.
-static func is_noticed(u: Node3D, vehicles: Array, range_units: float) -> bool:
-	var r := range_units * Assets.UNIT
-	for v in vehicles:
-		if v.team != u.team and (v.global_position.distance_to(u.global_position) < r or v.target == u):
-			return true
-	return u is Herc and u.integrity < 1.0

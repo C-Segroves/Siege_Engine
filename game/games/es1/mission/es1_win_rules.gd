@@ -335,7 +335,7 @@ func is_safe(u: Node3D) -> bool:
 			continue
 		if not squad and _group_hunts(v, u):
 			return false
-		if EsRanges.is_in_safe_range(v, u):
+		if ProximityAlert.is_unsafe_from(v, u, EsSensorProfile.make()):
 			return false
 	return true
 
@@ -373,5 +373,5 @@ func update_alerts() -> void:
 			units.append(s)
 	for u in units:
 		var ar := rt.alert_region_of(u)
-		if ar >= 0 and ar < rt.regions.size() and not rt.regions[ar].fired and MissionTargets.is_noticed(u, vs, EsRanges.DETECT_RANGE_UNITS):
+		if ar >= 0 and ar < rt.regions.size() and not rt.regions[ar].fired and ProximityAlert.is_noticed(u, vs, EsSensorProfile.make()):
 			rt.fire_region(ar)

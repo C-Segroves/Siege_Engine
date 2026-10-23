@@ -1,12 +1,13 @@
 class_name SSSensors
 extends RefCounted
 ## Proximity events of a Starsiege mission: trigger boxes (AreaTrigger: trigger::onEnter / onContact / onLeave)
-## and the scan approximation (ScanObjective: onScan = the player keeps a target locked within SCAN_RANGE for SCAN_TIME).
+## and the scan approximation (ScanObjective: onScan = the player keeps a target locked within the profile's scan range
+## for its scan time).
 
-const SCAN_RANGE := 600.0
-const SCAN_TIME := 2.0
-## The lock is the aim, so the scan has no view cone (SSMissionWorld.is_target_in_view).
-const SCAN_CONE_DEGREES := 360.0
+## Remake approximation of onScan (no original value): 600 m, 2 s. The lock is the aim, so no view cone
+## (SSMissionWorld.is_target_in_view).
+const SCAN_RANGE_M := 600.0
+const SCAN_SECONDS := 2.0
 ## Vertical slack of trigger boxes (the .mis boxes are often flat; vehicles stand above them).
 const TRIGGER_HEIGHT_SLACK := 20.0
 const DEFAULT_BOX_MIN := [-10, -10, -10]
@@ -21,12 +22,21 @@ var _left := []            # vehicle obj ids that left in the scan in progress
 var _world: SSMissionWorld
 var _scan: ScanObjective = null
 var _scanned := {}         # target obj id -> true once its onScan was raised
+var _profile := SSSensors.make_profile()
 
 
 func _init(runtime: StarsiegeMissionRuntime) -> void:
 	rt = runtime
 	tree = runtime.tree
 	_world = SSMissionWorld.new(runtime)
+
+
+## Starsiege's sensor numbers.
+static func make_profile() -> SensorProfile:
+	var profile := SensorProfile.make_default()
+	profile.scan_range_m = SCAN_RANGE_M
+	profile.scan_seconds = SCAN_SECONDS
+	return profile
 
 
 func check_triggers() -> void:
@@ -79,7 +89,7 @@ static func _make_shape(d: Dictionary, position: Vector3) -> AreaShape:
 		StarsiegeMissionRuntime.orig_to_eng(size.x, size.y, size.z).abs(), TRIGGER_HEIGHT_SLACK)
 
 
-## Raises onScan once per target the player has kept locked in range for SCAN_TIME.
+## Raises onScan once per target the player has kept locked in range for the scan time.
 func check_scan(dt: float) -> void:
 	var pl: Herc = rt.battle.player
 	if pl == null or not is_instance_valid(pl) or not pl.alive or not is_instance_valid(pl.target):
@@ -90,8 +100,8 @@ func check_scan(dt: float) -> void:
 		_scan = null
 		return
 	if _scan == null or _scan.target != str(tid):
-		_scan = ScanObjective.new("scan", "", str(tid), SCAN_RANGE, [{"seconds": SCAN_TIME, "text": ""}])
-		_scan.cone_degrees = SCAN_CONE_DEGREES
+		_scan = ScanObjective.new("scan", "", str(tid), _profile.scan_range_m, [{"seconds": _profile.scan_seconds, "text": ""}])
+		_scan.cone_degrees = _profile.scan_cone_degrees
 	_world.locked_target = pl.target
 	if not _scanned.has(tid) and _scan.apply_tick(_world, dt):
 		_scanned[tid] = true

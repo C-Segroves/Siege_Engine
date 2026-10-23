@@ -1,7 +1,7 @@
 class_name CallinSweep
 extends RefCounted
 ## The radar sweep call-in: the host finds the hostile units near the caller twice a second and tells him; on his machine
-## each one is marked swept on its real radar contact (RadarContacts.apply_swept: the unit's node, or the far bot's
+## each one is marked swept on its real radar contact (ContactTable.apply_swept: the unit's node, or the far bot's
 ## RadarProxy), so every radar, the command map and T-targeting show it for as long as the sweep lasts.
 
 const STEP_SECONDS := 0.5
@@ -72,7 +72,7 @@ func apply_contacts(new_contacts: Array, seconds: float) -> void:
 	for c in contacts:
 		var unit := _find_unit(int(c.id))
 		if unit != null:
-			RadarContacts.apply_swept(unit, MARK_SECONDS)
+			ContactTable.apply_swept(unit, MARK_SECONDS)
 
 
 func _find_unit(id: int) -> Node3D:

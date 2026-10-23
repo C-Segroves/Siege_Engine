@@ -24,7 +24,7 @@ func make_player_spawn(k: int) -> Transform3D:
 		return Transform3D.IDENTITY
 	var d: Dictionary = drops[0]
 	var xf := Transform3D(Basis(Vector3.UP, float(d.get("yaw", 0.0))), SSObjectTree.position_of_def(d))
-	xf.origin += xf.basis * rt.squad_slot_offset(k)
+	xf.origin += xf.basis * Formation.squad_slot(k)
 	xf.origin = make_start_position(xf.origin, PLAYER_START_LIFT)
 	return xf
 

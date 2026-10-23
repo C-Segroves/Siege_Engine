@@ -21,6 +21,7 @@ const SavedCampaignGuard := preload("res://tests/saved_campaign_guard.gd")
 ## Per process: other test runs may play raids at the same time.
 var _pilot := "QA Extraction %d" % OS.get_process_id()
 const MAP := "tribes2:Katabatic"
+const RELEASE_METRES := 4.0
 const SEED := 4242
 const SHOP_FUNDS := 5000
 const LOOT_ROLLS := 40
@@ -63,6 +64,7 @@ func _ready() -> void:
 	if not OS.get_cmdline_user_args().has(ONLY_REVIVE_ARG):
 		await _check_raid_extract()
 		await _check_raid_death()
+		await _check_release_height()
 		await _check_base_tasks()
 	await _check_flag_response()
 	await _check_revive()
@@ -478,15 +480,15 @@ func _check_insured_and_armor() -> void:
 ## A raid on MAP with the test pilot's kit plus the starter kit; `prepare` may change the profile first
 ## (func(p: ExtractionProfile)); `teammate` adds a second raid player on the same team (peer MATE_PEER, nobody
 ## controls him).
-func _start_raid(soldiers: int, vehicles: int, prepare := Callable(), teammate := false) -> Battle:
+func _start_raid(soldiers: int, vehicles: int, prepare := Callable(), teammate := false, map := MAP, fast := true) -> Battle:
 	var p := ExtractionProfile.load_for(_pilot)
 	for s in ExtractionProfile.make_starter_stacks(InfantryCatalog.armor(p.kit_armor)):
 		p.kit.apply_add(str(s[0]), int(s[1]))
 	if prepare.is_valid():
 		prepare.call(p)
 	p.save()
-	var config := MatchFlow.make_extraction_solo_config(p, {"map": MAP, "respawn": true}, soldiers, vehicles)
-	config[ExtractionRules.FAST_CONFIG_KEY] = true
+	var config := MatchFlow.make_extraction_solo_config(p, {"map": map, "respawn": true}, soldiers, vehicles)
+	config[ExtractionRules.FAST_CONFIG_KEY] = fast
 	config["extraction_seed"] = SEED
 	if teammate:
 		var mate := {"name": "QA Mate", "team": 0, "kit": p.make_kit_dict()}
@@ -498,6 +500,28 @@ func _start_raid(soldiers: int, vehicles: int, prepare := Callable(), teammate :
 	get_tree().current_scene = battle
 	await _frames(SETTLE_FRAMES)
 	return battle
+
+
+## The insertion transport sets down before it lets the riders out: released within RELEASE_METRES of the ground, no fall damage,
+## on both maps, in normal and fast timings.
+func _check_release_height() -> void:
+	print("3b insertion: riders released at the ground, no fall damage:")
+	for map in [MAP, VarunaMap.MAP_ID]:
+		for fast in [false, true]:
+			var battle := await _start_raid(0, 0, Callable(), false, map, fast)
+			var soldier := battle.player as Infantry
+			var seen := {"height": -1.0}
+			await _wait_for(func() -> bool:
+				if soldier.stowed:
+					return false
+				seen.height = soldier.global_position.y - battle.infantry.make_on_ground(soldier.global_position).y
+				return true, 150.0)
+			var hp0 := float((soldier.components[0] as Dictionary).hp)
+			await _frames(90)
+			var hp1 := float((soldier.components[0] as Dictionary).hp)
+			_expect(seen.height >= -1.0 and seen.height <= RELEASE_METRES, "%s %s: released %.1f m above the ground" % [map, "fast" if fast else "normal", seen.height])
+			_expect(soldier.alive and hp1 >= hp0 - 0.01, "%s %s: no fall damage (hp %.0f -> %.0f)" % [map, "fast" if fast else "normal", hp0, hp1])
+			await _free_scene()
 
 
 func _check_raid_extract() -> void:

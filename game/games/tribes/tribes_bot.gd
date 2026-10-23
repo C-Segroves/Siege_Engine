@@ -31,6 +31,19 @@ static func make_scripted(s: Infantry, id: int, p_skill: float) -> TribesBot:
 	return b
 
 
+## Carries out a shared order: attack its target, move to its point, walk its path round and round, else hold.
+func apply_order(o: AIOrder) -> void:
+	match o.kind:
+		AIOrder.ATTACK:
+			apply_engage(o.target as Herc)
+		AIOrder.MOVE:
+			apply_move(o.point)
+		AIOrder.PATROL:
+			apply_patrol(o.path)
+		_:
+			apply_hold()
+
+
 func apply_engage(t: Herc) -> void:
 	order = Order.ENGAGE
 	engage_target = t

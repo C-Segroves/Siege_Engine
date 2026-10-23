@@ -52,6 +52,11 @@ const WIN_TEXT := {GOAL_GENERATORS: "Generators destroyed. Mission complete.", G
 const TURRET_TAGS := ["TURRET1", "TURRET2", "TURRET3", "TURRET4", "TURRET5"]
 const GENERATOR_TAGS := ["GEN1", "GEN2"]
 const ORDER_META := "aa_order"
+## campaign_logic::OrderBots task codes the remake plays: 1 / 3 roam to a place, 2 defend it, 7 deathmatch, 8 antagonize;
+## any other task attacks the named object.
+const TASK_DEATHMATCH := 7
+const TASK_ANTAGONIZE := 8
+const TASK_KINDS := {1: AIOrder.MOVE, 3: AIOrder.MOVE, 2: AIOrder.DEFEND}
 const LOOK_MOUSE_SPEED := 300.0          # mouse speed (pixels / s) that counts as full look strength
 ## The training lessons' inputs -> the remake's actions (vm_input).
 const INPUT_ACTIONS := {"move_forward": "throttle_up", "move_back": "throttle_down", "strafe_left": "turn_left",
@@ -491,7 +496,10 @@ func vm_spawn(team: int, wave: int) -> void:
 ## An order (campaign_logic::OrderBots): kept on the soldier it names (slot -1 = all of the side), applied by _aim_soldiers.
 func vm_order(team: int, task: int, target: String, slot: int) -> void:
 	var list: Array = enemies if team == ENEMY_TEAM else allies
-	var order := {"task": task, "target": target}
+	var order := AIOrder.new()
+	order.kind = TASK_KINDS.get(task, AIOrder.ATTACK)
+	order.tag = target
+	order.source = task
 	if slot < 0:
 		for b in list:
 			if is_instance_valid(b):
@@ -611,32 +619,34 @@ func _aim_soldiers() -> void:
 
 
 func _make_objective(b: InfantryBot, team: int, p: Herc) -> Dictionary:
-	var order: Dictionary = b.get_meta(ORDER_META, {})
-	if order.is_empty():
-		if team == ENEMY_TEAM:
-			return {"point": p.global_position, "urgent": false, "radius": 25.0, "hold": false}
+	var order: AIOrder = b.get_meta(ORDER_META, null)
+	var enemy_side := team == ENEMY_TEAM
+	if order == null:
+		if enemy_side:
+			return _make_plan(AIOrder.ATTACK, p.global_position, false, 25.0, false).to_objective()
 		var lead := nav_points[0] if not nav_points.is_empty() else p.global_position
-		return {"point": lead, "urgent": false, "radius": 20.0, "hold": false}
+		return _make_plan(AIOrder.MOVE, lead, false, 20.0, false).to_objective()
 	var here := b.soldier.global_position
-	match int(order.task):
-		7:                                   # deathmatch: the nearest enemy of its side (the player for the BioDerms)
-			var foe := p.global_position if team == ENEMY_TEAM else _nearest_enemy(here, p.global_position)
-			return {"point": foe, "urgent": false, "radius": 25.0, "hold": false}
-		8:                                   # antagonize: hunt the player
-			return {"point": p.global_position, "urgent": false, "radius": 25.0, "hold": false}
-	var at := _pick_target(str(order.target), here)
+	match int(order.source):
+		TASK_DEATHMATCH:                     # the nearest enemy of its side (the player for the BioDerms)
+			var foe := p.global_position if enemy_side else _nearest_enemy(here, p.global_position)
+			return _make_plan(AIOrder.ATTACK, foe, false, 25.0, false).to_objective()
+		TASK_ANTAGONIZE:                     # hunt the player
+			return _make_plan(AIOrder.ATTACK, p.global_position, false, 25.0, false).to_objective()
+	var at := _pick_target(order.tag, here)
 	if at.is_empty():
-		return {"point": p.global_position, "urgent": false, "radius": 25.0, "hold": false}
-	match int(order.task):
-		2:                                   # defend a place
-			return {"point": at.pos, "urgent": false, "radius": 15.0, "hold": true}
-		1, 3:                                # roam to a place (the player: stay with him)
-			return {"point": at.pos, "urgent": false, "radius": 20.0, "hold": false}
+		return _make_plan(AIOrder.ATTACK, p.global_position, false, 25.0, false).to_objective()
+	match order.kind:
+		AIOrder.DEFEND:                      # a place
+			return _make_plan(AIOrder.DEFEND, at.pos, false, 15.0, true).to_objective()
+		AIOrder.MOVE:                        # roam to a place (the player: stay with him)
+			return _make_plan(AIOrder.MOVE, at.pos, false, 20.0, false).to_objective()
 	# attack / mortar / repair / destroy an object: its base object is the soldiers' target
-	var out := {"point": at.pos, "urgent": true, "radius": 25.0, "hold": false}
-	if at.has("node"):
-		out["target"] = at.node
-	return out
+	return _make_plan(AIOrder.ATTACK, at.pos, true, 25.0, false, at.get("node")).to_objective()
+
+
+static func _make_plan(kind: String, point: Vector3, urgent: bool, radius: float, hold: bool, target = null) -> AIOrder:
+	return AIOrder.make_plan(kind, point, urgent, radius, hold, target as Node3D)
 
 
 ## {pos, node?} of the object an order names; "GENS" the generator still standing nearest to `from`, "TURRETS" a standing turret.

@@ -9,8 +9,6 @@ extends RefCounted
 const GROUP := "com_towers"
 const COM_TOWER_NAMES := ["Radar tower", "Listening post"]
 const TURRET_NAMES := ["Gun tower"]
-## Reach (m) of a com tower without a sensor spec of its own (Earthsiege towers).
-const DEFAULT_RANGE_M := 1500.0
 const CACHE_TEAMS := 64
 
 static var _cache := {}
@@ -48,7 +46,7 @@ static func make_range(s: Node) -> float:
 		var rules = (s as TribesBaseObject).spec.get("sensor", {})
 		if rules is Dictionary and float(rules.get("range", 0.0)) > 0.0:
 			return float(rules.range)
-	return DEFAULT_RANGE_M
+	return SensorProfile.DEFAULT_TOWER_RANGE_M
 
 
 ## True when a working com tower on the viewer's side has `unit` within its range. Between begin_cache and end_cache the
@@ -157,6 +155,6 @@ static func make_radar_structures(viewer: Node) -> Array:
 	if viewer == null or not viewer.is_inside_tree() or not SensorLink.is_up(SensorLink.battle_of(viewer)):
 		return out
 	for s in viewer.get_tree().get_nodes_in_group(Structure.TARGET_GROUP):
-		if bool(s.get("alive")) and not bool(s.get_meta(RadarContacts.HIDDEN_META, false)) and (is_turret(s) or is_com_tower(s)):
+		if bool(s.get("alive")) and not bool(s.get_meta(ContactTable.HIDDEN_META, false)) and (is_turret(s) or is_com_tower(s)):
 			out.append(s)
 	return out

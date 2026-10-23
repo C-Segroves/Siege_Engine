@@ -276,7 +276,7 @@ func _check_towers_and_targeting(_battle: Battle, view: CommandMapView, me: Node
 	me.get_parent().add_child(tower)
 	tower.add_to_groups()
 	SensorTowers.apply_register(tower)
-	tower.global_position = foe.global_position + Vector3(SensorTowers.DEFAULT_RANGE_M * 3.0, 0, 0)
+	tower.global_position = foe.global_position + Vector3(SensorProfile.DEFAULT_TOWER_RANGE_M * 3.0, 0, 0)
 	_expect(not RadarContacts.is_on_scope(me, foe), "a com tower out of reach reveals nobody")
 	tower.global_position = foe.global_position + Vector3(10, 0, 0)
 	_expect(RadarContacts.is_on_scope(me, foe) and view.make_units().has(foe), "a com tower in reach puts the unit on the radar and the map")
@@ -430,9 +430,9 @@ func _check_radar_hidden(battle: Battle, me: Node3D) -> void:
 		var id := SSObjectTree.id_of_node(enemy)
 		functions.call_function("setvehicleradarvisible", [id, "false"])
 	else:
-		RadarContacts.apply_hidden(enemy, true)
+		ContactTable.apply_hidden(enemy, true)
 	_expect(not RadarContacts.is_shown(me, enemy), "a unit the mission hides is off the radar")
-	RadarContacts.apply_hidden(enemy, false)
+	ContactTable.apply_hidden(enemy, false)
 
 
 ## Tribes 2 Training 1: the script owns the command-map key ("not yet cleared for Command Circuit use").

@@ -120,7 +120,7 @@ func create_ai(ai_name: String, group_path: String, armor: String, display: Stri
 	actors.set_armor(pid, armor)
 	var brain := actors.brain_of(client)
 	if brain and points.size() > 1:
-		brain.apply_patrol(points)
+		brain.apply_order(AIOrder.make_route(AIOrder.PATROL, points, true))
 
 
 func ai_client(ai_name: String) -> int:

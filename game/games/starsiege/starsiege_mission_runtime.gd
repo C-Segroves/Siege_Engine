@@ -194,7 +194,7 @@ func ground_height_at(p: Vector3) -> float:
 
 
 func formation_offset_local(k: int) -> Vector3:
-	return Vector3(15.0 * k, 0, 20.0 * k)
+	return Formation.make_stepped(Formation.STARSIEGE_WINGMAN_STEP).offset_of(k)
 
 
 ## Starts the script: loads the libraries and mission script, registers the player squad, spawns the

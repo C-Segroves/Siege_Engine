@@ -129,7 +129,7 @@ func _build_model() -> void:
 		var pack := str(armor.get("pack", "tribes"))
 		shape.build(Assets.shape(make_body_shape_id()), 0, Packs.default_palette(pack))
 		shape.position.y = -shape.lowest_point() * shape.scale.y
-	_animation = InfantryAnimation.new(shape)
+	_animation = InfantryAnimation.new(shape, make_body_shape_id())
 	eye = Node3D.new()
 	eye.name = "Eye"
 	eye.position.y = float(armor.get("eye_height_m", 1.8))
@@ -539,6 +539,8 @@ func _animate(delta: float, with_steps := true) -> void:
 	var local := global_basis.inverse() * velocity
 	var airborne := not is_on_floor_now() if not follows_snapshots else absf(velocity.y) > 1.0
 	_animation.update(local, airborne, jetting, delta)
+	if not far_lod:   # the look, head and recoil layers are for the soldiers close enough to see them (MID / FAR bots keep the plain locomotion)
+		_animation.apply_layers(pitch, 0.0, pitch_max, current_weapon(), delta)
 	if with_steps:
 		_sounds.apply_steps(self, _animation, delta)
 	held.update(current_weapon(), delta)

@@ -14,19 +14,20 @@ extends RefCounted
 ##   cloaks        a cloaked unit is seen by no sensor beyond its reveal range, except by motion sensors
 ##                 (detectsCloaked) while it moves at least their detectMinVelocity (CloakRules).
 ## Teammates and allies are always shown. Detection is refreshed every REFRESH_SECONDS on every peer.
+## Each sensor is a SensorSource (range, line of sight, view cone, cloak rules) and what a team detects is a ContactTable.
 
 const REFRESH_SECONDS := 0.25
-## Line-of-sight checks aim at a unit's middle (metres above its origin).
-const SIGHT_HEIGHT := 1.0
 
-var player_sensor: Dictionary = {}
-var _detected := {}          # team -> {instance id: true}
+var player_sensor: SensorSource = null
+var contacts := ContactTable.new()
 var _refresh_t := 0.0
 
 
+## `p_player_sensor`: the "player_sensor" block of the pack's base_equipment.json ({} = soldiers carry no sensor).
 static func make(p_player_sensor: Dictionary) -> TribesSensorNet:
 	var net := TribesSensorNet.new()
-	net.player_sensor = p_player_sensor
+	if not p_player_sensor.is_empty():
+		net.player_sensor = SensorSource.make_from_spec(p_player_sensor)
 	return net
 
 
@@ -34,7 +35,7 @@ static func make(p_player_sensor: Dictionary) -> TribesSensorNet:
 func is_shown(team: int, unit: Node) -> bool:
 	if TeamRelations.is_allied(team, int(unit.get("team"))):
 		return true
-	return (_detected.get(team, {}) as Dictionary).has(unit.get_instance_id())
+	return contacts.is_detected(team, unit)
 
 
 ## Recomputes what each team detects (every REFRESH_SECONDS).
@@ -44,15 +45,25 @@ func apply_refresh(tree: SceneTree, delta: float) -> void:
 		return
 	_refresh_t = REFRESH_SECONDS
 	var units := tree.get_nodes_in_group("vehicles").filter(func(v: Node) -> bool: return bool(v.get("alive")))
-	var sensors := tree.get_nodes_in_group(TribesBase.SENSOR_GROUP).filter(
-		func(s: TribesBaseObject) -> bool: return s.is_working())
-	_detected.clear()
+	var sensors := _make_working_sensors(tree)
+	var now := Time.get_ticks_msec()
+	contacts.apply_clear()
 	for team in _make_teams(units):
-		var seen := {}
+		contacts.apply_team(team)
 		for u in units:
 			if TeamRelations.is_hostile(team, int(u.team)) and _is_detected(team, u, sensors, units):
-				seen[u.get_instance_id()] = true
-		_detected[team] = seen
+				contacts.apply_detected(team, u.get_instance_id(), now)
+	contacts.apply_forget(now)
+
+
+## The working base sensors as [TribesBaseObject, SensorSource] pairs (read from their specs once per refresh).
+static func _make_working_sensors(tree: SceneTree) -> Array:
+	var out := []
+	for s in tree.get_nodes_in_group(TribesBase.SENSOR_GROUP):
+		var o := s as TribesBaseObject
+		if o.is_working():
+			out.append([o, SensorSource.make_from_spec(o.spec.get("sensor", {}))])
+	return out
 
 
 static func _make_teams(units: Array) -> Array:
@@ -64,17 +75,17 @@ static func _make_teams(units: Array) -> Array:
 
 func _is_detected(team: int, unit: Node3D, sensors: Array, units: Array) -> bool:
 	var jammed := unit.has_meta(InfantryPack.META_JAM_RADIUS) or CloakRules.is_passive_jammed(unit) 		or _is_under_jammer(team, unit, sensors)
-	for s in sensors:
-		var o := s as TribesBaseObject
-		var rules: Dictionary = o.spec.get("sensor", {})
-		if bool(rules.get("jams", false)):
+	for pair in sensors:
+		var o: TribesBaseObject = pair[0]
+		var source: SensorSource = pair[1]
+		if source.jams:
 			continue
-		if o.team == team and (not jammed or bool(rules.get("detects_jammed", false))) and _senses(o, rules, unit):
+		if o.team == team and (not jammed or source.detects_jammed) and source.senses(o, unit):
 			return true
-	if player_sensor.is_empty() or (jammed and not bool(player_sensor.get("detects_jammed", false))):
+	if player_sensor == null or (jammed and not player_sensor.detects_jammed):
 		return false
 	for u in units:
-		if int(u.team) == team and u is Herc and _soldier_sees(u, unit):
+		if int(u.team) == team and u is Herc and player_sensor.senses(u, unit, -(u as Herc).aim_basis().z):
 			return true
 	return false
 
@@ -82,36 +93,9 @@ func _is_detected(team: int, unit: Node3D, sensors: Array, units: Array) -> bool
 ## Inside the range of a working jammer that is not `team`'s (Tribes 1 deployable sensor jammer: SensorData
 ## supression; it hides its own side from the enemy's sensors).
 static func _is_under_jammer(team: int, unit: Node3D, sensors: Array) -> bool:
-	for s in sensors:
-		var o := s as TribesBaseObject
-		var rules: Dictionary = o.spec.get("sensor", {})
-		if bool(rules.get("jams", false)) and TeamRelations.is_hostile(team, o.team) and 				o.global_position.distance_to(unit.global_position) <= float(rules.get("range", 0.0)):
+	for pair in sensors:
+		var o: TribesBaseObject = pair[0]
+		var source: SensorSource = pair[1]
+		if source.jams and TeamRelations.is_hostile(team, o.team) and o.global_position.distance_to(unit.global_position) <= source.range_m:
 			return true
 	return false
-
-
-func _senses(o: Node3D, rules: Dictionary, unit: Node3D) -> bool:
-	var to := unit.global_position + Vector3.UP * SIGHT_HEIGHT
-	var distance := o.global_position.distance_to(to)
-	if distance > float(rules.get("range", 0.0)) or CloakRules.is_hidden_from_sensor(unit, rules, distance):
-		return false
-	return not bool(rules.get("los", false)) or _has_sight(o, o.global_position + Vector3.UP * SIGHT_HEIGHT, unit)
-
-
-func _soldier_sees(viewer: Herc, unit: Node3D) -> bool:
-	var eye := viewer.global_position + Vector3.UP * SIGHT_HEIGHT
-	var to := unit.global_position + Vector3.UP * SIGHT_HEIGHT - eye
-	if to.length() > float(player_sensor.get("range", 0.0)) or CloakRules.is_hidden_from_sensor(unit, player_sensor, to.length()):
-		return false
-	if bool(player_sensor.get("fov_only", false)):
-		var half := deg_to_rad(float(player_sensor.get("fov_deg", 90.0)) * float(player_sensor.get("fov_percent", 1.0))) * 0.5
-		if (-viewer.aim_basis().z).angle_to(to) > half:
-			return false
-	return not bool(player_sensor.get("los", false)) or _has_sight(viewer, eye, unit)
-
-
-static func _has_sight(from_node: Node3D, from: Vector3, unit: Node3D) -> bool:
-	var exclude := [from_node.get_rid()] if from_node is CollisionObject3D else []
-	var q := PhysicsRayQueryParameters3D.create(from, unit.global_position + Vector3.UP * SIGHT_HEIGHT, 0xFFFFFFFF, exclude)
-	var hit := from_node.get_world_3d().direct_space_state.intersect_ray(q)
-	return hit.is_empty() or hit.collider == unit or (hit.collider is Node and unit.is_ancestor_of(hit.collider))

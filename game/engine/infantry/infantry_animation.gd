@@ -11,6 +11,7 @@ extends RefCounted
 ## cycle), at most MAX_TIME_SCALE times as fast. Its foot triggers (Darkstar frame triggers / Torque sequence
 ## triggers, 1 = left foot, 2 = right foot) are where the footsteps fall: `footsteps` lists the ones crossed in
 ## the last update (InfantrySounds plays them).
+## apply_layers() then composes the look, head and recoil layers onto that pose (InfantryAnimationLayers, a NEAR soldier only).
 
 ## Candidate sequence names per role, Tribes 1 first.
 const ROOT := ["root"]
@@ -45,10 +46,13 @@ var _current := -1
 var _phase := 0.0
 var _landing_left := 0.0
 var _was_airborne := false
+var _posed := false       # the last update() posed a base sequence (the layers compose onto it)
+var _layers: InfantryAnimationLayers
 
 
-func _init(shape: ShapeInstance) -> void:
+func _init(shape: ShapeInstance, shape_id := "") -> void:
 	_shape = shape
+	_layers = InfantryAnimationLayers.new(shape, shape_id)
 	var seqs: Array = shape.shape.get("ds_sequences", [])
 	for i in seqs.size():
 		var n := str(seqs[i].get("name", "")).to_lower()
@@ -56,6 +60,23 @@ func _init(shape: ShapeInstance) -> void:
 			_index[n] = i
 		if _is_death_name(n) and not _deaths.has(i):
 			_deaths.append(i)
+
+
+## True when the body has look, head or recoil layers (apply_layers does something).
+func has_layers() -> bool:
+	return _layers.has_layers()
+
+
+## Composes the layers onto the pose of the last update(): look `pitch` (up positive, within +-`limit`), the head's `yaw` off the
+## body, weapon `w` in hand (null = unarmed). Not for a soldier posed by apply_death or apply_hold.
+func apply_layers(pitch: float, yaw: float, limit: float, w: Weapon, delta: float) -> void:
+	if _posed and _current >= 0:
+		_layers.apply(_current, pitch, yaw, limit, w, delta)
+
+
+## The layer machinery, for tests.
+func get_layers() -> InfantryAnimationLayers:
+	return _layers
 
 
 func has_sequences() -> bool:
@@ -76,6 +97,7 @@ func death_count() -> int:
 ## One frame of movement: `p_local_velocity` in the soldier's frame (x right, z back), `airborne`, `jetting`.
 func update(p_local_velocity: Vector3, p_airborne: bool, jetting: bool, delta: float) -> void:
 	footsteps.clear()
+	_posed = false
 	local_velocity = p_local_velocity
 	airborne = p_airborne
 	_apply_landing(airborne, delta)
@@ -118,6 +140,7 @@ func make_sequence_name(velocity: Vector3, in_air: bool, jetting: bool) -> Strin
 func apply_death(seconds: float, choice: int) -> void:
 	if _deaths.is_empty():
 		return
+	_layers.release()
 	var i := _deaths[posmod(choice, _deaths.size())]
 	var duration := ShapeCycles.cycle_seconds(_shape, i, 0.0)
 	ShapeCycles.pose(_shape, i, seconds / maxf(duration, 0.01), false)
@@ -144,6 +167,7 @@ func _play(i: int, rate: float, delta: float, wrap: bool) -> void:
 	var before := _phase
 	_phase += delta * rate / maxf(duration, 0.01)
 	_collect_footsteps(i, before, _phase)
+	_posed = true
 	ShapeCycles.pose(_shape, i, _phase if wrap else minf(_phase, 1.0), wrap)
 
 
@@ -158,7 +182,9 @@ func apply_hold(names: Array, delta: float) -> bool:
 	for n in names:
 		var i := int(_index.get(str(n).to_lower(), -1))
 		if i >= 0:
+			_layers.release()
 			_play(i, 1.0, delta, true)
+			_posed = false
 			footsteps.clear()
 			return true
 	return false

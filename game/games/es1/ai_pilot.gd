@@ -168,7 +168,7 @@ func _follow_leader_cloak() -> void:
 
 
 ## The nearest hostile the pilot's sensors find within `range`. Original ES1 behaviour: radar finds a cloaked unit only
-## as the cloak rules allow, and a passive (EMCON) unit is seen from half as far (RadarMode.SIGNATURE_PASSIVE).
+## as the cloak rules allow, and a passive (EMCON) unit is seen from half as far (SensorProfile.DEFAULT_PASSIVE_SIGNATURE).
 func _find_target(range: float) -> Herc:
 	return TargetSelector.pick(herc.get_tree(), _make_target_profile(range),
 		{"from": herc.global_position, "team": herc.team, "viewer": herc}) as Herc

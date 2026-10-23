@@ -6,8 +6,6 @@ extends RefCounted
 
 ## order(..., speed, <level>) -> fraction of the vehicle's top speed.
 const SPEEDS := {"low": 0.4, "slow": 0.4, "medium": 0.7, "high": 1.0, "fast": 1.0}
-## Formation slots used when newFormation gave fewer offsets than the group has followers.
-const DEFAULT_FORMATION_STEP := Vector3(12.0, 0, 16.0)
 const DEFAULT_SKILL := 0.5
 const DEFAULT_SENSOR_RANGE := 900.0
 const LAST_RESORT_VEHICLE := "es1:RAPTOR"
@@ -16,7 +14,7 @@ const UNIT_START_LIFT := 0.5
 var rt: StarsiegeMissionRuntime
 var tree: SSObjectTree
 var units := {}            # obj id -> unit state
-var formations := {}       # lower name -> Array[Vector3] (engine local offsets)
+var formations := {}       # lower name -> Formation (engine local offsets)
 
 
 func _init(runtime: StarsiegeMissionRuntime) -> void:
@@ -221,19 +219,17 @@ func order(who, what: String, args: Array) -> void:
 
 ## newFormation(name, x0, y0, z0, x1, y1, z1, ...): the first triple is the leader slot.
 func define_formation(name: String, coords: Array) -> void:
-	var offs := [Vector3.ZERO]
+	var offs := []
 	var i := 0
 	while i + 2 < coords.size():
 		offs.append(StarsiegeMissionRuntime.orig_to_eng(SSScript.num(coords[i]), SSScript.num(coords[i + 1]),
 			SSScript.num(coords[i + 2])))
 		i += 3
-	if offs.size() > 1:
-		offs.remove_at(0)
-	formations[name.to_lower()] = offs
+	formations[name.to_lower()] = Formation.make_scripted(offs)
 
 
 func _apply_formation(members: Array, formation_name: String) -> void:
-	var offs: Array = formations.get(formation_name, [])
+	var formation: Formation = formations.get(formation_name, Formation.make_scripted([]))
 	var leader_id := _formation_leader(members)
 	var k := 0
 	for u in members:
@@ -245,7 +241,7 @@ func _apply_formation(members: Array, formation_name: String) -> void:
 			continue
 		k += 1
 		p.leader = tree.node_of(leader_id) as Herc
-		p.formation_offset = offs[k] if k < offs.size() else DEFAULT_FORMATION_STEP * k
+		p.formation_offset = formation.offset_of(k)
 
 
 func _formation_leader(members: Array) -> int:
@@ -306,9 +302,10 @@ func _order_attack(u: Dictionary, h: Herc, target) -> void:
 	var p: AIPilot = u.pilot
 	if p and t != null:
 		p.leader = null
-		p.order = AIPilot.Order.SEARCH
-		h.target = t
-		p.engaging = true
+		var attack := AIOrder.new()
+		attack.kind = AIOrder.SEARCH
+		attack.apply_to_pilot(p)
+		AIOrder.apply_engage(p, t)
 
 
 ## guard <group>: patrol its markers (or follow its units); guard <vehicle>: follow it;
@@ -343,20 +340,14 @@ func _guard_group(u: Dictionary, gid: int) -> void:
 			u.goal = members[0]
 			return
 		pts.append(tree.position_of(gid))
-	p.patrol_points = pts
-	p.patrol_index = 0
-	p.loop_path = true
-	p.order = AIPilot.Order.PATROL
+	AIOrder.make_route(AIOrder.PATROL, pts, true).apply_to_pilot(p)
 	u.mode = "route"
 	u.last_index = 0
 
 
 func _travel_to(u: Dictionary, point: Vector3) -> void:
 	var p: AIPilot = u.pilot
-	p.patrol_points = [point] as Array[Vector3]
-	p.patrol_index = 0
-	p.loop_path = false
-	p.order = AIPilot.Order.TRAVEL
+	AIOrder.make_route(AIOrder.TRAVEL, [point] as Array[Vector3], false).apply_to_pilot(p)
 	u.mode = "travel"
 
 
@@ -392,7 +383,5 @@ func _order_hold_position(u: Dictionary, h: Herc) -> void:
 	var p: AIPilot = u.pilot
 	if p == null:
 		return
-	p.order = AIPilot.Order.GUARD
-	p.guard_point = h.global_position
-	p.patrol_points.clear()
+	AIOrder.make_hold_at(h.global_position).apply_to_pilot(p)
 	u.mode = "idle"

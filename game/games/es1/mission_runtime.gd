@@ -265,23 +265,13 @@ func _formation_offset(kind: String, form: int, k: int, yaw: float) -> Vector3:
 
 ## Slot `k` of formation `form` for units of `kind` turned by `yaw`: the Earthsiege formations table (metres).
 static func make_es1_formation_offset(kind: String, form: int, k: int, yaw: float) -> Vector3:
-	var f = Assets.load_json("gameplay/formations.json")
-	if not f is Dictionary or k == 0 and kind == "mech":
-		return Vector3.ZERO
-	var forms: Array = f.get(_formation_key(kind), [])
-	if form >= forms.size():
-		return Vector3.ZERO
-	var slots: Array = forms[form]
-	var si := k - 1 if kind == "mech" else k
-	if si < 0 or si >= slots.size():
-		return Vector3.ZERO
-	return _slot_vector(slots[si], yaw)
+	var table = Assets.load_json("gameplay/formations.json")
+	return make_slot_offset(Formation.make_from_table_entry(table, _formation_key(kind), form, yaw, false), kind, k)
 
 
-## A formation table entry (original units, x/y[/z]) turned by the group's yaw.
-static func _slot_vector(o: Array, yaw: float) -> Vector3:
-	var local := ShapeInstance.es_to_godot([o[0], o[1], o[2] if o.size() > 2 else 0])
-	return Basis(Vector3.UP, yaw) * local
+## Herc groups leave slot 0 to the leader; base and flyer groups list every unit's slot from 0.
+static func make_slot_offset(formation: Formation, kind: String, k: int) -> Vector3:
+	return formation.offset_of(k) if kind == "mech" else formation.offset_of(k + 1)
 
 
 ## Formation slot offset in the leader's local frame (metres), for AI followers.
@@ -343,7 +333,7 @@ func player_spawn(k: int) -> Transform3D:
 	var pos := nav_points[0] if not nav_points.is_empty() else Vector3.ZERO
 	var look := nav_points[1] if nav_points.size() > 1 else pos + Vector3.FORWARD
 	var xf := Transform3D(Basis(Vector3.UP, yaw_towards(pos, look)), pos)
-	xf.origin += xf.basis * squad_slot_offset(k)
+	xf.origin += xf.basis * Formation.squad_slot(k)
 	return xf
 
 

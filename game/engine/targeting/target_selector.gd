@@ -88,7 +88,7 @@ static func _is_candidate(v: Node, profile: TargetProfile, ctx: Dictionary) -> b
 static func is_hidden(v: Node, profile: TargetProfile, ctx: Dictionary, distance: float) -> bool:
 	match profile.visibility:
 		TargetProfile.Visibility.RADAR:
-			return CloakRules.is_hidden_from_radar(ctx.get("viewer"), v)
+			return not ContactTable.is_swept(v) and CloakRules.is_hidden_from_radar(ctx.get("viewer"), v)
 		TargetProfile.Visibility.EYES:
 			return InfantryPack.is_hidden_at(v, distance) or CloakRules.is_hidden_from_eyes(v, distance)
 		TargetProfile.Visibility.SENSOR:

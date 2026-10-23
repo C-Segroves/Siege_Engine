@@ -82,6 +82,4 @@ func has_squad_keys() -> bool:
 
 ## The unit's slot behind `commander` (its leader frame), for formation orders: rows of three.
 func make_formation_offset(index: int) -> Vector3:
-	var row := index / 3 + 1
-	var col := index % 3 - 1
-	return Vector3(col * FORMATION_SPACING, 0.0, row * FORMATION_SPACING)
+	return Formation.rows_slot(index, FORMATION_SPACING)

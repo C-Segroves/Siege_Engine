@@ -15,8 +15,6 @@ signal mission_over(success: bool, code: int, text: String)
 
 ## Mission variables the campaigns carry between missions (Earthsiege 1, Starsiege and Tribes keep 100).
 const MISSION_VAR_COUNT := 100
-## Player squad starts: wingmen alternate left / right, SQUAD_SPACING apart and back (Earthsiege and Starsiege).
-const SQUAD_SPACING := 25.0
 ## Debriefing codes the Darkstar-era games (Starsiege, Tribes, Aerial Assault, Vengeance) store in mission var 0.
 const CODE_SUCCESS := 1
 const CODE_FAILED := 6
@@ -72,14 +70,6 @@ func _default_vars() -> PackedInt32Array:
 	var v := PackedInt32Array()
 	v.resize(MISSION_VAR_COUNT)
 	return v
-
-
-## Offset of player-squad slot k from the leader's start, in the leader's frame (slot 0 = leader).
-static func squad_slot_offset(k: int) -> Vector3:
-	if k <= 0:
-		return Vector3.ZERO
-	var row := (k + 1) / 2
-	return Vector3((k % 2 * 2 - 1) * SQUAD_SPACING * row, 0, SQUAD_SPACING * row)
 
 
 ## Host: spawns the mission's units.
