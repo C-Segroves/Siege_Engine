@@ -156,9 +156,20 @@ The old path is deleted in the same chunk once its trace passes.
 
 Same method for each: golden trace, then a shared primitive in `engine/`, then per-game adapters.
 
-- **Targeting:**
-  - Sources: `es1/ai_pilot.gd` `_find_target`, `infantry_bot.gd` `_find_target`, `tribes_turret.gd` and `ss_turret.gd` `find_target`, `wingman_radio.gd`, `tribes_bot.gd`, `engine/targeting.gd`.
-  - Becomes one `TargetSelector` (TeamRelations filter, range, LOS, stickiness, priority).
+- **Targeting (done 2026-10-22):**
+  - `engine/targeting/target_selector.gd` (`TargetSelector.pick` / `keeps` / `is_live` / `is_hostile_live`) is the one AI target choice: native
+    distance prefilter over the "vehicles" group, hostility (TeamRelations, or the profile's rule), strict range, cloak and radar
+    visibility (`CloakRules`, `InfantryPack` jam radius, `RadarMode` signature), optional arc / line-of-sight veto tried nearest first,
+    stickiness (`keeps`). `TargetProfile` is the per-game data: range, visibility mode, signature weighting, keep buffer, think period.
+  - Profiles, each keeping its original rule: ES1 `AIPilot` (radar visibility, passive units seen from half as far, range by order: sensor_range,
+    0.6x on GUARD, unlimited on SEARCH); soldier bots (`InfantryBot`, Tribes 2 ai.cs AIFindClosestEnemy: eyes, jam radius, cloak reveal range 8 m;
+    `TribesBot._make_order_target` picks the reach: INF for ENGAGE, 60 m on hold); Tribes turrets (datablock range and sensor, 0.2 s think,
+    arc + LOS veto); Starsiege turrets (SSTeams, `engage_range` held to `+ deactivate_buffer`, datablock check_interval); Battledrome turret (side as team).
+  - Deleted: `TurretTargeting`, the `AIPilot` / `InfantryBot` search loops, the turret `is_hostile` lambdas, `WingmanRadio._is_hostile_alive`.
+    `Targeting` (the player's T / C keys) shares `TargetSelector.is_live` for its candidates; its cone and cycling scoring is player UI and stays.
+  - Candidates come from the "vehicles" group, not EntityTable / InterestGrid cells: those exist on the network server only and carry no
+    dormant / stowed / cloak state. Swapping the candidate source is one function (the loop in `pick`) when the cells grow those flags.
+  - Test: `tests/target_selector_check` (seeded layout against a brute-force reference, then each rule).
 - **Sensors:**
   - Sources: the ES1/ES2 `is_safe` / detection and range constants, `ss_sensors.gd`, `tribes_sensor_net.gd`, `tribes_contacts.gd`, `sensor_towers.gd`, `radar_contacts.gd`, `line_of_sight.gd`.
   - Becomes `SensorSource` + `ContactTable` + a per-game `SensorProfile`.

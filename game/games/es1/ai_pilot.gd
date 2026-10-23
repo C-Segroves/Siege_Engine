@@ -34,6 +34,7 @@ var _think := 0.0
 ## BotSleep tier: 0 NEAR (full), 1 MID (thinned target search, line of sight checked less often).
 var ai_lod := 0
 var _decisions := 0
+var _target_profile := _make_pilot_profile()
 var _strafe := 1.0
 var _was_alerted := false
 var _los_due_ms := 0
@@ -82,9 +83,12 @@ static func order_from_original(code: int) -> int:
 func _ready() -> void:
 	if herc:
 		guard_point = herc.global_position
-		herc.damaged.connect(func(_h, attacker):
-			if attacker is Herc and attacker.team != herc.team:   # neutral teams (TeamRelations) still answer fire
-				wake(attacker))
+		herc.damaged.connect(_on_herc_damaged)
+
+
+func _on_herc_damaged(_h: Herc, attacker: Node) -> void:
+	if attacker is Herc and attacker.team != herc.team:   # neutral teams (TeamRelations) still answer fire
+		wake(attacker)
 
 
 func wake(by: Node = null) -> void:
@@ -114,6 +118,14 @@ func _physics_process(delta: float) -> void:
 		_pursue_objective()
 	else:
 		_move_by_orders()
+
+
+static func _make_pilot_profile() -> TargetProfile:
+	var profile := TargetProfile.new()
+	profile.visibility = TargetProfile.Visibility.RADAR
+	profile.weigh_signature = true
+	profile.herc_only = true
+	return profile
 
 
 func _reconsider() -> void:
@@ -155,21 +167,16 @@ func _follow_leader_cloak() -> void:
 		herc.cloak_input = _leader_cloak_seen
 
 
+## The nearest hostile the pilot's sensors find within `range`. Original ES1 behaviour: radar finds a cloaked unit only
+## as the cloak rules allow, and a passive (EMCON) unit is seen from half as far (RadarMode.SIGNATURE_PASSIVE).
 func _find_target(range: float) -> Herc:
-	var best: Herc = null
-	var best_d := range
-	for v in herc.get_tree().get_nodes_in_group("vehicles"):
-		var d: float = herc.global_position.distance_to(v.global_position)
-		if d >= best_d:   # the signature only shortens how far a unit is seen: beyond the best so far, out (a native test first)
-			continue
-		if v == herc or not v.alive or not TeamRelations.is_hostile(herc.team, v.team) or v.has_meta("dormant"):
-			continue
-		if CloakRules.is_hidden_from_radar(herc, v):   # a cloaked unit the pilot's sensors do not find
-			continue
-		if d / RadarMode.make_signature(v) < best_d:   # a passive (EMCON) unit is seen from half as far
-			best_d = d / RadarMode.make_signature(v)
-			best = v
-	return best
+	return TargetSelector.pick(herc.get_tree(), _make_target_profile(range),
+		{"from": herc.global_position, "team": herc.team, "viewer": herc}) as Herc
+
+
+func _make_target_profile(range: float) -> TargetProfile:
+	_target_profile.range_m = range
+	return _target_profile
 
 
 func _idle() -> void:

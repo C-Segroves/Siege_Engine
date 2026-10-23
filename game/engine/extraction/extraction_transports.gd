@@ -20,6 +20,8 @@ const STATE_DEPARTING := "departing"
 const TRANSPORT_PROTECTION := 100000.0
 const TRANSPORT_SKILL := 0.5
 const DROP_LANDING_SPACING := 35.0
+## A transport appears this far beyond the map edge.
+const EDGE_MARGIN_M := 60.0
 const DELIVERY_DROPSHIP := "dropship"
 const DELIVERY_TROOP := "troop"
 const STATE_CLOSED := "closed"
@@ -173,7 +175,7 @@ func spawn_delivery_transport(vehicle_id: String, landing: Vector3, approach_m: 
 func _spawn_flight(vehicle_id: String, landing: Vector3, approach_m: float, hover_height: float) -> Flyer:
 	var rules := ExtractionRules.transport()
 	var height := float(rules.get("altitude_m", 45.0))
-	var from := director.map.make_approach_point(landing, approach_m)
+	var from := director.map.make_approach_point(landing, make_entry_distance(landing, approach_m))
 	from.y = MapBuilder.ground_height(battle, from) + height
 	var to := landing - from
 	var exit := landing + Vector3(to.x, 0.0, to.z).normalized() * float(rules.get("leave_m", 500.0))
@@ -188,10 +190,24 @@ func _spawn_flight(vehicle_id: String, landing: Vector3, approach_m: float, hove
 		return null
 	fl.set_meta("dormant", true)
 	fl.set_meta("transport", true)
+	SupportCraft.mark(fl)
 	var flight := TransportFlight.make(fl, landing, exit, height)
 	flight.hover_height = hover_height
 	fl.ai = flight
 	return fl
+
+
+## How far out from `landing` a transport appears: the map edge plus EDGE_MARGIN_M (no more than `approach_m`), so it
+## spends as little time outside the playable area as it can.
+func make_entry_distance(landing: Vector3, approach_m: float) -> float:
+	if battle.bounds == null or not battle.bounds.bounds.has_area:
+		return approach_m
+	var out := Vector2(landing.x, landing.z) - director.map.make_center()
+	if out.length() < 1.0:
+		out = Vector2.RIGHT
+	var dir := Vector3(out.x, 0.0, out.y).normalized()
+	var to_edge := CallinAirLine.make_edge_distance(battle.bounds.bounds.area, landing, dir, 1.0, approach_m)
+	return minf(approach_m, to_edge + EDGE_MARGIN_M)
 
 
 func _flight_of(net_id: int) -> TransportFlight:

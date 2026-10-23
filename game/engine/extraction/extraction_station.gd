@@ -144,6 +144,7 @@ func _apply_buy(peer: int, item_id: String, account: int) -> void:
 ## The owner pays the rest of a station purchase from his account.
 @rpc("authority", "reliable", "call_local")
 func _charge_account(amount: int) -> void:
-	var profile := ExtractionProfile.load_for(Net.player_name)
-	profile.money = maxi(profile.money - amount, 0)
-	profile.save()
+	var wallet := OperatorProfile.load_for(Net.player_name)
+	wallet.credits = maxi(wallet.credits - amount, 0)
+	wallet.stats.spent = int(wallet.stats.get("spent", 0)) + amount
+	wallet.save()

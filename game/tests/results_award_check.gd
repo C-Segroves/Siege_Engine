@@ -9,7 +9,12 @@ const SETTINGS := {"mode": "vs", "game_mode": "ctf"}
 const PILOT := "Ace"
 ## Goal id -> the row field that completes it.
 const GOAL_FIELDS := {"kills10": "kills", "kills20": "kills", "vehicles3": "vehicle_kills", "survive": "survived",
-	"objectives2": "objectives", "flag2": "flag_captures"}
+	"objectives2": "objectives", "flag2": "flag_captures", "assists3": "assists", "assists8": "assists",
+	"damage1500": "damage", "damage4000": "damage", "alive240": "seconds_alive"}
+## The goals that read BattleStats numbers (a goal pays at most this many times what the ledger pays for the same work).
+const STAT_GOAL_KINDS := ["assists", "damage", "seconds_alive"]
+## The goal board is a seeded pick of the pool: seeds tried to find a board that offers the goals a check picks.
+const SEED_TRIES := 2000
 
 var _failures := 0
 
@@ -40,13 +45,25 @@ func _goal_lines(award: Dictionary) -> Array:
 	return (award.get("lines", []) as Array).filter(func(l: Dictionary) -> bool: return str(l.text).begins_with("Goal:"))
 
 
-func _total(row_stats: Dictionary, picked := []) -> int:
-	return int(ResultsAward.make(_summary(row_stats), SETTINGS, PILOT, picked).get("total", 0))
+func _total(row_stats: Dictionary, picked := [], settings := SETTINGS) -> int:
+	return int(ResultsAward.make(_summary(row_stats), settings, PILOT, picked).get("total", 0))
 
 
-## The credits goal `id` adds when the pilot picked it and his row is `row_stats`.
+## The credits goal `id` adds when the pilot picked it (on a board that offers it) and his row is `row_stats`.
 func _goal_pay(id: String, row_stats: Dictionary) -> int:
-	return _total(row_stats, [id]) - _total(row_stats)
+	var settings := _settings_offering([id])
+	return _total(row_stats, [id], settings) - _total(row_stats, [], settings)
+
+
+## The CTF settings with a goal seed whose board offers every goal of `ids` ({} when none does).
+func _settings_offering(ids: Array) -> Dictionary:
+	for seed_value in range(1, SEED_TRIES):
+		var settings := SETTINGS.duplicate()
+		settings[GameOptionsModel.GOAL_SEED_KEY] = seed_value
+		var board := LobbyGoals.make_board(settings)
+		if ids.all(func(id: String) -> bool: return not _find_goal(board, id).is_empty()):
+			return settings
+	return SETTINGS
 
 
 func _find_goal(board: Array, id: String) -> Dictionary:
@@ -58,10 +75,9 @@ func _find_goal(board: Array, id: String) -> Dictionary:
 
 func _check_every_goal_kind() -> void:
 	print("goals:")
-	var board := LobbyGoals.make_board(SETTINGS)
 	for id in GOAL_FIELDS:
-		var goal := _find_goal(board, id)
-		_expect(not goal.is_empty(), "the board of a CTF match offers %s" % id)
+		var goal := _find_goal(LobbyGoals.make_board(_settings_offering([id])), id)
+		_expect(not goal.is_empty(), "a board of a CTF match can offer %s" % id)
 		if goal.is_empty():
 			continue
 		var field: String = GOAL_FIELDS[id]
@@ -69,6 +85,7 @@ func _check_every_goal_kind() -> void:
 		var short_row := {field: false if field == "survived" else int(goal.count) - 1}
 		_expect(_goal_pay(id, met_row) == int(goal.reward), "%s pays %d cr when met" % [id, int(goal.reward)])
 		_expect(_goal_pay(id, short_row) == 0, "%s pays nothing when not met" % id)
+	_check_stat_goal_balance()
 	var unpicked := ResultsAward.make(_summary({"kills": 30, "vehicle_kills": 9, "survived": true}), SETTINGS, PILOT, [])
 	_expect(_goal_lines(unpicked).is_empty(), "a goal he did not pick pays nothing")
 	_expect(GoalBoard.is_done({"kind": "assists", "count": 3}, {"assists": 3}) and not GoalBoard.is_done({"kind": "assists", "count": 3}, {"assists": 2}),
@@ -76,6 +93,31 @@ func _check_every_goal_kind() -> void:
 	_expect(GoalBoard.is_done({"kind": "damage", "count": 500}, {"damage": 600}) and GoalBoard.is_done({"kind": "seconds_alive", "count": 120}, {"seconds_alive": 130.0}),
 		"damage and time alive goals read their stats")
 	_expect(GoalBoard.is_done({"kind": "extractions", "count": 1}, {"extractions": 1}), "an extractions goal reads the extractions stat")
+
+
+## The goals that use the BattleStats numbers pay like the rest of the pool: a harder goal of a kind pays more in total and not
+## less per unit, an assists goal pays more per assist than the ledger does (it asks for a streak) but at most three times as
+## much, and every goal can be met in a match: the time-alive ones within the shortest match the ledger pays (min_match_s) x 5.
+func _check_stat_goal_balance() -> void:
+	print("stat goal balance:")
+	var pool: Array = (EconomyRules.goals().pool as Array).filter(func(g: Dictionary) -> bool: return str(g.scope) == GoalBoard.SCOPE_INDIVIDUAL)
+	var earn := EconomyRules.make_earn_row(EconomyRules.make_mode_key(SETTINGS))
+	for kind in STAT_GOAL_KINDS:
+		var goals := pool.filter(func(g: Dictionary) -> bool: return str(g.kind) == kind)
+		goals.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return int(a.count) < int(b.count))
+		_expect(goals.size() >= 1, "the pool has a %s goal" % kind)
+		for i in range(1, goals.size()):
+			var easy: Dictionary = goals[i - 1]
+			var hard: Dictionary = goals[i]
+			_expect(int(hard.reward) > int(easy.reward) and float(hard.reward) / int(hard.count) >= float(easy.reward) / int(easy.count),
+				"%s pays more than %s, and not less per unit" % [hard.id, easy.id])
+		for g in goals:
+			_expect(int(g.reward) > 0 and (g.modes as Array).has("vs") and (g.modes as Array).has("coop"), "%s pays and is offered in vs and co-op" % g.id)
+	for g in pool.filter(func(g: Dictionary) -> bool: return str(g.kind) == "assists"):
+		var per_assist := float(g.reward) / int(g.count)
+		_expect(per_assist > float(earn.per_assist) and per_assist <= 3.0 * float(earn.per_assist), "%s pays %.1f cr per assist (ledger %d)" % [g.id, per_assist, int(earn.per_assist)])
+	for g in pool.filter(func(g: Dictionary) -> bool: return str(g.kind) == "seconds_alive"):
+		_expect(int(g.count) <= int(EconomyRules.data().earn.min_match_s) * 5, "%s can be met in a short match" % g.id)
 
 
 func _check_ledger_rates() -> void:
@@ -95,7 +137,8 @@ func _check_host_and_client_agree() -> void:
 	var summary := _summary({"kills": 12, "survived": true, "assists": 2})
 	summary.pilots.append({"name": "Other", "team": 1, "kills": 1, "deaths": 3, "player": true, "survived": false})
 	var picked := {PILOT: ["kills10", "survive"], "Other": ["kills10"]}
-	summary["awards"] = ResultsAward.make_all(summary, SETTINGS, picked)
+	var settings := _settings_offering(["kills10", "survive"])
+	summary["awards"] = ResultsAward.make_all(summary, settings, picked)
 	_expect((summary.awards as Dictionary).has(PILOT) and (summary.awards as Dictionary).has("Other"), "the host makes an award for every pilot row")
 	var wire: Dictionary = bytes_to_var(var_to_bytes(summary))   # what the _finish rpc carries
 	_expect(ResultsAward.for_pilot(wire, PILOT) == ResultsAward.for_pilot(summary, PILOT), "the client holds the host's award as made")

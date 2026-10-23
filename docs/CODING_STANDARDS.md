@@ -96,6 +96,7 @@ touches cleaner than it found it.
 | `mine_drop` | B (Tribes 2; Tribes 1 M) | d-pad down | on foot: hold and release to throw a mine |
 | `pack_use` | R (Tribes 2; Tribes 1 P) | d-pad right | switch the worn backpack on / off (repair, shield, sensor jammer) |
 | `repair_kit_use` | H (Tribes 1; Tribes 2 Q) | left stick click | use a repair kit |
+| `structure_repair` | R | back paddle 1 | a Herc without a repair pack: hold next to a structure to repair it (`RepairDirector`; capturing it when hostile) |
 | `inventory_toggle` | I | hold X (0.5 s) | extraction raid: open / close the inventory panel (`InventoryPanel`) |
 | `exfil_call` | O | hold right stick click (1 s) | extraction raid: call an exfil transport to the nearest extraction zone |
 | `fire_group_1` / `fire_group_2` | mouse left / mouse right | RB / LB | weapon groups (on foot: `fire_group_1` fires the weapon in hand) |

@@ -257,7 +257,7 @@ func _check_repair_pack(battle: Battle, base: TribesBase, gen: TribesBaseObject)
 	s.kit.pack_active = true
 	s.global_position = gen.global_position + Vector3.UP * 0.5
 	s.velocity = Vector3.ZERO
-	_expect(base.find_repair_target(s) == gen, "the repair pack finds the damaged generator in reach")
+	_expect(RepairWork.find_pack_target(get_tree(), s) == gen, "the repair pack finds the damaged generator in reach")
 	await _seconds(REPAIR_WAIT_SECONDS)
 	_expect(gen.hp > hurt, "the repair pack repairs it (%.0f -> %.0f hp)" % [hurt, gen.hp])
 	s.kit.pack_active = false

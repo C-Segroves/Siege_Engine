@@ -1,20 +1,22 @@
-class_name TribesRepairBeam
+class_name RepairBeam
 extends MeshInstance3D
-## The repair beam between a repairing soldier and the base object he works on (shown on every peer): a thin glowing
-## cylinder stretched between the two points (the originals draw the RepairBolt / DefaultRepairBeam from the gun).
+## The one repair beam between a repairing unit and what it works on - a base object, a structure, a teammate, a
+## vehicle (shown on every peer): a thin glowing cylinder stretched between the two points (the originals draw the
+## RepairBolt / DefaultRepairBeam from the gun).
 
 const COLOR := Color(0.35, 1.0, 0.55, 0.9)
-## Where the beam starts on a soldier and ends on an object, above their origins (metres).
+## Where the beam starts or ends, above the origin of a soldier, a Herc-sized vehicle and a structure (metres).
 const SOLDIER_CHEST := 1.3
+const VEHICLE_MIDDLE := 3.0
 const OBJECT_MIDDLE := 1.5
 const MIN_LENGTH := 0.05
 
 
-static func make(parent: Node) -> TribesRepairBeam:
-	var b := TribesRepairBeam.new()
+static func make(parent: Node) -> RepairBeam:
+	var b := RepairBeam.new()
 	b.name = "RepairBeam"
 	var cyl := CylinderMesh.new()
-	cyl.top_radius = float(BaseRepairRules.feedback().get("beam_radius_m", 0.06))
+	cyl.top_radius = float(RepairRules.feedback().get("beam_radius_m", 0.06))
 	cyl.bottom_radius = cyl.top_radius
 	cyl.height = 1.0
 	cyl.radial_segments = 8
@@ -30,6 +32,16 @@ static func make(parent: Node) -> TribesRepairBeam:
 	b.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	parent.add_child(b)
 	return b
+
+
+## The point of `node` the beam touches.
+static func make_anchor(node: Node3D) -> Vector3:
+	var height := OBJECT_MIDDLE
+	if node is Infantry:
+		height = SOLDIER_CHEST
+	elif node is Herc:
+		height = VEHICLE_MIDDLE
+	return node.global_position + Vector3.UP * height
 
 
 ## Stretches the beam from `a` to `b` (world).

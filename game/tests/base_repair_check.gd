@@ -1,6 +1,7 @@
 extends Node
-## Base objects are never removed and can be repaired (docs/TRIBES_BASE_EQUIPMENT.md; BaseRepairRules), on a Tribes 1
-## and a Tribes 2 map in real battles:
+## Base objects are never removed and can be repaired (docs/TRIBES_BASE_EQUIPMENT.md; RepairRules, BaseCapture), on a
+## Tribes 1 and a Tribes 2 map in real battles:
+##   units       the repair pack mends a hurt teammate and a vehicle in reach (not its wearer meanwhile) at the game's rate;
 ##   standing    a destroyed generator / turret stays in the world as a ruin (disabled, not removed); its power
 ##               effect holds: a generator down powers its base off;
 ##   faction     a guard soldier of the owner's side walks to the downed generator and repairs it (Task.REPAIR),
@@ -9,11 +10,14 @@ extends Node
 ##               it: its team becomes his, it fires at its old faction; it returns to the owner when the time is up
 ##               and when it is destroyed; the owner's repair work takes it back; a captured generator powers the
 ##               capturer's side and not the owner's;
+##   structures  (one Tribes 2 battle) a Herc holding the repair action mends an Earthsiege / Starsiege structure at a share
+##               of its hit points per second, captures a hostile one, and cannot revive a destroyed or indestructible one;
 ##   sync        a client applies the host's team / repair messages (their receiving functions called as the RPC does).
 ## godot --headless --audio-driver Dummy --path game res://tests/base_repair_check.tscn
 
 const SavedCampaignGuard := preload("res://tests/saved_campaign_guard.gd")
 const MAPS := ["tribes:Raindance", "tribes2:Katabatic"]
+const GAMES := ["tribes", "tribes2", "es1", "es2", "starsiege"]
 const SETTLE_FRAMES := 30
 const TIME_SCALE := 4.0
 const TARGET_VEHICLE := "es1:SCORPION"
@@ -29,6 +33,14 @@ const HIT_WAIT := 2.0
 const CREW_DISTANCE := 7.0
 const CREW_DROP := 4.0
 const TEST_CAPTURE_SECONDS := 40.0
+const MATE_GAP := 2.0
+const HURT_SHARE := 0.5
+const HERC_PEER := 99
+const STRUCTURE_GAP := 12.0
+const HOLD_WAIT := 3.0
+const ES1_STRUCTURE := "es1:BASES_0"
+const SS_STRUCTURE := "starsiege:htroopplanetdefense"
+const STRUCTURE_HP := 15000.0
 
 var _failures := 0
 var _guard := SavedCampaignGuard.new()
@@ -73,8 +85,16 @@ func _until(done: Callable, limit: float) -> bool:
 
 func _check_rules() -> void:
 	print("rules:")
-	_expect(BaseRepairRules.is_capture_on() and BaseRepairRules.make_capture_seconds() > 0.0, "capture is on, with a duration from data")
-	_expect(float(BaseRepairRules.faction().get("search_m", 0.0)) > 0.0 and float(BaseRepairRules.faction().get("reach_m", 0.0)) > 0.0,
+	for pack in GAMES:
+		_expect(BaseCapture.is_on(pack) and BaseCapture.make_seconds(pack) > 0.0, "%s: capture is on, with a duration from data" % pack)
+		var hold := RepairRules.hold(pack)
+		_expect(float(hold.get("reach_m", 0.0)) > 0.0 and float(hold.get("hp_share_per_s", 0.0)) > 0.0,
+			"%s: the hold repair has its reach and rate in data" % pack)
+	_expect(RepairRules.make_unit_rate_source("tribes2") == RepairRules.UNIT_RATE_PACK and RepairRules.make_unit_rate_source("tribes") == "object",
+		"Tribes 2 mends a teammate at the pack's own rate, Tribes 1 at the object rate (RepairGunImage / RepairBolt)")
+	_expect(float(RepairRules.make_beam("tribes").get("range", 0.0)) > 0.0 and float(RepairRules.make_beam("tribes2").get("per_s", 0.0)) > 0.0,
+		"both Tribes games have their repair beam's reach and rate")
+	_expect(float(RepairRules.faction().get("search_m", 0.0)) > 0.0 and float(RepairRules.faction().get("reach_m", 0.0)) > 0.0,
 		"the faction repair crew has its search and reach in data")
 
 
@@ -90,6 +110,9 @@ func _check_map(map_id: String) -> void:
 			func(g: TribesBaseObject) -> bool: return base.grid.make_powered_groups([g.power_group]).has(turret.power_group))
 		_expect(not gens.is_empty(), "the turret's group is fed by %d generator(s)" % gens.size())
 		if not gens.is_empty():
+			await _check_units(battle)
+			if map_id == MAPS[-1]:
+				await _check_structures(battle)
 			await _check_standing(base, turret, gens)
 			await _check_faction_repair(battle, base, turret, gens)
 			await _check_capture(battle, base, turret)
@@ -215,7 +238,7 @@ func _check_capture(battle: Battle, base: TribesBase, turret: TribesTurret) -> v
 	s.velocity = Vector3.ZERO
 	s.kit.pack_active = true
 	s.capacitor = s.capacitor_max
-	_expect(base.find_repair_target(s) == turret, "the repair pack finds the downed enemy turret in reach")
+	_expect(RepairWork.find_pack_target(get_tree(), s) == turret, "the repair pack finds the downed enemy turret in reach")
 	var captured := await _until(func() -> bool: return turret.is_captured(), REPAIR_WAIT)
 	_expect(captured and turret.team == PLAYER_TEAM and turret.home_team == OWNER_TEAM,
 		"repairing it captures it for the player's team (owner %d, now %d)" % [turret.home_team, turret.team])
@@ -250,12 +273,12 @@ func _check_capture(battle: Battle, base: TribesBase, turret: TribesTurret) -> v
 		"a captured turret that is destroyed goes back to its owner as a ruin")
 	# the owner's repair work after a capture takes it back
 	turret.apply_capture(PLAYER_TEAM, TEST_CAPTURE_SECONDS)
-	base.apply_object_repair(turret, OWNER_TEAM, 10.0)
+	BaseCapture.apply_work(turret, OWNER_TEAM, 10.0)
 	_expect(turret.team == OWNER_TEAM and not turret.is_captured(), "the owner repairing a captured object recaptures it")
 	# an allied repairer does not capture
 	_destroy(turret)
 	TeamRelations.apply_stance(PLAYER_TEAM, OWNER_TEAM, TeamRelations.ALLIED)
-	base.apply_object_repair(turret, PLAYER_TEAM, 10.0)
+	BaseCapture.apply_work(turret, PLAYER_TEAM, 10.0)
 	_expect(turret.team == OWNER_TEAM and not turret.is_captured(), "an ally's repair work does not capture")
 	TeamRelations.clear()
 	s.team = OWNER_TEAM
@@ -266,10 +289,7 @@ func _check_capture(battle: Battle, base: TribesBase, turret: TribesTurret) -> v
 
 ## An old-faction (team 0) target the turret sees: a vehicle placed in its range, arc and sight.
 func _make_enemy(battle: Battle, turret: TribesTurret) -> Herc:
-	var enemy := battle.spawn_ai(TARGET_VEHICLE, OWNER_TEAM, Transform3D(Basis(), turret.global_position + Vector3(0, 500, 0)), [], "Target", {"skill": 0.0})
-	for c in enemy.get_children():
-		if c is AIPilot:
-			c.queue_free()
+	var enemy := _spawn_still_herc(battle, OWNER_TEAM, turret.global_position + Vector3(0, 500, 0))
 	enemy.end_spawn_protection()
 	for share in SPOT_SHARES:
 		for k in SPOT_BEARINGS:
@@ -342,3 +362,146 @@ func _check_sync(base: TribesBase, turret: TribesTurret) -> void:
 	_expect(turret.alive and turret.is_enabled(), "and a repaired one stand up again")
 	turret._apply_team_state(OWNER_TEAM, 0.0, OWNER_TEAM)
 	_expect(turret.team == OWNER_TEAM and not turret.is_captured(), "the host's release returns it")
+
+
+# ------------------------------------------------------------------ teammates and vehicles
+
+## A parked Herc of `team` (its pilot stopped).
+func _spawn_still_herc(battle: Battle, team: int, at: Vector3) -> Herc:
+	var herc := battle.spawn_ai(TARGET_VEHICLE, team, Transform3D(Basis(), at), [], "Target", {"skill": 0.0})
+	for c in herc.get_children():
+		if c is AIPilot:
+			(c as AIPilot).set_physics_process(false)
+	herc.end_spawn_protection()
+	return herc
+
+
+## Hurts the first component of `unit` to HURT_SHARE of its hit points.
+static func _hurt(unit: Herc) -> void:
+	unit.components[0].hp = float(unit.components[0].max) * HURT_SHARE
+	unit.integrity = HercDamage.integrity_of(unit.components)
+
+
+static func _hp(unit: Herc) -> float:
+	return float(unit.components[0].hp)
+
+
+func _check_units(battle: Battle) -> void:
+	print(" teammates and vehicles:")
+	var s := battle.player as Infantry
+	var pack_id := _repair_pack_id(s)
+	if pack_id == "":
+		return
+	s.spawn_protection = 100000.0
+	s.apply_spawn_protection()
+	s.team = PLAYER_TEAM
+	s.kit.pack_id = pack_id
+	s.capacitor = s.capacitor_max
+	s.velocity = Vector3.ZERO
+	var beam := RepairRules.make_beam(pack_id)
+	var spec := battle.infantry.bots.make_bot_spec(battle.infantry.pack, 0)
+	spec.team = PLAYER_TEAM
+	spec.xf = Transform3D(Basis(), s.global_position + Vector3(MATE_GAP, 0, 0))
+	var brain := battle.infantry.bots.spawn_bot(spec, 0.5)
+	_expect(brain != null, "a teammate soldier is fielded")
+	if brain == null:
+		return
+	brain.set_physics_process(false)
+	var mate := brain.soldier
+	mate.spawn_protection = 100000.0
+	mate.apply_spawn_protection()
+	mate.global_position = s.global_position + Vector3(MATE_GAP, 0, 0)
+	_hurt(mate)
+	_hurt(s)
+	var mate_hp := _hp(mate)
+	var own_hp := _hp(s)
+	s.kit.pack_active = true
+	await _frames(3)
+	_expect(RepairWork.find_pack_target(get_tree(), s) == mate, "the repair pack finds the hurt teammate in reach")
+	var expected := RepairWork.make_pack_rate(s, mate)
+	var by_pack := RepairRules.make_unit_rate_source(pack_id) == RepairRules.UNIT_RATE_PACK
+	var wanted := float(InfantryGear.pack(pack_id).get("repair_per_s", 0.0)) if by_pack else float(beam.get("per_s", 0.0))
+	_expect(is_equal_approx(expected, wanted), "his rate is the %s rate (%.0f /s)" % ["pack's own" if by_pack else "object", expected])
+	await _until(func() -> bool: return _hp(mate) > mate_hp + expected * 0.5, REPAIR_WAIT)
+	_expect(_hp(mate) > mate_hp, "the pack mends the teammate (%.0f -> %.0f)" % [mate_hp, _hp(mate)])
+	_expect(is_equal_approx(_hp(s), own_hp), "and not its wearer meanwhile (%.0f)" % _hp(s))
+	mate.components[0].hp = float(mate.components[0].max)
+	mate.integrity = 1.0
+	await _until(func() -> bool: return _hp(s) > own_hp, REPAIR_WAIT)
+	_expect(_hp(s) > own_hp, "with nobody left to mend it heals its wearer (%.0f -> %.0f)" % [own_hp, _hp(s)])
+	var ally := _spawn_still_herc(battle, PLAYER_TEAM, s.global_position + Vector3(MATE_GAP, 0, 0))
+	ally.global_position = s.global_position + Vector3(MATE_GAP, 0, 0)
+	_hurt(ally)
+	var hull := _hp(ally)
+	await _frames(3)
+	_expect(RepairWork.find_pack_target(get_tree(), s) == ally, "it finds a hurt allied vehicle in reach too")
+	await _until(func() -> bool: return _hp(ally) > hull, REPAIR_WAIT)
+	_expect(_hp(ally) > hull, "the pack mends the vehicle (%.0f -> %.0f)" % [hull, _hp(ally)])
+	ally.team = OWNER_TEAM
+	await _frames(3)
+	_expect(RepairWork.find_pack_target(get_tree(), s) != ally, "a hostile vehicle is not mended")
+	s.kit.pack_active = false
+	s.team = OWNER_TEAM
+	ally.queue_free()
+	mate.team = OWNER_TEAM         # the owner's side: neither hostile to the guard crew nor a target of the turret
+
+
+# ------------------------------------------------------------------ Herc structures
+
+## A structure of `team` beside `herc`, hurt to HURT_SHARE of its hit points.
+func _make_structure(battle: Battle, herc: Herc, team: int, at_offset: Vector3, ss := false) -> Structure:
+	var xf := Transform3D(Basis(), herc.global_position + at_offset)
+	var st: Structure
+	if ss:
+		st = SSStructure.make(battle, SS_STRUCTURE, xf, battle.palette_id, team, STRUCTURE_HP)
+	else:
+		st = Structure.create(battle, ES1_STRUCTURE, xf, battle.palette_id, team, STRUCTURE_HP)
+	st.hp = st.max_hp * HURT_SHARE
+	st.integrity = HURT_SHARE
+	return st
+
+
+func _check_structures(battle: Battle) -> void:
+	print(" Herc structures:")
+	var herc := _spawn_still_herc(battle, PLAYER_TEAM, (battle.player as Node3D).global_position + Vector3(0, 0, 40))
+	herc.owner_peer = HERC_PEER
+	var director := battle.infantry.repair
+	var share := float(RepairRules.hold("es1").get("hp_share_per_s", 0.0))
+	var mine := _make_structure(battle, herc, PLAYER_TEAM, Vector3(STRUCTURE_GAP, 0, 0))
+	director._apply_hold(HERC_PEER, true)
+	await _until(func() -> bool: return mine.hp >= mine.max_hp * (HURT_SHARE + share * HOLD_WAIT), HOLD_WAIT * 4.0)
+	director._apply_hold(HERC_PEER, false)
+	_expect(mine.hp >= mine.max_hp * (HURT_SHARE + share * HOLD_WAIT * 0.5), "a Herc holding repair mends a friendly structure (%.0f / %.0f hp)" % [mine.hp, mine.max_hp])
+	_expect(mine.team == PLAYER_TEAM and not mine.is_captured(), "and does not capture its own")
+	var held := mine.hp
+	await _frames(10)
+	_expect(is_equal_approx(mine.hp, held), "releasing the action stops the work")
+	mine.apply_repair(mine.max_hp)
+	var foe := _make_structure(battle, herc, OWNER_TEAM, Vector3(0, 0, STRUCTURE_GAP * 2.0))
+	director._apply_hold(HERC_PEER, true)
+	await _until(func() -> bool: return foe.is_captured(), HOLD_WAIT * 4.0)
+	director._apply_hold(HERC_PEER, false)
+	_expect(foe.is_captured() and foe.team == PLAYER_TEAM and foe.home_team == OWNER_TEAM, "repairing a hostile structure captures it (owner %d, now %d)" % [foe.home_team, foe.team])
+	BaseCapture.apply_work(foe, OWNER_TEAM, 1.0)
+	_expect(foe.team == OWNER_TEAM and not foe.is_captured(), "its owner's repair work takes it back")
+	foe.apply_capture(PLAYER_TEAM, TEST_CAPTURE_SECONDS)
+	foe.capture_left = 0.3
+	await _until(func() -> bool: return not foe.is_captured(), 2.0)
+	_expect(foe.team == OWNER_TEAM, "a capture that runs out returns the structure")
+	foe.apply_capture(PLAYER_TEAM, TEST_CAPTURE_SECONDS)
+	foe.destroy(null)
+	_expect(foe.team == OWNER_TEAM and not foe.is_captured() and not foe.alive, "a captured structure that is destroyed goes home as a ruin")
+	var before := foe.hp
+	BaseCapture.apply_work(foe, PLAYER_TEAM, 500.0)
+	_expect(not foe.alive and foe.hp == before and not foe.is_captured(), "a destroyed Herc structure is not repaired back to life nor captured")
+	var ss := _make_structure(battle, herc, OWNER_TEAM, Vector3(0, 0, -STRUCTURE_GAP * 2.0), true)
+	BaseCapture.apply_work(ss, PLAYER_TEAM, 500.0)
+	_expect(ss.is_captured() and ss.hp > STRUCTURE_HP * HURT_SHARE, "a Starsiege structure is repaired and captured by the same rules (%.0f hp)" % ss.hp)
+	ss.apply_release()
+	var rock := _make_structure(battle, herc, OWNER_TEAM, Vector3(-STRUCTURE_GAP * 2.0, 0, 0), true) as SSStructure
+	rock.indestructible = true
+	BaseCapture.apply_work(rock, PLAYER_TEAM, 500.0)
+	_expect(rock.hp == rock.max_hp * HURT_SHARE and not rock.is_captured(), "an indestructible one takes no repair")
+	for st in [mine, foe, ss, rock]:
+		st.queue_free()
+	herc.queue_free()

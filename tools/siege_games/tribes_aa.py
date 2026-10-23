@@ -44,6 +44,13 @@ def _audio(ctx):
              'names live in the executable).' % (n, voice, music))
 
 
+def _weapons(ctx):
+    import aa_weapons
+    n = aa_weapons.export(ctx.disc(1).path, ctx.pack_path())
+    ctx.note('Aerial Assault: %d hand weapons (damage, rate, ammo, speed, energy from the executable) with their rules per armour size.' % n)
+
+
 def steps(_ctx):
     return [Step('missions', 'Reading the campaign and converting the missions...', 120, _import),
-            Step('audio', 'Converting the sounds and music...', 90, _audio)]
+            Step('audio', 'Converting the sounds and music...', 90, _audio),
+            Step('weapons', 'Reading the hand weapons...', 20, _weapons)]

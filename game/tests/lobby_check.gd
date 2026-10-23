@@ -178,7 +178,8 @@ func _check_goals() -> void:
 	var mates := LobbyGoals.make_teammate_picks(s, roster, [1, 2], 1)
 	_expect(mates.size() == 1 and mates[0].name == "Kira" and mates[0].goals.size() == 2, "the teammates' picks are listed for the others only")
 	_expect(LobbyGoals.make_picked_ids(roster[1], s) == ids.slice(0, 2), "own picks are read from the roster entry")
-	var done := LobbyGoals.make_done(board, ids, {"kills": 99, "vehicle_kills": 99, "objectives": 99, "flag_captures": 99, "survived": true})
+	var done := LobbyGoals.make_done(board, ids, {"kills": 99, "vehicle_kills": 99, "objectives": 99, "flag_captures": 99, "survived": true,
+		"assists": 99, "damage": 99999, "seconds_alive": 9999.0})
 	_expect(done.size() == board.size(), "completed goals are found from the match stats")
 
 

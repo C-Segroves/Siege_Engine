@@ -198,3 +198,21 @@ Run time is roughly 15 to 25 minutes (inflating 3 GB, innoextract, 33 maps).
 ## Legal
 Code and format notes only; no game data in the repo; everything is read from the user's own copy. innoextract is a
 separate program (zlib license); see THIRD_PARTY_NOTICES.md.
+
+## Infantry weapons (`tools/tv_weapons.py`, `tools/ue2_classes.py`)
+Weapons are UnrealScript classes; their `defaultproperties` are a tagged-property stream at the end of each Class export
+(`ue2_classes.read_class_defaults` takes the longest clean stream ending at the export end), merged along the super chain
+(EquipmentClasses.pkg over Program/Bin/Gameplay.u). Eight weapons are exported to `gameplay/weapons_infantry.json`: Spinfusor,
+Chaingun, Blaster, Grenade Launcher, Mortar, Sniper Rifle, Rocket Pod, Burner (EnergyBlade, Grappler and Buckler are melee / no
+damage). Fields used: `roundsPerSecond`, `projectileVelocity`, `numberOfBullets`, `energyUsage`, `Spread`, `minSpread/maxSpread`,
+`numProjectiles`, `launchDelay`; projectile class `damageAmt`, `radiusDamageAmt/Size`, `LifeSpan`, `MaxVelocity`,
+`AccelerationMagtitude`, `GravityScale`, `postSpreadVelocity`; `LevelInfo.DefaultGravity` -1160 uu/s^2 (x GravityScale 1.2 = 19.9
+m/s^2, the same as Aerial Assault's -20).
+Units: 1/70 m per uu (a 4700 uu/s spinfusor = 67 m/s, the Tribes 2 disc speed). Damage: the light armour `Health` 75 = 1980 hp,
+26.4 hp per health point (spinfusor 58 -> 1531, close to the Tribes disc 1500). Energy x 0.6 (pool 100 -> 60). The armours' `AllowedWeapons`
+struct array ({typeClass, quantity}) gives the weapons and rounds per size, `maxCarriedWeapons` the slots, Health 75/100/195 and
+energy 100/105/125 (`infantry_rules.json`). The multiplayer loadout classes are not decoded: the default kit is Blaster, Chaingun,
+Spinfusor where allowed. Held models are the `*Held` static meshes of Content/Art/Weapons.pkg (`gameplay` shapes `weapons__*`),
+projectile meshes Disc, Grenade, Rocket; fire and impact sounds from `audio/sounds.json` (tv_weapons). Not modelled: chaingun
+heat, blaster bounce, burner burning area, rocket steering, sniper charge damage.
+Check: `res://tests/aa_tv_weapons_check.tscn` (shared with Aerial Assault).

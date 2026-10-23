@@ -698,18 +698,19 @@ func _check_blast(battle: Node, h: Herc) -> void:
 
 # ------------------------------------------------------------------ turret targeting
 
-## Every game's turret takes the nearest targetable hostile in range its own rules accept (TurretTargeting).
-func _check_turret_targeting(battle: Node, near: Herc) -> void:
-	var from: Vector3 = near.global_position + Vector3(5, 0, 0)
-	var all := func(_v: Node) -> bool: return true
-	_expect(TurretTargeting.find_nearest(get_tree(), {"from": from, "range": 20.0, "is_hostile": all}) == near,
-		"TurretTargeting: the nearest unit in range")
-	_expect(TurretTargeting.find_nearest(get_tree(), {"from": from, "range": 20.0,
-		"is_hostile": func(v: Node) -> bool: return v != near}) != near, "TurretTargeting: the game's hostility rule decides")
-	_expect(TurretTargeting.find_nearest(get_tree(), {"from": from, "range": 20.0, "is_hostile": all,
-		"accepts": func(_v: Node3D, _p: Vector3) -> bool: return false}) == null, "TurretTargeting: arc / sight tests veto")
+## Every game's turret takes the nearest targetable hostile in range its own rules accept (TargetSelector).
+func _check_turret_targeting(_battle: Node, near: Herc) -> void:
+	var ctx := {"from": near.global_position + Vector3(5, 0, 0), "team": -1}
+	var all := TargetProfile.make_turret().with_range(20.0)
+	all.hostile_rule = func(_a: int, _b: int) -> bool: return true
+	_expect(TargetSelector.pick(get_tree(), all, ctx) == near, "TargetSelector: the nearest unit in range")
+	var not_near := TargetProfile.make_turret().with_range(20.0)
+	not_near.hostile_rule = func(_a: int, b: int) -> bool: return b != int(near.team)
+	_expect(TargetSelector.pick(get_tree(), not_near, ctx) != near, "TargetSelector: the game's hostility rule decides")
+	ctx.accepts = func(_v: Node3D, _p: Vector3) -> bool: return false
+	_expect(TargetSelector.pick(get_tree(), all, ctx) == null, "TargetSelector: arc / sight tests veto")
 	near.set_meta("dormant", true)
-	_expect(not TurretTargeting.is_targetable(near), "TurretTargeting: dormant units are never targets")
+	_expect(not TargetSelector.is_live(near), "TargetSelector: dormant units are never targets")
 	near.remove_meta("dormant")
 
 

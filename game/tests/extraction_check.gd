@@ -529,8 +529,18 @@ func _check_raid_extract() -> void:
 	_expect(BattleCameras.make_follow_body(soldier) == transport, "X6: the chase camera follows the transport, not the rider inside it")
 	await _shot("1_dropin")
 	await _shot("x6_dropin_camera", "extraction2")
-	await _wait_for(func() -> bool: return not soldier.stowed, 60.0)
+	var bounds: MapBounds = battle.bounds.bounds
+	var seen := {"outside": bounds.is_outside(transport.global_position), "hurt": false}
+	transport.damaged.connect(func(_h: Herc, _a: Node) -> void: seen.hurt = true)
+	soldier.damaged.connect(func(_h: Herc, _a: Node) -> void: seen.hurt = true)
+	_expect(SupportCraft.is_exempt(transport) and SupportCraft.is_exempt(soldier), "the transport and its rider are support craft for the area rule")
+	await _wait_for(func() -> bool:
+		seen.outside = seen.outside or bounds.is_outside(transport.global_position)
+		seen.hurt = seen.hurt or not transport.alive or not soldier.alive
+		return not soldier.stowed, 90.0)
 	_expect(not soldier.stowed and soldier.alive, "landed and out at the insertion point")
+	_expect(not seen.hurt and transport.alive, "Katabatic: the insertion transport and its rider took no damage on the way (%s)" % [seen])
+	_expect(not SupportCraft.is_exempt(soldier), "once out, the rider is under the area rule again")
 	await _frames(10)
 	await _shot("2_landed")
 	await _check_bioderm(battle, soldier)
@@ -544,7 +554,40 @@ func _check_raid_extract() -> void:
 	await _check_task_kill(battle, soldier)
 	soldier.spawn_protection = 0.0
 	soldier.apply_spawn_protection()
+	await _check_long_way_in(battle, soldier)
 	await _check_exfil(battle, soldier)
+
+
+## A transport appearing from far out (2 km) is brought in at the map edge plus a margin, and a rider aboard it stays
+## unhurt through more seconds outside the area than the area rule needs to hurt anybody (Tribes: the first damage ~4 s out).
+func _check_long_way_in(battle: Battle, soldier: Infantry) -> void:
+	var x := battle.extraction
+	var bounds: MapBounds = battle.bounds.bounds
+	var vid := ExtractionTransports.pick_transport_id()
+	var landing := soldier.global_position
+	var entry := x.transports.make_entry_distance(landing, 2000.0)
+	_expect(entry < 2000.0 and bounds.is_outside(landing + (landing - Vector3(x.map.make_center().x, landing.y, x.map.make_center().y)).normalized() * entry),
+		"the transport appears just past the map edge (%.0f m out of 2000)" % entry)
+	var fl := x.transports.spawn_delivery_transport(vid, landing + Vector3(60, 0, 0), 2000.0, 0.0)
+	_expect(fl != null and SupportCraft.is_craft(fl), "a spawned transport is a support craft")
+	if fl == null:
+		return
+	var waiting := [1]
+	x.transports._board_all(fl, waiting)
+	var hurt := {"v": false}
+	fl.damaged.connect(func(_h: Herc, _a: Node) -> void: hurt.v = true)
+	soldier.damaged.connect(func(_h: Herc, _a: Node) -> void: hurt.v = true)
+	var r := bounds.area
+	fl.global_position = Vector3(r.end.x + 900.0, fl.global_position.y, r.get_center().y)   # (far outside)
+	await _wait_for(func() -> bool: return false, 9.0)
+	_expect(bounds.is_outside(fl.global_position) and soldier.stowed, "still outside the area after 9 s, the rider aboard")
+	_expect(fl.alive and soldier.alive and not hurt.v, "9 s outside the area aboard a support craft: neither the craft nor the rider is hurt")
+	x.transports._unload(fl)
+	await _wait_for(func() -> bool: return not soldier.stowed, 5.0)
+	battle.remove_vehicle(fl.net_id)
+	soldier.global_position = landing
+	soldier.velocity = Vector3.ZERO
+	await _frames(5)
 
 
 ## A Bioderm soldier wears the Tribes 2 Bioderm body over the Tribes 2 armour, with the weapon in its hand.
@@ -943,7 +986,14 @@ func _check_exfil(battle: Battle, soldier: Infantry) -> void:
 	soldier.apply_spawn_protection()
 	soldier.global_position = battle.infantry.make_on_ground(x.zones[zone] + Vector3(20, 0, 0)) + Vector3.UP * 0.3
 	soldier.velocity = Vector3.ZERO
-	await _wait_for(func() -> bool: return x.transports.exfils.has(zone) and x.transports.exfils[zone].state == "landed", 90.0)
+	var flown := {"outside": false, "hurt": false}
+	await _wait_for(func() -> bool:
+		var ft: Herc = battle.vehicles.get(int(x.transports.exfils[zone].net_id)) if x.transports.exfils.has(zone) else null
+		if ft != null and is_instance_valid(ft):
+			flown.outside = flown.outside or battle.bounds.bounds.is_outside(ft.global_position)
+			flown.hurt = flown.hurt or not ft.alive or ft.integrity < 1.0
+		return x.transports.exfils.has(zone) and x.transports.exfils[zone].state == "landed", 90.0)
+	_expect(flown.outside and not flown.hurt, "the exfil transport crossed the map edge and arrived undamaged")
 	_expect(x.transports.exfils.has(zone) and x.transports.exfils[zone].state == "landed", "the transport landed at zone %s" % ExtractionTransports.make_zone_name(zone))
 	var t: Herc = battle.vehicles.get(int(x.transports.exfils[zone].net_id)) if x.transports.exfils.has(zone) else null
 	if t == null:

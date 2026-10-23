@@ -5,11 +5,10 @@ extends Node
 ## becomes a TribesBaseObject (TribesTurret for armed turrets) in place of the plain shape MapBuilder placed.
 ##   power     TribesPowerGrid: generators power their group and the groups below; checked on every peer (each
 ##             sees the same damage states), so stations, turrets and sensors switch on and off everywhere;
-##   repair    host: a soldier whose repair pack is on repairs the nearest damaged base object within the repair
-##             beam's reach at the game's object repair rate (base_equipment.json "repair"); the repair work of a
-##             soldier not allied to the object's team captures it for BaseRepairRules capture.seconds
-##             (TribesBaseObject.apply_capture); a faction's guard soldiers repair their own downed objects
-##             (find_job_for, InfantryBot Task.REPAIR); every peer draws the repair beams (TribesRepairBeam);
+##   repair    the repair pack works on base objects like on any structure (RepairDirector, BaseCapture: the game's
+##             object repair rate from base_equipment.json "repair"; the repair work of a soldier not allied to the
+##             object's team captures it); a faction's guard soldiers repair their own downed objects (find_job_for,
+##             InfantryBot Task.REPAIR);
 ##   sensors   TribesSensorNet: what each team's radar shows (is_on_radar); not in an extraction raid, whose
 ##             radar is the mode's own;
 ##   teams     the map's team groups; in a free-for-all (GameModes.is_free_for_all) and in an extraction raid
@@ -34,8 +33,6 @@ const SENSOR_GROUP := "tribes_sensors"
 const MISSION_LIGHT_GROUP := "tribes_mission_lights"
 ## A bot's claim on an object it repairs lapses after this long without renewal.
 const JOB_STALE_SECONDS := 3.0
-## Meta of a soldier repairing an object without a pack (a faction's repair crew): the object, for the beam.
-const META_REPAIR_JOB := "repair_job"
 
 var battle: Node
 var objects: Array[TribesBaseObject] = []
@@ -50,7 +47,6 @@ var map_data: Dictionary = {}
 var _check_t := 0.0
 var _job_of := {}                # TribesBaseObject -> bot id repairing it (host)
 var _job_ms := {}                # TribesBaseObject -> msec of the claim's last renewal
-var _beams := {}                 # Infantry -> TribesRepairBeam (every peer)
 static var _specs := {}          # pack -> base_equipment.json
 ## Packs without base_equipment.json of their own that borrow another pack's blocks (their stations are look-alikes).
 const SPEC_PACK_FALLBACK := {"tribes_aa": "tribes2", "tribes_v": "tribes2"}
@@ -68,7 +64,7 @@ static func build_for(p_battle: Node, built: Dictionary) -> TribesBase:
 	base.battle = p_battle
 	base.name = NODE_NAME
 	base.grid = TribesPowerGrid.make_for(built.get("map", {}))
-	base.repair = load_specs(pack).get("repair", {})
+	base.repair = RepairRules.make_beam(pack)
 	if not ExtractionRules.is_extraction(p_battle.get("config") if p_battle.get("config") is Dictionary else {}):
 		base.sensor_net = TribesSensorNet.make(load_specs(pack).get("player_sensor", {}))
 	p_battle.add_child(base)
@@ -243,10 +239,6 @@ func _physics_process(delta: float) -> void:
 		_apply_field_permeability()
 	if sensor_net:
 		sensor_net.apply_refresh(get_tree(), delta)
-	if multiplayer.is_server():
-		_apply_repair_packs(delta)
-	if not ServerProfile.is_collision_only():
-		_apply_repair_beams()
 
 
 func _apply_field_permeability() -> void:
@@ -263,66 +255,11 @@ func fixtures_of(type: Variant) -> Array:
 
 # ------------------------------------------------------------------ repair
 
-func _apply_repair_packs(delta: float) -> void:
-	var per_s := float(repair.get("per_s", 0.0))
-	if per_s <= 0.0:
-		return
-	for h in battle.get("vehicles").values():
-		var soldier := h as Infantry if is_instance_valid(h) else null
-		if soldier and soldier.alive and is_repairing(soldier):
-			var obj := find_repair_target(soldier)
-			if obj:
-				apply_object_repair(obj, soldier.team, per_s * delta)
-
-
-## Host: `amount` points of repair work by a soldier of `by_team` on `obj`. Work for a team that is not allied to the
-## object's owner captures it first (a neutral object, team -1, has no owner to take it from); a captured object's
-## capturer keeps it going, its owner's work takes it back.
-func apply_object_repair(obj: TribesBaseObject, by_team: int, amount: float) -> void:
-	if obj.is_fully_repaired():
-		return
-	if BaseRepairRules.is_capture_on():
-		var seconds := BaseRepairRules.make_capture_seconds()
-		if obj.is_captured():
-			if TeamRelations.is_allied(by_team, obj.home_team):
-				obj.apply_release()
-			else:
-				obj.apply_capture(obj.team if TeamRelations.is_allied(by_team, obj.team) else by_team, seconds)
-		elif obj.team >= 0 and not TeamRelations.is_allied(by_team, obj.team):
-			obj.apply_capture(by_team, seconds)
-	obj.apply_repair(amount)
-
-
-## The soldier's repair pack is switched on.
-static func is_repairing(soldier: Infantry) -> bool:
-	return soldier.kit.pack_active and str(InfantryGear.pack(soldier.kit.pack_id).get("effect", "")) == "repair"
-
-
-## The nearest damaged base object within the repair beam's reach: his own team's, a neutral one, and (capture rule on)
-## an object of a team he is not allied to, which his repair work then captures.
-func find_repair_target(soldier: Infantry) -> TribesBaseObject:
-	var reach := float(repair.get("range", 0.0))
-	var best: TribesBaseObject = null
-	for o in objects:
-		if o.is_fully_repaired() or o.invincible or not _may_repair(soldier.team, o):
-			continue
-		var d := make_reach_distance(soldier, o)
-		if d <= reach:
-			reach = d
-			best = o
-	return best
-
-
-## True when a soldier of `team` may repair `o`: neutral, allied, or any (capture on).
-func _may_repair(team: int, o: TribesBaseObject) -> bool:
-	return o.team == NEUTRAL_TEAM or TeamRelations.is_allied(team, o.team) or BaseRepairRules.is_capture_on()
-
-
 ## The damaged or downed object of the side `soldier` belongs to that bot `bot_id` should repair now (null when none):
-## the nearest within BaseRepairRules faction_repair.search_m, generators first, no other live bot already on it,
+## the nearest within RepairRules faction_repair.search_m, generators first, no other live bot already on it,
 ## none that `is_skipped` (func(obj) -> bool: the bot gave it up) refuses.
 func find_job_for(soldier: Infantry, bot_id: int, is_skipped := Callable()) -> TribesBaseObject:
-	var rules := BaseRepairRules.faction()
+	var rules := RepairRules.faction()
 	if not bool(rules.get("enabled", false)):
 		return null
 	var best: TribesBaseObject = null
@@ -350,40 +287,6 @@ func apply_job_claim(obj: TribesBaseObject, bot_id: int) -> void:
 
 func _is_job_live(o: TribesBaseObject) -> bool:
 	return (Time.get_ticks_msec() - int(_job_ms.get(o, 0))) < int(JOB_STALE_SECONDS * 1000.0)
-
-
-## Distance from the soldier to the object's surface, roughly: centre distance less the shape's half width.
-static func make_reach_distance(soldier: Node3D, o: TribesBaseObject) -> float:
-	return maxf(0.0, soldier.global_position.distance_to(o.global_position) - o.make_body_size().x)
-
-
-# ------------------------------------------------------------------ repair beams
-
-## Every peer: a beam from each repairing soldier (pack on, or a crew member at work) to the object it repairs.
-func _apply_repair_beams() -> void:
-	var live := {}
-	for h in battle.get("vehicles").values():
-		var soldier := h as Infantry if is_instance_valid(h) else null
-		if soldier == null or not soldier.alive:
-			continue
-		var obj: TribesBaseObject = null
-		var job = soldier.get_meta(META_REPAIR_JOB) if soldier.has_meta(META_REPAIR_JOB) else null
-		if job is TribesBaseObject and is_instance_valid(job) and not (job as TribesBaseObject).is_fully_repaired():
-			obj = job
-		elif is_repairing(soldier):
-			obj = find_repair_target(soldier)
-		if obj == null:
-			continue
-		live[soldier] = true
-		if not _beams.has(soldier):
-			_beams[soldier] = TribesRepairBeam.make(battle)
-		(_beams[soldier] as TribesRepairBeam).apply_between(soldier.global_position + Vector3.UP * TribesRepairBeam.SOLDIER_CHEST,
-			obj.global_position + Vector3.UP * TribesRepairBeam.OBJECT_MIDDLE)
-	for soldier in _beams.keys():
-		if not live.has(soldier):
-			if is_instance_valid(_beams[soldier]):
-				(_beams[soldier] as Node).queue_free()
-			_beams.erase(soldier)
 
 
 # ------------------------------------------------------------------ sensors

@@ -145,6 +145,71 @@
 				]
 			},
 			{
+				"id": "assists3",
+				"scope": "individual",
+				"kind": "assists",
+				"count": 3,
+				"reward": 40,
+				"text": "Get {count} assists",
+				"modes": [
+					"vs",
+					"coop",
+					"campaign"
+				]
+			},
+			{
+				"id": "assists8",
+				"scope": "individual",
+				"kind": "assists",
+				"count": 8,
+				"reward": 120,
+				"text": "Get {count} assists",
+				"modes": [
+					"vs",
+					"coop",
+					"campaign"
+				]
+			},
+			{
+				"id": "damage1500",
+				"scope": "individual",
+				"kind": "damage",
+				"count": 1500,
+				"reward": 90,
+				"text": "Deal {count} damage",
+				"modes": [
+					"vs",
+					"coop",
+					"campaign"
+				]
+			},
+			{
+				"id": "damage4000",
+				"scope": "individual",
+				"kind": "damage",
+				"count": 4000,
+				"reward": 240,
+				"text": "Deal {count} damage",
+				"modes": [
+					"vs",
+					"coop",
+					"campaign"
+				]
+			},
+			{
+				"id": "alive240",
+				"scope": "individual",
+				"kind": "seconds_alive",
+				"count": 240,
+				"reward": 60,
+				"text": "Stay alive for {count} seconds in total",
+				"modes": [
+					"vs",
+					"coop",
+					"campaign"
+				]
+			},
+			{
 				"id": "objectives2",
 				"scope": "individual",
 				"kind": "objectives",

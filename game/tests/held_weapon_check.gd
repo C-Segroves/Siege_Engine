@@ -48,13 +48,27 @@ func _check_armor(armor: Dictionary) -> void:
 		soldier.net_id = 1
 		add_child(soldier)
 		soldier.set_physics_process(false)
-		var loadout: Array = armor.get("weapons", []).slice(0, WEAPONS_PER_BODY)
-		soldier.equip(loadout)
-		for slot in soldier.weapons.size():
-			soldier.apply_weapon_slot(slot)
-			_check_weapon(soldier, "%s / %s / %s" % [armor.id, bodies[i].id, soldier.weapons[slot].weapon_id])
+		for loadout in _make_loadouts(armor, str(bodies[i].id)):
+			soldier.equip(loadout)
+			for slot in soldier.weapons.size():
+				soldier.apply_weapon_slot(slot)
+				_check_weapon(soldier, "%s / %s / %s" % [armor.id, bodies[i].id, soldier.weapons[slot].weapon_id])
 		soldier.queue_free()
 		await get_tree().process_frame
+
+
+## The loadouts to check on a body: the armour's first weapons, and for an Aerial Assault / Vengeance body all the weapons of its
+## game (infantry_rules.json) in groups of the armour's weapon slots, so every model of the two games is held once.
+func _make_loadouts(armor: Dictionary, body_id: String) -> Array:
+	var rules := InfantryCatalog.make_pack_rules(body_id.get_slice(":", 0), str(armor.get("size", "light")).to_upper())
+	if rules.is_empty():
+		return [(armor.get("weapons", []) as Array).slice(0, WEAPONS_PER_BODY)]
+	var out := []
+	var all: Array = rules.weapons
+	var slots := int(armor.get("max_weapons", WEAPONS_PER_BODY))
+	for first in range(0, all.size(), slots):
+		out.append(all.slice(first, first + slots))
+	return out
 
 
 func _check_weapon(soldier: Infantry, label: String) -> void:

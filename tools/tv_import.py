@@ -22,6 +22,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ue2_package as U  # noqa: E402
 import fx_default  # noqa: E402
+import tv_weapons  # noqa: E402
 import tv_assets  # noqa: E402
 import tv_audio  # noqa: E402
 import tv_bsp  # noqa: E402
@@ -249,6 +250,7 @@ def import_campaign(game_root, pack_dir, log=print, only=None):
     idx = tv_assets.PackageIndex(game_root)
     tv_audio.export_sounds(game_root, pack_dir, log=log)
     fx_default.export(PACK, pack_dir)                  # death effects: engine defaults + its Explo_* sounds
+    log('weapons: %d hand weapons' % tv_weapons.export(game_root, pack_dir))   # after the sounds (fire sounds) and fx (merges its effects)
     if not only or not os.path.isfile(os.path.join(pack_dir, 'gameplay', 'bodies.json')):
         tv_skeletal.export_bodies(idx, game_root, pack_dir, log=log)
     props_file = os.path.join(pack_dir, 'gameplay', 'props.json')

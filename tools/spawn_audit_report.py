@@ -88,7 +88,13 @@ def main():
             "- `MapBounds` grows to contain every start (the importers' areas are the bounding box of the objects: a start on the edge counted as outside).",
             "- Extraction: squad / site / gate spots (`ExtractionSquads.make_place_around`, shared with the siege gates) now choose level ground for",
             "  vehicles and standable ground for soldiers, inside the map's area, spreading wider when none is near; Cybrid gate spots no longer keep the",
-            "  gate's height.", ""]
+            "  gate's height.",
+            "- The Herc / vehicle level-ground search (`SpawnClearance.make_level_ground_origin`) skips candidates over a terrain hole (they hung at the",
+            "  height of the base start: Tribes 1 King Under the Hill, Aerial Assault Underhill), judges building floors as well as the heightfield (a",
+            "  slope or a drop on a base's own floor: Tribes 2 Talus), rejects places a wall or pillar stands within 3.2 m of, and puts candidates 0.5 m",
+            "  above the ground when the start lies below the surface (inside a base), where the terrain's own slope counted as cover.",
+            "- A soldier's drop point under a deck lower than his body stands on the deck (`SpawnClearance.make_headroom_origin`: Tribes 2 Training4).",
+            "- Vehicle pads face open ground (`SpawnClearance.make_open_facing`), as the Herc starts do (Tribes 2 Recalescence pad 2).", ""]
     # summary per pack
     out += ["## Summary", "", "| Pack | Maps | Points | Probes | ok | not for Hercs | exceptions | failures |", "|---|---:|---:|---:|---:|---:|---:|---:|"]
     packs = sorted({k[0] for k in by_map}, key=lambda p: PACK_ORDER.index(p) if p in PACK_ORDER else 99)

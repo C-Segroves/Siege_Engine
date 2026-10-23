@@ -309,8 +309,9 @@ commented out.
 | Cloak (T2, light armour only) | `pack_use` on: cloaked, 12 energy/s, a shot (above 20 energy) or a hit over 0.1 breaks it for 0.5 s; enemies lose him on radar, T-targeting, turrets and bot search unless within 8 m or a motion sensor sees him moving; wearing it jams sensors | packs/cloakingpack.cs, projectiles.cs, player.cs, ai.cs; docs/formats/cloaking.md |
 | not modelled | deployables (inventory / ammo stations, sensors, cameras, turrets, turret barrels), the satchel charge | recorded with `"mapped": false` |
 
-A toggled pack switches off when the energy falls below its minEnergy. Repairing other players or vehicles with the
-repair gun, the T2 "large pack" seat rule (hasLargePack: no deployable packs in sitting seats) and dropping or
+A toggled pack switches off when the energy falls below its minEnergy. The repair pack also mends the nearest hurt
+teammate, allied vehicle or damaged structure in its beam's reach before it heals its wearer (`RepairDirector`,
+`engine/repair/`; the remake takes the nearest, not the aimed one); the T2 "large pack" seat rule (hasLargePack: no deployable packs in sitting seats) and dropping or
 throwing packs and weapons aren't modelled.
 
 ## 7. Infantry bots (`InfantryBots`, `InfantryBot`)

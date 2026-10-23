@@ -58,8 +58,10 @@ static func _play_step(parent: Node, step: Dictionary, body: Dictionary) -> void
 		if wait <= 0.0:
 			Effects.fx.play_effect(parent, ref, str(body.pack), at)
 		else:
-			parent.get_tree().create_timer(wait).timeout.connect(
-				func() -> void: Effects.fx.play_effect(parent, ref, str(body.pack), at))
+			# a tween of the parent dies with it: a delayed blast must not call back into a battle that has ended
+			var delayed := parent.create_tween()
+			delayed.tween_interval(wait)
+			delayed.tween_callback(func() -> void: Effects.fx.play_effect(parent, ref, str(body.pack), at))
 
 
 ## The step's point: `height` of the body up from its feet, scattered over `scatter` of its half size.

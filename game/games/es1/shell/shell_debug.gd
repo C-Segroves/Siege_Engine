@@ -234,9 +234,11 @@ static func _type_text(text: String) -> void:
 		Input.parse_input_event(ev)
 
 
-## Moves the cursor to virtual point `v` and clicks (ui_click is bound to the left button).
+## Moves the cursor to virtual point `v` and clicks (ui_click is bound to the left button). The events are in the window's
+## own pixels, like the OS's: the window turns them into viewport coordinates (the UI scale setting, content_scale_factor)
+## before ShellScreen sees them, so the viewport position of the point goes through the viewport's screen transform.
 func click(v: Vector2i) -> void:
-	var w := shell.screen.to_window(v)
+	var w: Vector2 = shell.get_viewport().get_screen_transform() * shell.screen.to_window(v)
 	var mv := InputEventMouseMotion.new()
 	mv.position = w
 	Input.parse_input_event(mv)

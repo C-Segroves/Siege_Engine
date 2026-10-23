@@ -47,7 +47,9 @@ static func load_for(pilot_name: String) -> ExtractionProfile:
 	else:
 		p.apply_dict(d)
 		p.pilot = pilot_name
-	p.apply_slot_armor(OperatorProfile.load_for(pilot_name))
+	var operator := OperatorProfile.load_for(pilot_name)
+	p.apply_slot_armor(operator)
+	p.money = operator.credits   # one wallet: the operator's credits (the file's own "money" is only the old copy)
 	return p
 
 
@@ -302,8 +304,7 @@ func apply_extracted(stacks: Array, p_money: int) -> void:
 	brought.apply_merge(stacks)
 	brought.apply_take(ExtractionItems.make_armor_id(str(last_kit.get("armor", ""))), 1)   # his own armour is no gain
 	brought.money = p_money
-	stash.apply_merge(stacks)
-	money += p_money
+	stash.apply_merge(stacks)   # the credits are paid into the operator's wallet (RaidOperator.apply_survived)
 	stats.extracted = int(stats.get("extracted", 0)) + 1
 	stats.earned = int(stats.get("earned", 0)) + brought.make_value()
 	_apply_rewear()

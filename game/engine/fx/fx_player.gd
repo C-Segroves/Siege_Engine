@@ -210,6 +210,20 @@ func _on_sprite_exiting(_s: FxSprite) -> void:
 	_live_sprites = maxi(0, _live_sprites - 1)
 
 
+## The counters are released by methods, not lambdas: an effect that outlives its FxPlayer (a battle ended) must not
+## call back into the freed player ("Lambda capture was freed").
+func _on_counted_sprite_exiting() -> void:
+	_live_sprites = maxi(0, _live_sprites - 1)
+
+
+func _on_burst_exiting() -> void:
+	_live_bursts = maxi(0, _live_bursts - 1)
+
+
+func _on_light_exiting() -> void:
+	_live_lights = maxi(0, _live_lights - 1)
+
+
 func _play_burst(parent: Node, layer: Dictionary, pack: String, at: Vector3, forward: Vector3) -> void:
 	if _live_bursts >= MAX_LIVE_BURSTS:
 		return
@@ -221,7 +235,7 @@ func _play_burst(parent: Node, layer: Dictionary, pack: String, at: Vector3, for
 	if forward.length() > 0.001 and absf(forward.normalized().dot(Vector3.UP)) < 0.999:
 		p.direction = forward.normalized()
 	_live_bursts += 1
-	p.tree_exiting.connect(func() -> void: _live_bursts = maxi(0, _live_bursts - 1))
+	p.tree_exiting.connect(_on_burst_exiting)
 
 
 func _play_flash(parent: Node, layer: Dictionary, at: Vector3) -> void:
@@ -233,7 +247,7 @@ func _play_flash(parent: Node, layer: Dictionary, at: Vector3) -> void:
 	parent.add_child(q)
 	q.global_position = at
 	_live_sprites += 1
-	q.tree_exiting.connect(func() -> void: _live_sprites = maxi(0, _live_sprites - 1))
+	q.tree_exiting.connect(_on_counted_sprite_exiting)
 	_fade_out(q, q.material_override as StandardMaterial3D, float(layer.get("duration", 0.2)), float(layer.get("grow", 1.0)))
 
 
@@ -245,7 +259,7 @@ func _play_ring(parent: Node, layer: Dictionary, pack: String, at: Vector3, norm
 	parent.add_child(r)
 	r.global_position = at
 	_live_sprites += 1
-	r.tree_exiting.connect(func() -> void: _live_sprites = maxi(0, _live_sprites - 1))
+	r.tree_exiting.connect(_on_counted_sprite_exiting)
 
 
 func _play_shape(parent: Node, layer: Dictionary, at: Vector3, forward: Vector3) -> void:
@@ -290,7 +304,7 @@ func _play_light(parent: Node, block: Dictionary, at: Vector3) -> void:
 	parent.add_child(l)
 	l.global_position = at
 	_live_lights += 1
-	l.tree_exiting.connect(func() -> void: _live_lights = maxi(0, _live_lights - 1))
+	l.tree_exiting.connect(_on_light_exiting)
 	var tw := l.create_tween()
 	var curve = block.get("energy")
 	if curve is Array and not curve.is_empty():

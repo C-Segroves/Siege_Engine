@@ -84,7 +84,7 @@
   },
   "ammo_loaded_fraction": 0.5,
   "free_weapons": ["tribes:BLASTER"],
-  "free_weapon_fallbacks": ["tribes2:BLASTER"],
+  "free_weapon_fallbacks": ["tribes2:BLASTER", "tribes_aa:BLASTER", "tribes_v:BLASTER"],
   "weapon_overrides": {
     "notes": "Raid-only tuning (playtest X5): the Tribes 2 blaster is a paid upgrade over the free Tribes 1 one.",
     "tribes2:BLASTER": {"damage_scale": 1.2, "refire_scale": 0.9, "price": 450}

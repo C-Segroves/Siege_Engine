@@ -83,7 +83,7 @@ func _apply_rules(v: Herc, delta: float) -> void:
 		if not v.is_spawn_protected():
 			v.apply_environment_damage(1.0, KillText.CAUSE_FELL_THROUGH)
 		return
-	if checks_area and bounds.is_outside(v.global_position):
+	if is_out_of_area(v):
 		_apply_outside(v, delta)
 	elif _out_seconds.has(v.net_id):
 		_out_seconds.erase(v.net_id)
@@ -108,6 +108,12 @@ func _apply_outside(v: Herc, delta: float) -> void:
 ## True when a multiple of `step` lies in (before, now].
 static func _crossed(before: float, now: float, step: float) -> bool:
 	return floorf(now / step) > floorf(before / step)
+
+
+## True when `v` is outside the area by the rule: the one test of the damage and of the local player's tint (BoundsTint).
+## AI support craft and their riders are exempt.
+func is_out_of_area(v: Node3D) -> bool:
+	return checks_area and bounds.is_outside(v.global_position) and not SupportCraft.is_exempt(v)
 
 
 ## How far `p` lies outside the area (metres; 0 inside or without an area).

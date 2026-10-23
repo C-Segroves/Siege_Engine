@@ -97,6 +97,7 @@ func make_default_bindings() -> Dictionary:
 		## own Q for the kit is the next weapon here (a soldier has no other weapon key), so Q stays weapon_next.
 		"pack_use": [_physical_key(KEY_R), _physical_key(KEY_P), _joy_button(JOY_BUTTON_DPAD_RIGHT)],
 		"repair_kit_use": [_physical_key(KEY_H), _joy_button(JOY_BUTTON_LEFT_STICK)],
+		"structure_repair": [_physical_key(KEY_R), _joy_button(JOY_BUTTON_PADDLE1)],
 		"scope_zoom": [_mouse_button(MOUSE_BUTTON_MIDDLE), _joy_button(JOY_BUTTON_PADDLE1)],
 		"scope_level": [_physical_key(KEY_X), _joy_button(JOY_BUTTON_PADDLE2)],
 		"interact": [_physical_key(KEY_E), _joy_button(JOY_BUTTON_X)],

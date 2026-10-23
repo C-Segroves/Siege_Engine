@@ -80,8 +80,17 @@ func apply_hit(shield_dmg: float, armor_dmg: float, attacker: Node = null, hit_p
 
 
 func _physics_process(delta: float) -> void:
+	super(delta)
 	if is_burning() and multiplayer.is_server():
 		_apply_burn(delta)
+	elif _fire != null and not is_burning():       # repaired above the fire threshold: the flames die down
+		_fire.queue_free()
+		_fire = null
+
+
+## An indestructible shape takes no repair either.
+func can_repair() -> bool:
+	return not indestructible and super()
 
 
 func _apply_burn(delta: float) -> void:

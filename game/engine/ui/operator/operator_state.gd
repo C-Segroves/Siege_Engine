@@ -175,6 +175,76 @@ func apply_buy_supply(entry: Dictionary) -> void:
 		apply_changed()
 
 
+## True when the stash can sell `id` (loot, salvage and spare supplies; armour and call-ins are unlocks, not goods).
+func can_sell(id: String) -> bool:
+	return extraction != null and extraction.stash.count(id) > 0 and not ["armor", "callin"].has(ExtractionItems.kind_of(id)) 		and ExtractionItems.make_sell_price(id, extraction.stash.count(id)) > 0
+
+
+## The sell choices of a stash row's menu: [{label, units (of this id; kind: all of the kind), kind}], each with its price.
+func make_sell_options(id: String) -> Array:
+	if not can_sell(id):
+		return []
+	var held := extraction.stash.count(id)
+	var stack := mini(held, maxi(int(ExtractionItems.item(id).get("stack", 1)), 1))
+	var out := [{"units": 1}]
+	if stack > 1:
+		out.append({"units": stack})
+	if held > stack:
+		out.append({"units": held})
+	var kind := ExtractionItems.kind_of(id)
+	var kind_total := make_kind_sell_total(kind)
+	if kind_total > ExtractionItems.make_sell_price(id, held):
+		out.append({"kind": kind, "price": kind_total})
+	for o in out:
+		if not o.has("kind"):
+			o.price = ExtractionItems.make_sell_price(id, int(o.units))
+		o.label = ("Sell all %s" % str(ExtractionRules.item_kind(kind).get("label", kind)).to_lower()) if o.has("kind") 			else ("Sell 1" if int(o.units) == 1 else ("Sell stack (%d)" if int(o.units) == stack and held > stack else "Sell all (%d)") % int(o.units))
+		o.label += "  -  " + EconomyRules.make_money_text(int(o.price))
+	return out
+
+
+## What every sellable stash stack of `kind` would sell for.
+func make_kind_sell_total(kind: String) -> int:
+	var total := 0
+	for r in ExtractionItems.items_of_kind(kind):
+		if can_sell(str(r.id)):
+			total += ExtractionItems.make_sell_price(str(r.id), extraction.stash.count(str(r.id)))
+	return total
+
+
+## A choice of the stash row's menu (an option of make_sell_options): asks first, then sells.
+func request_sell_option(id: String, option: Dictionary) -> void:
+	if option.has("kind"):
+		confirm_requested.emit("Sell every %s in the stash for %s?" % [str(option.kind), EconomyRules.make_money_text(int(option.price))],
+			"Sell", apply_sell_kind.bind(str(option.kind)))
+	else:
+		request_sell(id, int(option.units))
+
+
+## Asks to sell `units` of `id` (-1: every unit the stash holds).
+func request_sell(id: String, units := -1) -> void:
+	if not can_sell(id):
+		return
+	var n := extraction.stash.count(id) if units < 0 else mini(units, extraction.stash.count(id))
+	confirm_requested.emit("Sell %s for %s?" % [ExtractionItems.make_stack_text(id, n),
+		EconomyRules.make_money_text(ExtractionItems.make_sell_price(id, n))], "Sell", apply_sell.bind(id, n))
+
+
+func apply_sell_kind(kind: String) -> void:
+	for r in ExtractionItems.items_of_kind(kind):
+		if can_sell(str(r.id)):
+			apply_sell(str(r.id), extraction.stash.count(str(r.id)))
+
+
+func apply_sell(id: String, units: int) -> void:
+	if extraction == null:
+		return
+	var result := SupplyService.apply_sell(profile, extraction, id, units)
+	apply_status(str(result.text))
+	if bool(result.ok):
+		apply_changed()
+
+
 func _request_purchase(entry: Dictionary) -> void:
 	var price := int(entry.price)
 	if not profile.is_affordable(price):

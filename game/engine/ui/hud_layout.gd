@@ -55,6 +55,7 @@ const ELEMENTS := {
 	&"centre_banner": {"zone": Zone.CENTRE, "order": 0, "group": &"centre", "max": Vector2(640, 108)},
 	&"revive_banner": {"zone": Zone.CENTRE, "order": 1, "group": &"centre", "max": Vector2(460, 96)},
 	&"siege_warning": {"zone": Zone.CENTRE, "order": 2, "group": &"centre", "max": Vector2(480, 46)},
+	&"bounds_warning": {"zone": Zone.CENTRE, "order": 3, "group": &"centre", "max": Vector2(560, 72)},
 	&"radar": {"zone": Zone.TOP_RIGHT, "order": 0, "max": Vector2(220, 220)},
 	&"objectives": {"zone": Zone.TOP_RIGHT, "order": 1, "max": Vector2(320, 170)},
 	&"throttle_block": {"zone": Zone.BOTTOM_LEFT, "order": 0, "max": Vector2(250, 242)},
@@ -66,6 +67,7 @@ const ELEMENTS := {
 	&"scope_overlay": {"zone": Zone.FULL, "order": 0, "max": Vector2.ZERO},
 	&"heal_flash": {"zone": Zone.FULL, "order": 1, "max": Vector2.ZERO},
 	&"downed_veil": {"zone": Zone.FULL, "order": 2, "max": Vector2.ZERO},
+	&"bounds_tint": {"zone": Zone.FULL, "order": 3, "max": Vector2.ZERO},
 }
 
 ## The elements of the plain HUD (HUD and InfantryHud), for the static reserved rects of floating panels.

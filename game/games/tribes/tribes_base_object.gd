@@ -11,13 +11,11 @@ extends Structure
 ##   scales   Tribes 2 damage profiles scale each hit by its damage type (DamageTypes.current);
 ##   repair   the repair pack brings it back from disabled or destroyed (apply_repair, host); a destroyed object
 ##            stays standing as a ruin (it is never removed), so a repairer can always bring it back;
-##   capture  repair work by a soldier who is not allied to its team takes it for him for BaseRepairRules
-##            capture.seconds (apply_capture, host): its team becomes his, so a turret fires at his enemies and a
-##            generator powers his side; it returns to its owner when the time is up, when it is destroyed or when
-##            the owner repairs it back.
+##   capture  repair work by a soldier who is not allied to its team takes it for him for the RepairRules
+##            capture.seconds (BaseCapture, Structure.apply_capture, host): its team becomes his, so a turret fires at
+##            his enemies and a generator powers his side; it returns to its owner when the time is up, when it is
+##            destroyed or when the owner repairs it back.
 ## Power is given by TribesBase (TribesPowerGrid). Host simulates; clients follow integrity and the repair RPC.
-
-signal state_changed(obj: TribesBaseObject)
 
 const KIND_GENERATOR := "generator"
 const KIND_TURRET := "turret"
@@ -29,8 +27,6 @@ const STATION_KINDS := ["inventory", "ammo", "command", "vehicle", "vehicle_pad"
 const T1_TEAM_DAMAGE_MARGIN := 0.05
 const T1_PACK := "tribes"
 const UNPOWERED_KINDS := [KIND_GENERATOR]
-## A capture's timer is renewed by the capturer's repair work at most this often (seconds).
-const CAPTURE_REFRESH_STEP := 1.0
 
 var spec: Dictionary = {}
 var kind := ""
@@ -54,10 +50,6 @@ var lights: TribesBaseLights
 var _shield_cost := 0.0              # energy per point of damage the shield absorbs (0: no shield)
 var _damage_scale: Dictionary = {}
 var _was_enabled := true
-## The owner's team while the object is captured (valid when capture_left > 0).
-var home_team := -1
-## Seconds the capture still holds (0: not captured).
-var capture_left := 0.0
 
 
 ## Builds the object for map station `record` (map.json entry with its MapBuilder transform `xf`) from `p_spec`.
@@ -104,6 +96,7 @@ func apply_spec(p_spec: Dictionary) -> void:
 	_shield_cost = float((p_spec.get("shield", {}) as Dictionary).get("energy_per_point", 0.0))
 	_damage_scale = p_spec.get("damage_scale", {})
 	invincible = bool(p_spec.get("invincible", false))
+	repairs_ruins = true
 	SensorTowers.apply_register(self)
 
 
@@ -189,10 +182,7 @@ func apply_state_check() -> void:
 func _physics_process(delta: float) -> void:
 	if has_power() and is_enabled() and energy < energy_max:
 		energy = minf(energy_max, energy + energy_recharge * delta)
-	if capture_left > 0.0:
-		capture_left = maxf(capture_left - delta, 0.0)
-		if capture_left <= 0.0 and multiplayer.is_server():
-			_send_team_state(home_team, 0.0, home_team)      # the time is up: back to the owner
+	apply_capture_tick(delta)
 
 
 # ------------------------------------------------------------------ damage and repair
@@ -229,96 +219,17 @@ func _cap_team_damage(dmg: float, attacker: Node) -> float:
 	return clampf(cap - make_damage_taken(), 0.0, dmg)
 
 
-## Host: `amount` points of repair (repair pack); a destroyed object comes back once it has hit points again.
-func apply_repair(amount: float) -> void:
-	if not multiplayer.is_server() or amount <= 0.0 or is_fully_repaired():
-		return
-	hp = minf(max_hp, maxf(hp, 0.0) + amount)
-	var ratio := clampf(hp / maxf(max_hp, 1.0), 0.0, 1.0)
-	if Net.is_online():
-		_apply_repaired.rpc(ratio)
-	_apply_repaired(ratio)
+# ------------------------------------------------------------------ repair and capture (Structure)
+
+func can_repair() -> bool:
+	return not invincible and super()
 
 
-func is_fully_repaired() -> bool:
-	return alive and hp >= max_hp
-
-
-@rpc("authority", "call_remote", "reliable")
-func _apply_repaired(ratio: float) -> void:
-	integrity = ratio
-	hp = max_hp * ratio
-	if not alive and hp > 0.0:
-		alive = true
-		apply_intact_look()
-
-
-# ------------------------------------------------------------------ capture
-
-func is_captured() -> bool:
-	return capture_left > 0.0
-
-
-## Host: `by_team` takes the object for `seconds` (a new capture, or the capturer's repair work refreshing it). When
-## `by_team` is the owner's own team the object goes home (recaptured).
-func apply_capture(by_team: int, seconds: float) -> void:
-	if not multiplayer.is_server() or seconds <= 0.0:
-		return
-	if is_captured() and by_team == home_team:
-		apply_release()
-		return
-	if is_captured() and by_team == team:
-		if capture_left < seconds - CAPTURE_REFRESH_STEP:      # the capturer's work renews it, a packet a second
-			_send_team_state(team, seconds, home_team)
-		return
-	_send_team_state(by_team, seconds, team if not is_captured() else home_team)
-
-
-## Host: the object returns to its owner.
-func apply_release() -> void:
-	if not multiplayer.is_server() or not is_captured():
-		return
-	_send_team_state(home_team, 0.0, home_team)
-
-
-func _send_team_state(p_team: int, left: float, p_home: int) -> void:
-	if Net.is_online():
-		_apply_team_state.rpc(p_team, left, p_home)
-	_apply_team_state(p_team, left, p_home)
-
-
-@rpc("authority", "call_remote", "reliable")
-func _apply_team_state(p_team: int, left: float, p_home: int) -> void:
-	var changed := p_team != team
-	team = p_team
-	capture_left = left
-	home_team = p_home
+## A turret drops its target when its side changes (TribesTurret).
+func apply_side_changed() -> void:
 	target_cleared()
-	if changed:
-		state_changed.emit(self)
 
 
 ## A turret drops its target when its side changes (nothing to do for the other kinds).
 func target_cleared() -> void:
 	pass
-
-
-## The owner's team: the captured object's home team, else its own.
-func make_owner_team() -> int:
-	return home_team if is_captured() else team
-
-
-## A faction ownership assignment (TribesBase.apply_owners): the owner changes; a held capture goes on.
-func apply_owner_team(p_team: int) -> void:
-	if is_captured():
-		home_team = p_team
-	else:
-		team = p_team
-
-
-## A captured object that is destroyed returns to its owner (it is his ruin to repair again).
-func destroy(killer: Node = null) -> void:
-	if alive and is_captured():
-		team = home_team
-		capture_left = 0.0
-	super.destroy(killer)

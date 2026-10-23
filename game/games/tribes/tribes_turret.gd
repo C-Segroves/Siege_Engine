@@ -41,6 +41,7 @@ var deactivation_seconds := 0.0
 var shot_energy := 0.0
 var min_energy := 0.0
 var target: Node3D
+var _target_profile: TargetProfile
 ## Aim direction (world), turned toward the target at turn_rate.
 var aim_dir := Vector3.FORWARD
 ## 0 folded .. 1 deployed (the activate sequence's phase).
@@ -163,15 +164,25 @@ func _receive_aim(dir: Vector3, wants_deployed: bool) -> void:
 ## The nearest live hostile vehicle or soldier in range, in the turret's arc and in sight; null when none.
 func find_target() -> Node3D:
 	var muzzle := make_muzzle()
-	return TurretTargeting.find_nearest(get_tree(), {"from": muzzle, "range": engage_range,
-		"is_hostile": func(v: Node) -> bool: return TeamRelations.is_hostile(team, int(v.team)),
-		"aim_point": _aim_height_point, "sensor": spec.get("sensor", {}),
+	return TargetSelector.pick(get_tree(), _make_target_profile(), {"from": muzzle, "team": team,
+		"aim_point": _aim_height_point,
 		"accepts": func(v: Node3D, p: Vector3) -> bool: return is_in_arc(p - muzzle) and has_line_of_sight(v)})
 
 
 ## Alive, of a hostile team, not dormant (downed, a transport) and not inside a vehicle.
 func is_valid_target(v: Node) -> bool:
-	return TurretTargeting.is_targetable(v) and TeamRelations.is_hostile(team, int(v.team)) 		and not CloakRules.is_hidden_from_sensor(v, spec.get("sensor", {}), global_position.distance_to(v.global_position))
+	return TargetSelector.keeps(_make_target_profile(), {"from": global_position, "team": team}, v)
+
+
+## Tribes turrets (sensor rules from the datablock, `spec.sensor`): the nearest hostile whose aim point is in range,
+## re-searched every THINK_SECONDS (0.2 s; the turret's think rate in ai.cs / turret datablocks).
+func _make_target_profile() -> TargetProfile:
+	if _target_profile == null:
+		_target_profile = TargetProfile.make_turret()
+		_target_profile.think_seconds = THINK_SECONDS
+	_target_profile.range_m = engage_range
+	_target_profile.sensor = spec.get("sensor", {})
+	return _target_profile
 
 
 ## True when world direction `dir` is within the turret's pitch limits (measured from its own base plane).

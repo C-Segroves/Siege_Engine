@@ -40,7 +40,7 @@ static func make_candidates(viewer: Herc) -> Array:
 
 
 static func _is_candidate(viewer: Herc, n: Node) -> bool:
-	return n != viewer and n is Node3D and bool(n.get("alive")) and not n.has_meta("dormant") \
+	return n != viewer and n is Node3D and TargetSelector.is_live(n) \
 		and not TeamRelations.is_allied(viewer.team, int(n.get("team"))) and RadarContacts.is_on_scope(viewer, n)
 
 

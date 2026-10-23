@@ -1,8 +1,10 @@
 class_name StashTab
 extends VBoxContainer
-## The raid-only third side of Operator Setup: a read-only view of everything the player has for a raid, stash and kit
-## together, grouped by kind with counts (docs/design/lobby_loadout_economy.md section 6.1, extraction extras). Nothing is moved
-## here: the kit is chosen in the Loadout list's drop-downs, and supplies are bought in the store under "Supplies".
+## The raid-only third side of Operator Setup: everything the player has for a raid, stash and kit together, grouped by
+## kind with counts (docs/design/lobby_loadout_economy.md section 6.1, extraction extras). Nothing is moved here: the kit
+## is chosen in the Loadout list's drop-downs, and supplies are bought in the store under "Supplies". The one action is
+## Sell, from a row's context menu (StashRow: right click, pad X, the menu key): loot, salvage and spare supplies go
+## for their sell price into the credits wallet.
 
 signal rebuilt
 
@@ -78,4 +80,5 @@ func _make_entry_row(e: Dictionary) -> Control:
 		where.append("%d in the kit" % int(e.kit))
 	if int(e.stash) > 0:
 		where.append("%d in the stash" % int(e.stash))
-	return ItemRow.make(ExtractionItems.make_stack_text(id, units), "%s  -  %s" % [", ".join(where), ExtractionScreenText.make_item_detail(id, units)], [])
+	return StashRow.make(_state, id, ExtractionItems.make_stack_text(id, units),
+		"%s  -  %s" % [", ".join(where), ExtractionScreenText.make_item_detail(id, units)])

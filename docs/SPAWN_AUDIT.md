@@ -37,6 +37,12 @@ do (`BattleInfantry.make_ground_point`) where that differs from a respawn at the
 - Extraction: squad / site / gate spots (`ExtractionSquads.make_place_around`, shared with the siege gates) now choose level ground for
   vehicles and standable ground for soldiers, inside the map's area, spreading wider when none is near; Cybrid gate spots no longer keep the
   gate's height.
+- The Herc / vehicle level-ground search (`SpawnClearance.make_level_ground_origin`) skips candidates over a terrain hole (they hung at the
+  height of the base start: Tribes 1 King Under the Hill, Aerial Assault Underhill), judges building floors as well as the heightfield (a
+  slope or a drop on a base's own floor: Tribes 2 Talus), rejects places a wall or pillar stands within 3.2 m of, and puts candidates 0.5 m
+  above the ground when the start lies below the surface (inside a base), where the terrain's own slope counted as cover.
+- A soldier's drop point under a deck lower than his body stands on the deck (`SpawnClearance.make_headroom_origin`: Tribes 2 Training4).
+- Vehicle pads face open ground (`SpawnClearance.make_open_facing`), as the Herc starts do (Tribes 2 Recalescence pad 2).
 
 ## Summary
 
@@ -46,18 +52,18 @@ do (`BattleInfantry.make_ground_point`) where that differs from a respawn at the
 | Earthsiege 2 | 39 | 10754 | 27016 | 27016 | 0 | 0 | 0 |
 | Battledrome arenas | 15 | 414 | 1242 | 1242 | 0 | 0 | 0 |
 | Starsiege | 24 | 3634 | 9245 | 9245 | 0 | 0 | 0 |
-| Tribes 1 | 37 | 6605 | 15565 | 14821 | 711 | 33 | 0 |
-| Tribes 2 (with Varuna's Fall) | 53 | 3052 | 8249 | 8203 | 28 | 18 | 0 |
-| Tribes: Aerial Assault | 33 | 1576 | 3680 | 3650 | 22 | 8 | 0 |
+| Tribes 1 | 37 | 6608 | 15574 | 14856 | 707 | 11 | 0 |
+| Tribes 2 (with Varuna's Fall) | 53 | 3051 | 8245 | 8204 | 27 | 14 | 0 |
+| Tribes: Aerial Assault | 33 | 1576 | 3680 | 3645 | 33 | 2 | 0 |
 | Tribes: Vengeance | 33 | 99 | 264 | 247 | 11 | 6 | 0 |
 | missions:tribes2 | 5 | 36 | 74 | 74 | 0 | 0 | 0 |
 | missions:es1 | 77 | 390 | 1170 | 1168 | 0 | 2 | 0 |
-| missions:tribes_aa | 16 | 16 | 32 | 32 | 0 | 0 | 0 |
+| missions:tribes_v | 33 | 33 | 66 | 65 | 0 | 1 | 0 |
 | missions:tribes | 8 | 20 | 40 | 38 | 0 | 2 | 0 |
-| missions:starsiege | 36 | 568 | 1704 | 1688 | 0 | 16 | 0 |
-| missions:tribes_v | 33 | 33 | 66 | 61 | 0 | 5 | 0 |
+| missions:tribes_aa | 16 | 16 | 32 | 32 | 0 | 0 | 0 |
+| missions:starsiege | 36 | 568 | 1704 | 1694 | 0 | 10 | 0 |
 | missions:es2 | 61 | 290 | 866 | 864 | 0 | 0 | 0 |
-| **All** | 482 | 30893 | 77780 | 76918 | 772 | 90 | 0 |
+| **All** | 482 | 30895 | 77785 | 76959 | 778 | 48 | 0 |
 
 ## Documented exceptions
 
@@ -95,64 +101,34 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 - `tribes2:Katabatic|squad_vehicle_spot #5|large Herc`: extraction spot on cliff terrain: no level spot found within 3x the spread (best-effort ExtractionSquads.make_place_around); the unit slides or drops to flat ground, or the zone touches a prop
 - `tribes2:Katabatic|squad_vehicle_spot #5|large vehicle`: extraction spot on cliff terrain: no level spot found within 3x the spread (best-effort ExtractionSquads.make_place_around); the unit slides or drops to flat ground, or the zone touches a prop
 - `tribes2:Overreach|squad_vehicle_spot #3|large Herc`: extraction spot on cliff terrain: no level spot found within 3x the spread (best-effort ExtractionSquads.make_place_around); the unit slides or drops to flat ground, or the zone touches a prop
-- `tribes2:Recalescence|pad #2|large vehicle`: open: see the reason; start on steep ground or in cramped base geometry that the level-ground search (SpawnClearance.make_level_ground_origin) and clearance did not resolve
 - `tribes2:Respite|squad_vehicle_spot #1|large Herc`: extraction spot on cliff terrain: no level spot found within 3x the spread (best-effort ExtractionSquads.make_place_around); the unit slides or drops to flat ground, or the zone touches a prop
 - `tribes2:Slapdash|exfil #1|soldier`: extraction spot on cliff terrain: no level spot found within 3x the spread (best-effort ExtractionSquads.make_place_around); the unit slides or drops to flat ground, or the zone touches a prop
-- `tribes2:Talus|herc #1|large vehicle`: open: see the reason; start on steep ground or in cramped base geometry that the level-ground search (SpawnClearance.make_level_ground_origin) and clearance did not resolve
-- `tribes2:Talus|team 0 #1|large vehicle`: open: see the reason; start on steep ground or in cramped base geometry that the level-ground search (SpawnClearance.make_level_ground_origin) and clearance did not resolve
-- `tribes2:Training4|infantry #1|soldier`: open: see the reason; start on steep ground or in cramped base geometry that the level-ground search (SpawnClearance.make_level_ground_origin) and clearance did not resolve
 - `tribes2:varuna|gate_vehicle_place #15|large Herc`: extraction spot on cliff terrain: no level spot found within 3x the spread (best-effort ExtractionSquads.make_place_around); the unit slides or drops to flat ground, or the zone touches a prop
 - `tribes2:varuna|gate_vehicle_place #15|large vehicle`: extraction spot on cliff terrain: no level spot found within 3x the spread (best-effort ExtractionSquads.make_place_around); the unit slides or drops to flat ground, or the zone touches a prop
 - `tribes2:varuna|site_spot #63|soldier`: extraction spot on cliff terrain: no level spot found within 3x the spread (best-effort ExtractionSquads.make_place_around); the unit slides or drops to flat ground, or the zone touches a prop
 - `tribes2:varuna|squad_spot #41|bot soldier`: extraction spot on cliff terrain: no level spot found within 3x the spread (best-effort ExtractionSquads.make_place_around); the unit slides or drops to flat ground, or the zone touches a prop
 - `tribes2:varuna|squad_spot #41|soldier`: extraction spot on cliff terrain: no level spot found within 3x the spread (best-effort ExtractionSquads.make_place_around); the unit slides or drops to flat ground, or the zone touches a prop
-- `tribes:AntHill|infantry #20|soldier`: original drop point 0.4-0.8 m inside the imported base floor mesh (approximate interiors); the physics engine lifts the soldier out in the first frame
-- `tribes:AntHill|infantry #21|soldier`: original drop point 0.4-0.8 m inside the imported base floor mesh (approximate interiors); the physics engine lifts the soldier out in the first frame
 - `tribes:AntHill|infantry #58|soldier`: original drop point 0.4-0.8 m inside the imported base floor mesh (approximate interiors); the physics engine lifts the soldier out in the first frame
 - `tribes:AntHill|squad_spot #15|soldier`: extraction spot on cliff terrain: no level spot found within 3x the spread (best-effort ExtractionSquads.make_place_around); the unit slides or drops to flat ground, or the zone touches a prop
 - `tribes:BloodRunsCold|gate_vehicle_place #12|large Herc`: extraction spot on cliff terrain: no level spot found within 3x the spread (best-effort ExtractionSquads.make_place_around); the unit slides or drops to flat ground, or the zone touches a prop
 - `tribes:CrissCross|squad_spot #3|soldier`: extraction spot on cliff terrain: no level spot found within 3x the spread (best-effort ExtractionSquads.make_place_around); the unit slides or drops to flat ground, or the zone touches a prop
 - `tribes:DangerousCrossing|squad_spot #5|soldier`: extraction spot on cliff terrain: no level spot found within 3x the spread (best-effort ExtractionSquads.make_place_around); the unit slides or drops to flat ground, or the zone touches a prop
 - `tribes:DeathKnell|gate_place #8|soldier`: extraction spot on cliff terrain: no level spot found within 3x the spread (best-effort ExtractionSquads.make_place_around); the unit slides or drops to flat ground, or the zone touches a prop
-- `tribes:Fallen|infantry #48|soldier`: original drop point 0.4-0.8 m inside the imported base floor mesh (approximate interiors); the physics engine lifts the soldier out in the first frame
-- `tribes:Fallen|infantry #64|soldier`: original drop point 0.4-0.8 m inside the imported base floor mesh (approximate interiors); the physics engine lifts the soldier out in the first frame
 - `tribes:Fallen|squad_spot #3|soldier`: extraction spot on cliff terrain: no level spot found within 3x the spread (best-effort ExtractionSquads.make_place_around); the unit slides or drops to flat ground, or the zone touches a prop
 - `tribes:FreeForAll|infantry #110|soldier`: original drop point 0.4-0.8 m inside the imported base floor mesh (approximate interiors); the physics engine lifts the soldier out in the first frame
-- `tribes:FreeForAll|infantry #20|soldier`: original drop point 0.4-0.8 m inside the imported base floor mesh (approximate interiors); the physics engine lifts the soldier out in the first frame
-- `tribes:FreeForAll|infantry #21|soldier`: original drop point 0.4-0.8 m inside the imported base floor mesh (approximate interiors); the physics engine lifts the soldier out in the first frame
-- `tribes:FreeForAll|infantry #30|soldier`: original drop point 0.4-0.8 m inside the imported base floor mesh (approximate interiors); the physics engine lifts the soldier out in the first frame
-- `tribes:FreeForAll|infantry #75|soldier`: original drop point 0.4-0.8 m inside the imported base floor mesh (approximate interiors); the physics engine lifts the soldier out in the first frame
-- `tribes:FreeForAll|infantry #76|soldier`: original drop point 0.4-0.8 m inside the imported base floor mesh (approximate interiors); the physics engine lifts the soldier out in the first frame
-- `tribes:FreeForAll|infantry #77|soldier`: original drop point 0.4-0.8 m inside the imported base floor mesh (approximate interiors); the physics engine lifts the soldier out in the first frame
-- `tribes:FreeForAll|infantry #78|soldier`: original drop point 0.4-0.8 m inside the imported base floor mesh (approximate interiors); the physics engine lifts the soldier out in the first frame
-- `tribes:FreeForAll|infantry #79|soldier`: original drop point 0.4-0.8 m inside the imported base floor mesh (approximate interiors); the physics engine lifts the soldier out in the first frame
-- `tribes:FreeForAll|infantry #80|soldier`: original drop point 0.4-0.8 m inside the imported base floor mesh (approximate interiors); the physics engine lifts the soldier out in the first frame
-- `tribes:FreeForAll|infantry #81|soldier`: original drop point 0.4-0.8 m inside the imported base floor mesh (approximate interiors); the physics engine lifts the soldier out in the first frame
-- `tribes:FreeForAll|infantry #82|soldier`: original drop point 0.4-0.8 m inside the imported base floor mesh (approximate interiors); the physics engine lifts the soldier out in the first frame
 - `tribes:FreeForAll|squad_spot #15|soldier`: extraction spot on cliff terrain: no level spot found within 3x the spread (best-effort ExtractionSquads.make_place_around); the unit slides or drops to flat ground, or the zone touches a prop
-- `tribes:KingUnderTheHill|herc #15|large Herc`: open: see the reason; start on steep ground or in cramped base geometry that the level-ground search (SpawnClearance.make_level_ground_origin) and clearance did not resolve
-- `tribes:KingUnderTheHill|herc #15|soldier`: open: see the reason; start on steep ground or in cramped base geometry that the level-ground search (SpawnClearance.make_level_ground_origin) and clearance did not resolve
-- `tribes:KingUnderTheHill|herc #2|large Herc`: open: see the reason; start on steep ground or in cramped base geometry that the level-ground search (SpawnClearance.make_level_ground_origin) and clearance did not resolve
-- `tribes:KingUnderTheHill|herc #2|soldier`: open: see the reason; start on steep ground or in cramped base geometry that the level-ground search (SpawnClearance.make_level_ground_origin) and clearance did not resolve
-- `tribes:KingUnderTheHill|team 0 #2|large Herc`: open: see the reason; start on steep ground or in cramped base geometry that the level-ground search (SpawnClearance.make_level_ground_origin) and clearance did not resolve
-- `tribes:KingUnderTheHill|team 0 #2|soldier`: open: see the reason; start on steep ground or in cramped base geometry that the level-ground search (SpawnClearance.make_level_ground_origin) and clearance did not resolve
 - `tribes:Mudslide|squad_spot #10|soldier`: extraction spot on cliff terrain: no level spot found within 3x the spread (best-effort ExtractionSquads.make_place_around); the unit slides or drops to flat ground, or the zone touches a prop
 - `tribes:Raindance|squad_vehicle_spot #1|soldier`: extraction spot on cliff terrain: no level spot found within 3x the spread (best-effort ExtractionSquads.make_place_around); the unit slides or drops to flat ground, or the zone touches a prop
-- `tribes:StrungOut|infantry #51|soldier`: original drop point 0.4-0.8 m inside the imported base floor mesh (approximate interiors); the physics engine lifts the soldier out in the first frame
 - `tribes_aa:Damnation|exfil #1|soldier`: extraction spot on cliff terrain: no level spot found within 3x the spread (best-effort ExtractionSquads.make_place_around); the unit slides or drops to flat ground, or the zone touches a prop
-- `tribes_aa:DeathBirdsFly|herc #4|large Herc`: open: see the reason; start on steep ground or in cramped base geometry that the level-ground search (SpawnClearance.make_level_ground_origin) and clearance did not resolve
-- `tribes_aa:DeathBirdsFly|team 1 #2|large Herc`: open: see the reason; start on steep ground or in cramped base geometry that the level-ground search (SpawnClearance.make_level_ground_origin) and clearance did not resolve
 - `tribes_aa:Insalubria|squad_spot #6|soldier`: extraction spot on cliff terrain: no level spot found within 3x the spread (best-effort ExtractionSquads.make_place_around); the unit slides or drops to flat ground, or the zone touches a prop
-- `tribes_aa:Underhill|herc #2|large Herc`: open: see the reason; start on steep ground or in cramped base geometry that the level-ground search (SpawnClearance.make_level_ground_origin) and clearance did not resolve
-- `tribes_aa:Underhill|herc #2|soldier`: open: see the reason; start on steep ground or in cramped base geometry that the level-ground search (SpawnClearance.make_level_ground_origin) and clearance did not resolve
-- `tribes_aa:Underhill|team 1 #1|large Herc`: open: see the reason; start on steep ground or in cramped base geometry that the level-ground search (SpawnClearance.make_level_ground_origin) and clearance did not resolve
-- `tribes_aa:Underhill|team 1 #1|soldier`: open: see the reason; start on steep ground or in cramped base geometry that the level-ground search (SpawnClearance.make_level_ground_origin) and clearance did not resolve
 - `tribes_v:SP-Revenge-UnderCity|herc #1|bot soldier`: Tribes: Vengeance data: the level's only start lies 114 m outside the imported heightfield and its underground room shells are approximations; nothing there to stand on
 - `tribes_v:SP-Revenge-UnderCity|herc #1|large Herc`: Tribes: Vengeance data: the level's only start lies 114 m outside the imported heightfield and its underground room shells are approximations; nothing there to stand on
 - `tribes_v:SP-Revenge-UnderCity|herc #1|soldier`: Tribes: Vengeance data: the level's only start lies 114 m outside the imported heightfield and its underground room shells are approximations; nothing there to stand on
 - `tribes_v:SP-Revenge-UnderCity|team 0 #1|bot soldier`: Tribes: Vengeance data: the level's only start lies 114 m outside the imported heightfield and its underground room shells are approximations; nothing there to stand on
 - `tribes_v:SP-Revenge-UnderCity|team 0 #1|large Herc`: Tribes: Vengeance data: the level's only start lies 114 m outside the imported heightfield and its underground room shells are approximations; nothing there to stand on
 - `tribes_v:SP-Revenge-UnderCity|team 0 #1|soldier`: Tribes: Vengeance data: the level's only start lies 114 m outside the imported heightfield and its underground room shells are approximations; nothing there to stand on
+- `mission:starsiege:HB1|unit kn_gorg #10 (team 1)|soldier`: Starsiege mission data: the unit is placed far above the ground (an air-dropped or hovering unit); the importer keeps the file position, nothing to snap it to
+- `mission:starsiege:HB1|unit kn_gorg #10 (team 1)|large Herc`: Starsiege mission data: the unit is placed far above the ground (an air-dropped or hovering unit); the importer keeps the file position, nothing to snap it to
 
 ## Earthsiege 1
 
@@ -269,42 +245,42 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 | Map | Points | ok | not for Hercs | exceptions | failures |
 |---|---:|---:|---:|---:|---:|
 | tribes:ADishBestServedCold | 138 | 293 | 10 | 0 | 0 |
-| tribes:AntHill | 185 | 375 | 48 | 4 | 0 |
+| tribes:AntHill | 187 | 385 | 46 | 2 | 0 |
 | tribes:BloodRunsCold | 103 | 248 | 1 | 1 | 0 |
 | tribes:BloodyVengeance | 140 | 291 | 16 | 0 | 0 |
 | tribes:Broadside | 163 | 342 | 38 | 0 | 0 |
-| tribes:Citadels | 148 | 286 | 37 | 0 | 0 |
+| tribes:Citadels | 148 | 285 | 38 | 0 | 0 |
 | tribes:CrissCross | 233 | 565 | 7 | 1 | 0 |
 | tribes:DangerousCrossing | 224 | 547 | 6 | 1 | 0 |
-| tribes:DeathKnell | 157 | 349 | 23 | 1 | 0 |
+| tribes:DeathKnell | 161 | 361 | 23 | 1 | 0 |
 | tribes:Desert_Of_Death | 237 | 582 | 0 | 0 | 0 |
-| tribes:Fallen | 183 | 362 | 56 | 3 | 0 |
+| tribes:Fallen | 183 | 364 | 56 | 1 | 0 |
 | tribes:FogOfWar | 203 | 476 | 11 | 0 | 0 |
-| tribes:FourWayDance | 206 | 489 | 2 | 0 | 0 |
-| tribes:FreeForAll | 284 | 562 | 95 | 13 | 0 |
-| tribes:HammerDown | 220 | 493 | 39 | 0 | 0 |
-| tribes:IceRidge | 176 | 398 | 26 | 0 | 0 |
-| tribes:KingUnderTheHill | 145 | 337 | 4 | 6 | 0 |
+| tribes:FourWayDance | 207 | 492 | 2 | 0 | 0 |
+| tribes:FreeForAll | 286 | 581 | 93 | 2 | 0 |
+| tribes:HammerDown | 218 | 487 | 39 | 0 | 0 |
+| tribes:IceRidge | 172 | 386 | 26 | 0 | 0 |
+| tribes:KingUnderTheHill | 145 | 343 | 4 | 0 | 0 |
 | tribes:LuckySeven | 221 | 521 | 2 | 0 | 0 |
 | tribes:Mudslide | 198 | 410 | 52 | 1 | 0 |
 | tribes:NoMan'sLand | 141 | 293 | 16 | 0 | 0 |
 | tribes:NoQuarter | 217 | 523 | 4 | 0 | 0 |
-| tribes:PeakPerformance | 172 | 404 | 0 | 0 | 0 |
+| tribes:PeakPerformance | 173 | 407 | 0 | 0 | 0 |
 | tribes:Peekaboo | 165 | 403 | 2 | 0 | 0 |
 | tribes:Raindance | 145 | 314 | 2 | 1 | 0 |
 | tribes:Rollercoaster | 143 | 305 | 8 | 0 | 0 |
 | tribes:SandStorm | 155 | 379 | 0 | 0 | 0 |
 | tribes:Scarabrae | 138 | 270 | 33 | 0 | 0 |
-| tribes:SeekAndDestroy | 158 | 322 | 40 | 0 | 0 |
+| tribes:SeekAndDestroy | 157 | 319 | 40 | 0 | 0 |
 | tribes:Siege | 148 | 284 | 39 | 0 | 0 |
-| tribes:Snowblind | 189 | 436 | 17 | 0 | 0 |
-| tribes:Stonehenge | 209 | 506 | 3 | 0 | 0 |
-| tribes:StrungOut | 196 | 441 | 33 | 1 | 0 |
+| tribes:Snowblind | 191 | 442 | 17 | 0 | 0 |
+| tribes:Stonehenge | 207 | 500 | 3 | 0 | 0 |
+| tribes:StrungOut | 196 | 442 | 33 | 0 | 0 |
 | tribes:TempleOfDoom | 136 | 295 | 4 | 0 | 0 |
 | tribes:TheRedSands | 180 | 446 | 0 | 0 | 0 |
 | tribes:towers | 160 | 378 | 0 | 0 | 0 |
 | tribes:TripleThreat | 216 | 526 | 0 | 0 | 0 |
-| tribes:Valhalla | 173 | 370 | 37 | 0 | 0 |
+| tribes:Valhalla | 173 | 371 | 36 | 0 | 0 |
 
 ### tribes:ADishBestServedCold
 
@@ -329,27 +305,23 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 | infantry #9 | -298.4 147.2 -235.1 | large Herc | not_for_herc:air | set down 10.2 m above its floor (rest -302.6 136.8 -223.4) |
 | infantry #13 | -27.7 -29.0 -272.1 | large Herc | not_for_herc:inside | starts 2.27 m inside collision (rest -28.2 -29.1 -271.8) |
 | infantry #14 | -325.0 142.5 -219.4 | large Herc | not_for_herc:stuck | cannot move 2 m in 4 directions (best 1.1 m) (rest -326.5 145.3 -221.5) |
-| infantry #15 | -329.1 140.2 -216.4 | large Herc | not_for_herc:inside | starts 2.60 m inside collision (rest -329.0 145.7 -219.3) |
-| infantry #16 | -320.7 140.4 -211.4 | large Herc | not_for_herc:inside | starts 1.96 m inside collision (rest -318.5 139.1 -209.4) |
-| infantry #17 | -324.5 140.5 -209.7 | large Herc | not_for_herc:stuck | cannot move 2 m in 4 directions (best 1.3 m) (rest -325.7 145.6 -208.9) |
+| infantry #15 | -329.1 141.7 -216.4 | large Herc | not_for_herc:stuck | cannot move 2 m in 4 directions (best 1.1 m) (rest -333.6 145.4 -217.7) |
+| infantry #16 | -320.7 141.7 -211.4 | large Herc | not_for_herc:inside | starts 3.28 m inside collision (rest -322.5 142.5 -210.5) |
+| infantry #17 | -324.5 141.7 -209.7 | large Herc | not_for_herc:stuck | cannot move 2 m in 4 directions (best 1.3 m) (rest -325.7 145.6 -208.9) |
 | infantry #18 | -313.1 141.9 -195.2 | large Herc | not_for_herc:inside | starts 2.81 m inside collision (rest -313.6 142.0 -195.8) |
 | infantry #19 | -316.4 142.1 -193.6 | large Herc | not_for_herc:inside | starts 2.59 m inside collision (rest -316.9 142.3 -193.9) |
-| infantry #20 | -320.0 139.7 -201.0 | soldier | exception:inside | starts 0.74 m inside collision (rest -320.3 140.0 -200.9) [exception: original drop point 0.4-0.8 m inside the imported base floor mesh (approximate interiors); the physics engine lifts the soldier out in the first frame] |
-| infantry #20 | -320.0 139.7 -201.0 | large Herc | not_for_herc:inside | starts 3.00 m inside collision (rest -317.7 141.2 -195.3) |
-| infantry #21 | -316.7 139.9 -202.6 | soldier | exception:inside | starts 0.75 m inside collision (rest -316.9 140.2 -202.7) [exception: original drop point 0.4-0.8 m inside the imported base floor mesh (approximate interiors); the physics engine lifts the soldier out in the first frame] |
-| infantry #21 | -316.7 139.9 -202.6 | large Herc | not_for_herc:inside | starts 2.68 m inside collision (rest -315.6 141.2 -197.2) |
+| infantry #20 | -320.0 141.7 -201.0 | large Herc | not_for_herc:inside | starts 3.09 m inside collision (rest -323.9 141.4 -203.4) |
+| infantry #21 | -316.7 141.7 -202.6 | large Herc | not_for_herc:inside | starts 2.68 m inside collision (rest -315.6 141.6 -197.2) |
 | infantry #22 | -305.5 148.2 -191.3 | large Herc | not_for_herc:inside | starts 1.44 m inside collision (rest -303.7 151.9 -187.9) |
 | infantry #24 | -297.4 148.4 -195.5 | large Herc | not_for_herc:inside | starts 1.45 m inside collision (rest -297.1 151.0 -189.4) |
 | infantry #25 | -306.2 147.7 -241.1 | large Herc | not_for_herc:air | set down 9.3 m above its floor (rest -226.5 113.7 -292.8) |
-| infantry #26 | -304.1 147.8 -242.2 | large Herc | not_for_herc:air | set down 9.4 m above its floor (rest -220.7 110.1 -282.9) |
-| infantry #29 | -313.2 140.2 -209.9 | large Herc | not_for_herc:inside | starts 1.37 m inside collision (rest -316.4 138.6 -207.1) |
+| infantry #29 | -313.2 141.7 -209.9 | large Herc | not_for_herc:inside | starts 3.63 m inside collision (rest -317.3 139.5 -209.6) |
 | infantry #30 | -325.0 142.1 -219.4 | large Herc | not_for_herc:stuck | cannot move 2 m in 4 directions (best 1.1 m) (rest -326.5 145.3 -221.5) |
 | infantry #31 | -313.1 142.1 -195.2 | large Herc | not_for_herc:inside | starts 2.56 m inside collision (rest -313.5 142.0 -195.8) |
 | infantry #32 | -316.4 141.9 -193.6 | large Herc | not_for_herc:inside | starts 2.62 m inside collision (rest -316.9 142.3 -193.9) |
 | infantry #33 | -305.5 148.0 -191.3 | large Herc | not_for_herc:inside | starts 3.13 m inside collision (rest -303.7 151.9 -187.9) |
 | infantry #34 | -297.4 148.1 -195.5 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest -295.8 138.7 -186.8) |
 | infantry #35 | -306.9 147.7 -240.7 | large Herc | not_for_herc:air | set down 9.9 m above its floor (rest -227.3 113.8 -292.4) |
-| infantry #36 | -304.8 147.8 -241.9 | large Herc | not_for_herc:air | set down 9.2 m above its floor (rest -220.8 110.1 -282.8) |
 | infantry #38 | -322.8 153.9 -218.2 | large Herc | not_for_herc:inside | starts 2.95 m inside collision (rest -324.8 153.9 -215.7) |
 | infantry #40 | 362.6 121.1 -116.8 | large Herc | not_for_herc:inside | starts 3.18 m inside collision (rest 362.3 126.1 -117.0) |
 | infantry #41 | 351.4 121.1 -105.0 | large Herc | not_for_herc:inside | starts 3.37 m inside collision (rest 351.3 121.1 -107.4) |
@@ -358,7 +330,7 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 | infantry #44 | 360.9 115.1 -125.3 | large Herc | not_for_herc:inside | starts 2.61 m inside collision (rest 354.1 112.9 -123.3) |
 | infantry #45 | 359.7 115.1 -120.4 | large Herc | not_for_herc:inside | starts 2.50 m inside collision (rest 353.3 113.3 -124.5) |
 | infantry #46 | 358.0 114.9 -114.6 | large Herc | not_for_herc:inside | starts 2.58 m inside collision (rest 352.9 113.5 -118.0) |
-| infantry #47 | 346.9 115.3 -100.5 | large Herc | not_for_herc:air | set down 6.5 m above its floor (rest 340.0 107.4 -102.6) |
+| infantry #47 | 346.9 115.3 -100.5 | large Herc | not_for_herc:air | set down 6.5 m above its floor (rest 340.0 107.4 -102.5) |
 | infantry #48 | 357.9 114.9 -97.6 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest 361.1 96.9 -96.9) |
 | infantry #49 | 350.0 120.9 -99.5 | large Herc | not_for_herc:inside | starts 3.50 m inside collision (rest 350.2 120.9 -99.0) |
 | infantry #50 | 352.2 114.9 -108.3 | large Herc | not_for_herc:inside | starts 3.55 m inside collision (rest 351.4 114.0 -106.0) |
@@ -453,40 +425,41 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 
 | Point | Position | Unit | Result | Reason |
 |---|---|---|---|---|
-| pad #1 | -612.3 156.6 660.8 | large Herc | not_for_herc:inside | starts 2.57 m inside collision (rest -610.3 156.2 664.2) |
-| pad #2 | 322.6 156.6 -365.3 | large Herc | not_for_herc:inside | starts 2.57 m inside collision (rest 319.5 156.2 -367.7) |
-| infantry #1 | -602.7 140.9 665.3 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest -601.4 143.1 664.4) |
-| infantry #2 | -605.5 140.9 667.7 | large Herc | not_for_herc:inside | starts 1.25 m inside collision (rest -607.0 143.1 668.7) |
-| infantry #3 | -608.8 140.9 670.4 | large Herc | not_for_herc:inside | starts 1.25 m inside collision (rest -606.9 143.1 668.6) |
-| infantry #4 | -611.7 140.9 672.9 | large Herc | not_for_herc:inside | starts 1.53 m inside collision (rest -612.1 143.3 672.8) |
-| infantry #5 | -618.1 140.9 671.3 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest -620.8 127.6 676.4) |
-| infantry #6 | -620.1 140.9 669.2 | large Herc | not_for_herc:inside | starts 2.90 m inside collision (rest -617.7 143.1 667.0) |
-| infantry #7 | -622.5 140.9 666.5 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest -625.7 127.6 670.9) |
-| infantry #8 | -624.9 140.9 663.9 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest -630.6 127.6 665.5) |
-| infantry #9 | -623.9 140.9 658.5 | large Herc | not_for_herc:inside | starts 1.25 m inside collision (rest -625.9 142.9 659.1) |
-| infantry #10 | -621.6 140.9 656.0 | large Herc | not_for_herc:inside | starts 1.99 m inside collision (rest -616.5 143.2 651.9) |
-| infantry #11 | -618.7 140.9 653.5 | large Herc | not_for_herc:inside | starts 1.98 m inside collision (rest -616.5 143.2 651.9) |
-| infantry #12 | -615.6 140.9 651.0 | large Herc | not_for_herc:inside | starts 1.32 m inside collision (rest -616.5 143.2 651.9) |
-| infantry #13 | -609.1 140.9 652.5 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest -605.8 127.6 647.1) |
-| infantry #14 | -606.9 140.9 654.5 | large Herc | not_for_herc:inside | starts 3.27 m inside collision (rest -610.7 143.2 653.4) |
-| infantry #15 | -604.0 140.9 657.5 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest -601.2 127.6 652.9) |
-| infantry #16 | -601.8 140.9 660.6 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest -597.4 127.6 656.5) |
+| pad #1 | -612.3 156.6 660.8 | large Herc | not_for_herc:inside | starts 2.57 m inside collision (rest -610.8 156.2 664.0) |
+| pad #2 | 322.6 156.6 -365.3 | large Herc | not_for_herc:inside | starts 2.57 m inside collision (rest 319.1 156.2 -368.4) |
+| infantry #1 | -602.7 143.9 665.3 | large Herc | not_for_herc:inside | starts 1.34 m inside collision (rest -603.8 143.1 665.7) |
+| infantry #2 | -605.5 143.9 667.7 | large Herc | not_for_herc:inside | starts 1.25 m inside collision (rest -606.9 143.1 668.6) |
+| infantry #3 | -608.8 143.9 670.4 | large Herc | not_for_herc:inside | starts 1.57 m inside collision (rest -609.6 143.5 672.4) |
+| infantry #4 | -611.7 143.9 672.9 | large Herc | not_for_herc:inside | starts 1.64 m inside collision (rest -612.1 144.0 672.7) |
+| infantry #5 | -618.1 143.8 671.3 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest -622.3 127.6 674.8) |
+| infantry #6 | -620.1 143.9 669.2 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest -624.1 127.6 672.8) |
+| infantry #7 | -622.5 143.9 666.5 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest -626.7 127.6 669.9) |
+| infantry #8 | -624.9 143.9 663.9 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest -629.2 127.6 667.0) |
+| infantry #9 | -623.9 143.9 658.5 | large Herc | not_for_herc:inside | starts 1.19 m inside collision (rest -625.9 142.9 659.1) |
+| infantry #10 | -621.6 143.9 656.0 | large Herc | not_for_herc:inside | starts 1.41 m inside collision (rest -625.9 142.9 659.1) |
+| infantry #11 | -618.7 143.9 653.5 | large Herc | not_for_herc:inside | starts 2.00 m inside collision (rest -616.5 143.2 651.9) |
+| infantry #12 | -615.6 143.7 651.0 | large Herc | not_for_herc:inside | starts 1.32 m inside collision (rest -616.5 143.2 651.9) |
+| infantry #13 | -609.1 143.8 652.5 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest -605.0 127.6 648.4) |
+| infantry #14 | -606.9 143.9 654.5 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest -603.0 127.6 650.9) |
+| infantry #15 | -604.0 143.9 657.5 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest -600.3 127.6 653.9) |
+| infantry #16 | -601.8 143.9 660.6 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest -597.4 127.6 656.5) |
 | infantry #17 | -616.4 128.2 647.1 | large Herc | not_for_herc:inside | starts 3.62 m inside collision (rest -615.7 128.2 646.6) |
-| infantry #23 | 321.8 141.1 -377.9 | large Herc | not_for_herc:inside | starts 2.76 m inside collision (rest 322.9 142.8 -373.8) |
-| infantry #24 | 324.1 140.9 -376.8 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest 324.5 127.6 -383.2) |
-| infantry #25 | 326.6 140.9 -375.6 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest 329.4 127.6 -380.6) |
-| infantry #26 | 328.9 140.9 -374.3 | large Herc | not_for_herc:inside | starts 2.80 m inside collision (rest 330.0 144.1 -371.9) |
-| infantry #27 | 330.9 140.9 -373.3 | large Herc | not_for_herc:inside | starts 2.80 m inside collision (rest 330.0 144.1 -371.9) |
-| infantry #28 | 333.3 140.9 -372.0 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest 338.1 127.6 -376.1) |
-| infantry #29 | 325.9 140.9 -354.5 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest 324.3 127.6 -348.6) |
-| infantry #30 | 323.6 140.9 -355.8 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest 319.6 127.6 -351.5) |
-| infantry #31 | 321.5 140.9 -357.0 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest 317.2 127.6 -352.8) |
-| infantry #33 | 317.1 140.9 -359.3 | large Herc | not_for_herc:air | set down 6.5 m above its floor (rest 322.6 127.6 -368.6) |
-| infantry #34 | 314.4 140.9 -360.6 | large Herc | not_for_herc:inside | starts 2.76 m inside collision (rest 313.4 127.6 -354.8) |
-| infantry #35 | 313.3 140.9 -367.8 | large Herc | not_for_herc:inside | starts 1.33 m inside collision (rest 312.9 143.1 -366.9) |
-| infantry #36 | 314.9 140.9 -371.5 | large Herc | not_for_herc:inside | starts 1.58 m inside collision (rest 315.2 142.9 -370.4) |
-| infantry #37 | 333.9 140.9 -365.8 | large Herc | not_for_herc:inside | starts 3.56 m inside collision (rest 328.7 134.4 -369.2) |
-| infantry #38 | 331.0 140.9 -360.9 | large Herc | not_for_herc:inside | starts 1.98 m inside collision (rest 329.7 143.2 -358.4) |
+| infantry #23 | 321.8 143.9 -377.9 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest 324.7 127.6 -383.1) |
+| infantry #24 | 324.1 143.8 -376.8 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest 327.0 127.6 -381.9) |
+| infantry #25 | 326.6 143.9 -375.6 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest 329.3 127.6 -380.7) |
+| infantry #26 | 328.9 143.9 -374.3 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest 332.0 127.6 -379.3) |
+| infantry #27 | 330.9 143.7 -373.3 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest 333.9 127.6 -378.3) |
+| infantry #28 | 333.3 143.9 -372.0 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest 336.4 127.6 -377.0) |
+| infantry #29 | 325.9 143.9 -354.5 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest 323.4 127.6 -349.1) |
+| infantry #30 | 323.6 143.8 -355.8 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest 321.0 127.6 -350.7) |
+| infantry #31 | 321.5 143.9 -357.0 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest 319.2 127.6 -351.7) |
+| infantry #32 | 319.6 143.9 -358.2 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest 317.0 127.6 -352.9) |
+| infantry #33 | 317.1 143.9 -359.3 | large Herc | not_for_herc:air | set down 6.9 m above its floor (rest 227.6 74.8 -388.8) |
+| infantry #34 | 314.4 143.8 -360.6 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest 311.9 127.6 -355.4) |
+| infantry #35 | 313.3 143.9 -367.8 | large Herc | not_for_herc:inside | starts 1.33 m inside collision (rest 312.9 143.1 -366.9) |
+| infantry #36 | 314.9 143.9 -371.5 | large Herc | not_for_herc:inside | starts 1.25 m inside collision (rest 314.8 143.1 -370.7) |
+| infantry #37 | 333.9 143.8 -365.8 | large Herc | not_for_herc:inside | starts 1.59 m inside collision (rest 335.9 142.9 -368.4) |
+| infantry #38 | 331.0 143.9 -360.9 | large Herc | not_for_herc:inside | starts 2.00 m inside collision (rest 329.7 143.2 -358.4) |
 | infantry #42 | 332.0 155.7 -368.7 | large Herc | not_for_herc:inside | starts 2.60 m inside collision (rest 321.3 155.0 -371.7) |
 | infantry #43 | 308.0 128.2 -365.0 | large Herc | not_for_herc:inside | starts 3.68 m inside collision (rest 308.2 127.6 -366.5) |
 | infantry #44 | 331.3 128.2 -353.9 | large Herc | not_for_herc:inside | starts 3.62 m inside collision (rest 330.8 128.2 -353.2) |
@@ -495,12 +468,12 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 
 | Point | Position | Unit | Result | Reason |
 |---|---|---|---|---|
-| infantry #6 | 118.0 109.4 631.3 | large Herc | not_for_herc:inside | starts 2.96 m inside collision (rest 116.6 108.1 630.1) |
+| infantry #6 | 118.0 111.9 631.3 | large Herc | not_for_herc:inside | starts 3.12 m inside collision (rest 119.5 111.9 634.5) |
 | infantry #7 | 122.9 112.3 634.9 | large Herc | not_for_herc:inside | starts 3.30 m inside collision (rest 126.8 112.3 632.1) |
 | infantry #8 | 119.2 112.1 636.4 | large Herc | not_for_herc:inside | starts 3.02 m inside collision (rest 119.1 112.1 635.4) |
-| infantry #30 | -160.8 117.1 -949.6 | large Herc | not_for_herc:inside | starts 3.25 m inside collision (rest -164.3 118.1 -948.1) |
-| infantry #31 | -154.2 116.9 -948.6 | large Herc | not_for_herc:inside | starts 2.98 m inside collision (rest -155.1 117.5 -946.6) |
-| infantry #32 | -148.8 116.7 -947.7 | large Herc | not_for_herc:inside | starts 2.46 m inside collision (rest -155.0 117.5 -946.7) |
+| infantry #30 | -160.8 118.0 -949.6 | large Herc | not_for_herc:inside | starts 3.25 m inside collision (rest -164.3 118.1 -948.1) |
+| infantry #31 | -154.2 118.0 -948.6 | large Herc | not_for_herc:inside | starts 2.98 m inside collision (rest -155.1 118.0 -946.6) |
+| infantry #32 | -148.8 118.0 -947.7 | large Herc | not_for_herc:inside | starts 2.47 m inside collision (rest -155.0 117.9 -946.7) |
 | infantry #55 | 361.7 129.5 -606.0 | large Herc | not_for_herc:inside | starts 3.18 m inside collision (rest 362.9 129.5 -604.6) |
 | squad_spot #3 | 119.4 112.9 647.6 | soldier | exception:air | set down 7.1 m above its floor (rest 135.8 101.9 669.4) [exception: extraction spot on cliff terrain: no level spot found within 3x the spread (best-effort ExtractionSquads.make_place_around); the unit slides or drops to flat ground, or the zone touches a prop] |
 
@@ -592,8 +565,7 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 | infantry #44 | 4.6 61.2 -692.3 | large Herc | not_for_herc:inside | starts 1.89 m inside collision (rest 2.4 64.5 -694.4) |
 | infantry #46 | 25.2 60.1 -700.2 | large Herc | not_for_herc:inside | starts 2.99 m inside collision (rest 22.0 63.5 -708.3) |
 | infantry #47 | 16.3 60.2 -711.0 | large Herc | not_for_herc:inside | starts 4.26 m inside collision (rest 16.5 61.0 -711.5) |
-| infantry #48 | 2.5 51.9 -689.2 | soldier | exception:inside | starts 0.40 m inside collision (rest 2.5 52.1 -689.2) [exception: original drop point 0.4-0.8 m inside the imported base floor mesh (approximate interiors); the physics engine lifts the soldier out in the first frame] |
-| infantry #48 | 2.5 51.9 -689.2 | large Herc | not_for_herc:inside | starts 2.89 m inside collision (rest 8.4 53.6 -689.8) |
+| infantry #48 | 2.5 54.5 -689.2 | large Herc | not_for_herc:inside | starts 2.79 m inside collision (rest 8.4 53.6 -689.8) |
 | infantry #51 | 2.3 61.1 -705.5 | large Herc | not_for_herc:inside | starts 2.54 m inside collision (rest 1.3 61.8 -704.3) |
 | infantry #52 | -3.6 61.1 -700.6 | large Herc | not_for_herc:inside | starts 3.19 m inside collision (rest -1.4 64.5 -700.1) |
 | infantry #53 | -10.6 62.0 -701.1 | large Herc | not_for_herc:inside | starts 2.35 m inside collision (rest -5.9 65.5 -693.9) |
@@ -605,8 +577,7 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 | infantry #61 | 2.7 61.1 -694.6 | large Herc | not_for_herc:inside | starts 1.61 m inside collision (rest 2.4 64.5 -694.1) |
 | infantry #62 | 25.2 60.2 -700.2 | large Herc | not_for_herc:inside | starts 3.01 m inside collision (rest 22.1 63.5 -708.3) |
 | infantry #63 | 16.3 60.1 -711.0 | large Herc | not_for_herc:inside | starts 4.24 m inside collision (rest 16.4 61.0 -711.5) |
-| infantry #64 | 3.7 52.5 -688.0 | soldier | exception:inside | starts 0.41 m inside collision (rest 3.7 52.2 -688.0) [exception: original drop point 0.4-0.8 m inside the imported base floor mesh (approximate interiors); the physics engine lifts the soldier out in the first frame] |
-| infantry #64 | 3.7 52.5 -688.0 | large Herc | not_for_herc:inside | starts 2.79 m inside collision (rest 8.4 53.5 -689.8) |
+| infantry #64 | 3.7 54.5 -688.0 | large Herc | not_for_herc:inside | starts 3.07 m inside collision (rest 8.4 53.6 -689.8) |
 | squad_spot #3 | 4.5 58.0 -678.7 | soldier | exception:air | set down 5.5 m above its floor (rest 11.2 56.3 -669.9) [exception: extraction spot on cliff terrain: no level spot found within 3x the spread (best-effort ExtractionSquads.make_place_around); the unit slides or drops to flat ground, or the zone touches a prop] |
 
 ### tribes:FogOfWar
@@ -640,28 +611,23 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 | infantry #9 | -298.4 147.2 -235.1 | large Herc | not_for_herc:air | set down 9.9 m above its floor (rest -302.6 136.8 -223.4) |
 | infantry #13 | -27.7 -29.0 -272.1 | large Herc | not_for_herc:inside | starts 2.27 m inside collision (rest -28.2 -29.1 -271.8) |
 | infantry #14 | -325.0 142.5 -219.3 | large Herc | not_for_herc:stuck | cannot move 2 m in 4 directions (best 1.1 m) (rest -326.5 145.3 -221.5) |
-| infantry #15 | -329.1 140.2 -216.4 | large Herc | not_for_herc:inside | starts 1.71 m inside collision (rest -329.0 145.7 -219.3) |
-| infantry #16 | -320.7 140.4 -211.4 | large Herc | not_for_herc:inside | starts 1.11 m inside collision (rest -318.4 138.9 -209.4) |
-| infantry #17 | -324.5 140.5 -209.7 | large Herc | not_for_herc:stuck | cannot move 2 m in 4 directions (best 1.3 m) (rest -325.7 145.6 -208.9) |
+| infantry #15 | -329.1 141.7 -216.4 | large Herc | not_for_herc:stuck | cannot move 2 m in 4 directions (best 1.1 m) (rest -333.6 145.3 -217.7) |
+| infantry #16 | -320.7 141.7 -211.4 | large Herc | not_for_herc:inside | starts 3.30 m inside collision (rest -322.3 145.4 -210.4) |
+| infantry #17 | -324.5 141.7 -209.7 | large Herc | not_for_herc:stuck | cannot move 2 m in 4 directions (best 1.3 m) (rest -325.7 145.6 -208.9) |
 | infantry #18 | -313.1 141.9 -195.2 | large Herc | not_for_herc:inside | starts 2.81 m inside collision (rest -314.3 142.0 -194.7) |
 | infantry #19 | -316.4 142.1 -193.6 | large Herc | not_for_herc:inside | starts 2.76 m inside collision (rest -317.3 142.3 -194.1) |
-| infantry #20 | -320.0 139.7 -201.0 | soldier | exception:inside | starts 0.74 m inside collision (rest -320.3 140.0 -200.9) [exception: original drop point 0.4-0.8 m inside the imported base floor mesh (approximate interiors); the physics engine lifts the soldier out in the first frame] |
-| infantry #20 | -320.0 139.7 -201.0 | large Herc | not_for_herc:inside | starts 2.78 m inside collision (rest -323.9 141.4 -203.4) |
-| infantry #21 | -316.7 139.9 -202.6 | soldier | exception:inside | starts 0.75 m inside collision (rest -316.9 140.2 -202.7) [exception: original drop point 0.4-0.8 m inside the imported base floor mesh (approximate interiors); the physics engine lifts the soldier out in the first frame] |
-| infantry #21 | -316.7 139.9 -202.6 | large Herc | not_for_herc:inside | starts 2.68 m inside collision (rest -315.6 141.2 -197.2) |
+| infantry #20 | -320.0 141.7 -201.0 | large Herc | not_for_herc:inside | starts 2.72 m inside collision (rest -323.9 141.4 -203.4) |
+| infantry #21 | -316.7 141.7 -202.6 | large Herc | not_for_herc:inside | starts 2.68 m inside collision (rest -315.6 141.6 -197.2) |
 | infantry #22 | -305.5 148.2 -191.3 | large Herc | not_for_herc:inside | starts 1.44 m inside collision (rest -303.7 151.9 -187.9) |
 | infantry #24 | -297.4 148.3 -195.5 | large Herc | not_for_herc:inside | starts 1.45 m inside collision (rest -297.0 151.0 -189.4) |
 | infantry #25 | -306.2 147.6 -241.1 | large Herc | not_for_herc:air | set down 9.3 m above its floor (rest -226.4 113.7 -292.8) |
-| infantry #26 | -304.1 147.8 -242.2 | large Herc | not_for_herc:air | set down 9.4 m above its floor (rest -220.7 110.1 -282.9) |
-| infantry #29 | -313.2 140.2 -209.9 | large Herc | not_for_herc:inside | starts 1.29 m inside collision (rest -316.0 139.2 -206.9) |
-| infantry #30 | -325.0 139.2 -219.3 | soldier | exception:inside | starts 0.42 m inside collision (rest -325.3 139.3 -219.6) [exception: original drop point 0.4-0.8 m inside the imported base floor mesh (approximate interiors); the physics engine lifts the soldier out in the first frame] |
-| infantry #30 | -325.0 139.2 -219.3 | large Herc | not_for_herc:stuck | cannot move 2 m in 4 directions (best 1.1 m) (rest -326.5 145.3 -221.5) |
+| infantry #29 | -313.2 141.7 -209.9 | large Herc | not_for_herc:inside | starts 1.51 m inside collision (rest -317.4 139.5 -209.4) |
+| infantry #30 | -325.0 141.7 -219.3 | large Herc | not_for_herc:stuck | cannot move 2 m in 4 directions (best 1.1 m) (rest -326.5 145.3 -221.5) |
 | infantry #31 | -313.1 142.1 -195.2 | large Herc | not_for_herc:inside | starts 2.56 m inside collision (rest -313.4 142.0 -195.8) |
 | infantry #32 | -316.4 141.9 -193.6 | large Herc | not_for_herc:inside | starts 2.62 m inside collision (rest -316.9 142.3 -193.9) |
 | infantry #33 | -305.5 148.0 -191.3 | large Herc | not_for_herc:inside | starts 3.13 m inside collision (rest -303.7 151.9 -187.9) |
 | infantry #34 | -297.4 148.1 -195.5 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest -295.7 138.7 -186.8) |
 | infantry #35 | -306.9 147.7 -240.7 | large Herc | not_for_herc:air | set down 9.9 m above its floor (rest -227.3 113.8 -292.4) |
-| infantry #36 | -304.8 147.8 -241.9 | large Herc | not_for_herc:air | set down 9.2 m above its floor (rest -220.8 110.1 -282.8) |
 | infantry #38 | -322.8 153.9 -218.2 | large Herc | not_for_herc:inside | starts 2.95 m inside collision (rest -324.8 153.9 -215.7) |
 | infantry #40 | -140.3 94.8 81.2 | large Herc | not_for_herc:inside | starts 3.68 m inside collision (rest -140.3 94.8 79.5) |
 | infantry #41 | -144.4 85.8 65.1 | large Herc | not_for_herc:inside | starts 3.17 m inside collision (rest -145.2 84.2 64.8) |
@@ -692,22 +658,14 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 | infantry #71 | -103.5 97.3 -584.5 | large Herc | not_for_herc:inside | starts 2.85 m inside collision (rest -106.2 96.5 -584.5) |
 | infantry #73 | -116.7 97.3 -589.2 | large Herc | not_for_herc:inside | starts 2.52 m inside collision (rest -117.3 96.4 -588.3) |
 | infantry #74 | -103.3 97.2 -603.6 | large Herc | not_for_herc:inside | starts 2.51 m inside collision (rest -108.0 97.2 -606.4) |
-| infantry #75 | -100.9 87.5 -589.0 | soldier | exception:inside | starts 0.57 m inside collision (rest -100.9 88.1 -589.0) [exception: original drop point 0.4-0.8 m inside the imported base floor mesh (approximate interiors); the physics engine lifts the soldier out in the first frame] |
-| infantry #75 | -100.9 87.5 -589.0 | large Herc | not_for_herc:inside | starts 2.74 m inside collision (rest -104.2 86.0 -594.7) |
-| infantry #76 | -110.2 87.5 -589.4 | soldier | exception:inside | starts 0.55 m inside collision (rest -110.4 88.3 -589.9) [exception: original drop point 0.4-0.8 m inside the imported base floor mesh (approximate interiors); the physics engine lifts the soldier out in the first frame] |
-| infantry #76 | -110.2 87.5 -589.4 | large Herc | not_for_herc:inside | starts 2.69 m inside collision (rest -112.2 88.6 -590.5) |
-| infantry #77 | -111.3 87.5 -582.5 | soldier | exception:inside | starts 0.98 m inside collision (rest -111.9 87.8 -582.5) [exception: original drop point 0.4-0.8 m inside the imported base floor mesh (approximate interiors); the physics engine lifts the soldier out in the first frame] |
-| infantry #77 | -111.3 87.5 -582.5 | large Herc | not_for_herc:inside | starts 2.53 m inside collision (rest -112.3 89.4 -586.4) |
-| infantry #78 | -103.6 87.5 -581.1 | soldier | exception:inside | starts 0.59 m inside collision (rest -103.5 88.1 -581.1) [exception: original drop point 0.4-0.8 m inside the imported base floor mesh (approximate interiors); the physics engine lifts the soldier out in the first frame] |
-| infantry #78 | -103.6 87.5 -581.1 | large Herc | not_for_herc:inside | starts 2.96 m inside collision (rest -104.8 89.6 -584.8) |
-| infantry #79 | -96.9 87.5 -582.1 | soldier | exception:inside | starts 0.57 m inside collision (rest -96.9 88.1 -582.1) [exception: original drop point 0.4-0.8 m inside the imported base floor mesh (approximate interiors); the physics engine lifts the soldier out in the first frame] |
-| infantry #79 | -96.9 87.5 -582.1 | large Herc | not_for_herc:inside | starts 3.55 m inside collision (rest -105.4 89.8 -583.9) |
-| infantry #80 | -95.5 87.5 -588.7 | soldier | exception:inside | starts 0.93 m inside collision (rest -95.0 87.8 -591.8) [exception: original drop point 0.4-0.8 m inside the imported base floor mesh (approximate interiors); the physics engine lifts the soldier out in the first frame] |
-| infantry #80 | -95.5 87.5 -588.7 | large Herc | not_for_herc:inside | starts 2.91 m inside collision (rest -95.8 89.1 -590.4) |
-| infantry #81 | -111.9 87.5 -588.2 | soldier | exception:inside | starts 0.66 m inside collision (rest -111.9 88.5 -588.2) [exception: original drop point 0.4-0.8 m inside the imported base floor mesh (approximate interiors); the physics engine lifts the soldier out in the first frame] |
-| infantry #81 | -111.9 87.5 -588.2 | large Herc | not_for_herc:inside | starts 2.89 m inside collision (rest -112.1 88.8 -589.3) |
-| infantry #82 | -95.9 87.5 -585.4 | soldier | exception:inside | starts 0.80 m inside collision (rest -96.1 88.1 -584.8) [exception: original drop point 0.4-0.8 m inside the imported base floor mesh (approximate interiors); the physics engine lifts the soldier out in the first frame] |
-| infantry #82 | -95.9 87.5 -585.4 | large Herc | not_for_herc:inside | starts 2.52 m inside collision (rest -95.6 89.1 -588.8) |
+| infantry #75 | -100.9 90.4 -589.0 | large Herc | not_for_herc:inside | starts 3.34 m inside collision (rest -104.2 86.0 -594.7) |
+| infantry #76 | -110.2 90.4 -589.4 | large Herc | not_for_herc:inside | starts 3.27 m inside collision (rest -113.7 90.0 -593.4) |
+| infantry #77 | -111.3 90.4 -582.5 | large Herc | not_for_herc:inside | starts 2.62 m inside collision (rest -111.7 89.9 -580.6) |
+| infantry #78 | -103.6 90.4 -581.1 | large Herc | not_for_herc:inside | starts 3.00 m inside collision (rest -105.4 89.8 -583.9) |
+| infantry #79 | -96.9 90.4 -582.1 | large Herc | not_for_herc:inside | starts 2.49 m inside collision (rest -96.1 92.6 -579.2) |
+| infantry #80 | -95.5 90.4 -588.7 | large Herc | not_for_herc:inside | starts 2.94 m inside collision (rest -95.9 89.1 -590.4) |
+| infantry #81 | -111.9 90.4 -588.2 | large Herc | not_for_herc:inside | starts 3.27 m inside collision (rest -113.4 90.0 -591.9) |
+| infantry #82 | -95.9 90.4 -585.4 | large Herc | not_for_herc:inside | starts 2.53 m inside collision (rest -95.7 89.1 -588.8) |
 | infantry #83 | -112.5 97.2 -612.3 | large Herc | not_for_herc:inside | starts 2.75 m inside collision (rest -113.4 97.0 -612.8) |
 | infantry #84 | -93.7 97.2 -614.5 | large Herc | not_for_herc:inside | starts 2.85 m inside collision (rest -94.7 97.1 -617.7) |
 | infantry #85 | -98.9 97.2 -606.4 | large Herc | not_for_herc:inside | starts 2.73 m inside collision (rest -100.3 97.2 -607.5) |
@@ -763,7 +721,7 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 | infantry #23 | -177.0 234.0 -286.3 | large Herc | not_for_herc:inside | starts 1.96 m inside collision (rest -182.4 231.4 -282.6) |
 | infantry #24 | -189.5 234.0 -285.1 | large Herc | not_for_herc:inside | starts 2.47 m inside collision (rest -197.3 233.2 -288.0) |
 | infantry #25 | -181.7 232.0 -268.5 | large Herc | not_for_herc:inside | starts 3.12 m inside collision (rest -181.1 230.8 -268.9) |
-| infantry #26 | -181.1 224.4 -282.7 | large Herc | not_for_herc:inside | starts 2.81 m inside collision (rest -181.9 220.6 -286.4) |
+| infantry #26 | -181.1 224.4 -282.7 | large Herc | not_for_herc:inside | starts 2.81 m inside collision (rest -181.9 220.4 -286.4) |
 | infantry #27 | -196.1 225.5 -295.6 | large Herc | not_for_herc:inside | starts 2.71 m inside collision (rest -195.4 225.0 -294.3) |
 | infantry #28 | -168.8 225.7 -294.6 | large Herc | not_for_herc:inside | starts 3.13 m inside collision (rest -169.8 225.9 -294.8) |
 | infantry #29 | -383.3 190.1 -37.2 | large Herc | not_for_herc:inside | starts 3.07 m inside collision (rest -382.8 190.1 -38.5) |
@@ -824,12 +782,6 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 
 | Point | Position | Unit | Result | Reason |
 |---|---|---|---|---|
-| herc #2 | -1191.7 230.2 69.9 | soldier | exception:air | set down 23.0 m above its floor (rest -1191.8 211.1 44.5) [exception: open: see the reason; start on steep ground or in cramped base geometry that the level-ground search (SpawnClearance.make_level_ground_origin) and clearance did not resolve] |
-| herc #2 | -1191.7 230.2 69.9 | large Herc | exception:falling | still falling after 90 frames (-15 m/s) (rest -1191.7 207.3 69.9) [exception: open: see the reason; start on steep ground or in cramped base geometry that the level-ground search (SpawnClearance.make_level_ground_origin) and clearance did not resolve] |
-| herc #15 | -884.0 209.4 70.5 | soldier | exception:air | set down 8.2 m above its floor (rest -893.4 207.3 93.6) [exception: open: see the reason; start on steep ground or in cramped base geometry that the level-ground search (SpawnClearance.make_level_ground_origin) and clearance did not resolve] |
-| herc #15 | -884.0 209.4 70.5 | large Herc | exception:falling | still falling after 90 frames (-15 m/s) (rest -871.9 173.3 70.7) [exception: open: see the reason; start on steep ground or in cramped base geometry that the level-ground search (SpawnClearance.make_level_ground_origin) and clearance did not resolve] |
-| team 0 #2 | -1191.7 230.2 69.9 | soldier | exception:air | set down 23.0 m above its floor (rest -1191.8 211.1 44.5) [exception: open: see the reason; start on steep ground or in cramped base geometry that the level-ground search (SpawnClearance.make_level_ground_origin) and clearance did not resolve] |
-| team 0 #2 | -1191.7 230.2 69.9 | large Herc | exception:falling | still falling after 90 frames (-15 m/s) (rest -1191.7 207.3 69.9) [exception: open: see the reason; start on steep ground or in cramped base geometry that the level-ground search (SpawnClearance.make_level_ground_origin) and clearance did not resolve] |
 | infantry #19 | -904.0 173.8 70.5 | large Herc | not_for_herc:stuck | cannot move 2 m in 4 directions (best 1.1 m) (rest -904.7 172.5 76.7) |
 | infantry #24 | -1187.4 194.8 155.4 | large Herc | not_for_herc:stuck | cannot move 2 m in 4 directions (best 0.6 m) (rest -1187.1 194.1 152.6) |
 | infantry #25 | -1186.8 191.8 14.4 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest -1186.8 143.3 12.3) |
@@ -847,7 +799,7 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 | Point | Position | Unit | Result | Reason |
 |---|---|---|---|---|
 | infantry #3 | 160.5 105.7 5.6 | large Herc | not_for_herc:air | set down 6.3 m above its floor (rest 165.2 100.5 11.5) |
-| infantry #4 | 178.3 96.2 -16.7 | large Herc | not_for_herc:air | set down 10.9 m above its floor (rest 184.9 86.7 -20.3) |
+| infantry #4 | 178.3 99.2 -16.7 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest 180.8 86.3 -18.9) |
 | infantry #7 | -855.4 124.0 -284.5 | large Herc | not_for_herc:inside | starts 3.07 m inside collision (rest -855.9 124.0 -280.4) |
 | infantry #16 | 181.0 92.8 4.4 | large Herc | not_for_herc:air | set down 10.7 m above its floor (rest 198.1 100.3 66.4) |
 | infantry #17 | 173.4 93.0 -20.9 | large Herc | not_for_herc:inside | starts 3.34 m inside collision (rest 171.6 90.7 -19.3) |
@@ -866,7 +818,7 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 | infantry #32 | 173.4 92.8 -20.9 | large Herc | not_for_herc:inside | starts 2.76 m inside collision (rest 180.6 87.5 -21.8) |
 | infantry #33 | 181.1 92.8 -2.5 | large Herc | not_for_herc:inside | starts 3.01 m inside collision (rest 178.4 91.8 -9.6) |
 | infantry #34 | 177.3 92.8 -1.4 | large Herc | not_for_herc:inside | starts 2.90 m inside collision (rest 163.0 89.6 2.0) |
-| infantry #35 | 174.8 93.4 -0.6 | large Herc | not_for_herc:inside | starts 2.61 m inside collision (rest 162.9 89.6 2.0) |
+| infantry #35 | 174.8 96.4 -0.6 | large Herc | not_for_herc:inside | starts 2.82 m inside collision (rest 175.5 95.8 6.0) |
 | infantry #36 | 174.7 93.2 -14.1 | large Herc | not_for_herc:inside | starts 2.95 m inside collision (rest 178.9 91.8 -8.2) |
 | infantry #37 | 160.3 101.8 -10.8 | large Herc | not_for_herc:inside | starts 3.03 m inside collision (rest 164.0 96.1 -18.2) |
 | infantry #38 | 163.8 101.6 3.5 | large Herc | not_for_herc:inside | starts 2.66 m inside collision (rest 165.1 98.8 -1.8) |
@@ -925,10 +877,10 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 
 | Point | Position | Unit | Result | Reason |
 |---|---|---|---|---|
-| infantry #27 | 47.2 98.1 128.1 | large Herc | not_for_herc:inside | starts 3.31 m inside collision (rest 44.7 99.2 127.1) |
-| infantry #28 | 50.3 97.9 107.8 | large Herc | not_for_herc:inside | starts 3.08 m inside collision (rest 52.4 99.0 107.6) |
+| infantry #27 | 47.2 98.1 128.1 | large Herc | not_for_herc:inside | starts 3.15 m inside collision (rest 44.7 99.1 127.1) |
+| infantry #28 | 50.3 97.9 107.8 | large Herc | not_for_herc:inside | starts 3.10 m inside collision (rest 52.5 99.0 107.6) |
 | infantry #55 | -533.6 92.4 122.2 | large Herc | not_for_herc:inside | starts 3.10 m inside collision (rest -533.5 94.2 122.6) |
-| infantry #56 | -536.4 92.4 144.5 | large Herc | not_for_herc:inside | starts 3.35 m inside collision (rest -538.3 94.1 143.0) |
+| infantry #56 | -536.4 92.4 144.5 | large Herc | not_for_herc:inside | starts 3.34 m inside collision (rest -538.4 94.1 142.9) |
 
 ### tribes:Peekaboo
 
@@ -962,13 +914,13 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 
 | Point | Position | Unit | Result | Reason |
 |---|---|---|---|---|
-| pad #1 | -431.1 151.8 682.6 | large Herc | not_for_herc:inside | starts 1.99 m inside collision (rest -432.5 150.9 682.7) |
+| pad #1 | -431.1 151.8 682.6 | large Herc | not_for_herc:inside | starts 1.99 m inside collision (rest -432.5 150.8 682.8) |
 | pad #2 | -399.8 160.0 -278.0 | large Herc | not_for_herc:inside | starts 1.22 m inside collision (rest -403.5 157.8 -280.3) |
 | infantry #6 | -482.2 174.8 733.7 | large Herc | not_for_herc:inside | starts 1.62 m inside collision (rest -481.4 179.8 734.4) |
 | infantry #7 | -491.8 174.8 724.8 | large Herc | not_for_herc:inside | starts 2.76 m inside collision (rest -490.4 179.8 725.6) |
 | infantry #8 | -487.4 174.8 729.1 | large Herc | not_for_herc:inside | starts 3.28 m inside collision (rest -485.1 174.9 728.4) |
 | infantry #9 | -446.9 174.8 698.2 | large Herc | not_for_herc:inside | starts 3.78 m inside collision (rest -443.5 174.8 698.2) |
-| infantry #10 | -450.4 174.8 694.9 | large Herc | not_for_herc:inside | starts 2.62 m inside collision (rest -451.4 174.4 697.0) |
+| infantry #10 | -450.4 174.8 694.9 | large Herc | not_for_herc:inside | starts 2.62 m inside collision (rest -451.4 174.5 697.0) |
 | infantry #11 | -453.4 174.8 692.2 | large Herc | not_for_herc:inside | starts 2.70 m inside collision (rest -451.4 174.3 696.9) |
 | infantry #12 | -436.3 181.1 677.8 | large Herc | not_for_herc:inside | starts 2.47 m inside collision (rest -433.8 179.8 679.4) |
 | infantry #13 | -435.4 181.1 692.3 | large Herc | not_for_herc:inside | starts 2.95 m inside collision (rest -433.8 179.9 692.2) |
@@ -986,7 +938,7 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 | infantry #31 | -382.3 189.3 -272.6 | large Herc | not_for_herc:inside | starts 2.96 m inside collision (rest -382.5 187.1 -272.5) |
 | infantry #32 | -396.8 189.3 -273.8 | large Herc | not_for_herc:inside | starts 2.69 m inside collision (rest -398.1 188.1 -276.3) |
 | infantry #33 | -396.3 183.0 -277.6 | large Herc | not_for_herc:inside | starts 2.55 m inside collision (rest -397.8 188.1 -275.2) |
-| infantry #34 | -372.4 183.0 -281.1 | large Herc | not_for_herc:inside | starts 3.01 m inside collision (rest -375.6 185.1 -282.9) |
+| infantry #34 | -372.4 183.0 -281.1 | large Herc | not_for_herc:inside | starts 3.01 m inside collision (rest -376.4 188.2 -283.7) |
 | infantry #35 | -388.7 183.0 -266.2 | large Herc | not_for_herc:inside | starts 2.98 m inside collision (rest -390.5 183.5 -268.2) |
 | infantry #39 | -410.8 159.0 -279.2 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest -412.5 138.5 -282.3) |
 | infantry #41 | -338.4 163.0 -300.6 | large Herc | not_for_herc:inside | starts 3.33 m inside collision (rest -338.8 163.9 -302.7) |
@@ -1066,7 +1018,7 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 | infantry #25 | -622.0 100.9 -358.7 | large Herc | not_for_herc:inside | starts 3.78 m inside collision (rest -622.2 100.9 -360.7) |
 | infantry #26 | -602.0 98.9 -350.0 | large Herc | not_for_herc:inside | starts 3.07 m inside collision (rest -602.0 98.9 -350.0) |
 | infantry #27 | -653.0 99.1 -372.9 | large Herc | not_for_herc:inside | starts 3.07 m inside collision (rest -653.0 99.1 -372.9) |
-| infantry #28 | -662.8 114.9 -317.6 | large Herc | not_for_herc:inside | starts 3.37 m inside collision (rest -662.9 116.6 -324.0) |
+| infantry #28 | -662.8 114.9 -317.6 | large Herc | not_for_herc:inside | starts 3.37 m inside collision (rest -662.8 116.8 -324.4) |
 | infantry #29 | -657.7 114.9 -328.9 | large Herc | not_for_herc:inside | starts 2.56 m inside collision (rest -652.8 115.0 -328.9) |
 | infantry #30 | -631.7 114.9 -317.4 | large Herc | not_for_herc:inside | starts 2.66 m inside collision (rest -632.8 114.9 -319.9) |
 | infantry #31 | -637.0 114.9 -305.6 | large Herc | not_for_herc:inside | starts 3.53 m inside collision (rest -641.4 114.9 -305.6) |
@@ -1113,7 +1065,7 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 |---|---|---|---|---|
 | infantry #17 | 347.3 177.5 -405.3 | large Herc | not_for_herc:inside | starts 1.81 m inside collision (rest 346.0 174.0 -405.7) |
 | infantry #45 | 550.9 107.9 -476.9 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest 550.9 97.7 -469.7) |
-| infantry #56 | 233.0 125.6 -307.5 | large Herc | not_for_herc:inside | starts 3.97 m inside collision (rest 233.3 125.7 -301.4) |
+| infantry #56 | 233.0 125.6 -307.5 | large Herc | not_for_herc:inside | starts 3.11 m inside collision (rest 231.5 125.7 -302.5) |
 
 ### tribes:StrungOut
 
@@ -1151,14 +1103,13 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 | infantry #38 | 172.0 163.2 172.8 | large Herc | not_for_herc:inside | starts 2.52 m inside collision (rest 173.0 162.7 173.1) |
 | infantry #39 | 211.8 163.2 172.4 | large Herc | not_for_herc:inside | starts 1.66 m inside collision (rest 210.8 160.2 170.8) |
 | infantry #40 | 212.2 163.2 211.2 | large Herc | not_for_herc:inside | starts 2.51 m inside collision (rest 208.4 160.0 212.9) |
-| infantry #51 | 176.0 186.1 208.0 | soldier | exception:inside | starts 0.67 m inside collision (rest 177.4 186.5 208.3) [exception: original drop point 0.4-0.8 m inside the imported base floor mesh (approximate interiors); the physics engine lifts the soldier out in the first frame] |
-| infantry #51 | 176.0 186.1 208.0 | large Herc | not_for_herc:inside | starts 3.15 m inside collision (rest 178.3 186.8 206.0) |
+| infantry #51 | 176.0 188.2 208.0 | large Herc | not_for_herc:inside | starts 3.14 m inside collision (rest 178.3 186.8 206.0) |
 
 ### tribes:TempleOfDoom
 
 | Point | Position | Unit | Result | Reason |
 |---|---|---|---|---|
-| pad #1 | 272.9 152.7 -471.6 | large Herc | not_for_herc:inside | starts 3.07 m inside collision (rest 272.8 152.7 -471.9) |
+| pad #1 | 272.9 152.7 -471.6 | large Herc | not_for_herc:inside | starts 3.07 m inside collision (rest 273.1 152.7 -471.2) |
 | infantry #18 | 222.4 137.1 -543.2 | large Herc | not_for_herc:inside | starts 2.84 m inside collision (rest 221.7 140.1 -544.3) |
 | infantry #37 | 253.8 139.9 501.9 | large Herc | not_for_herc:inside | starts 3.74 m inside collision (rest 249.4 139.9 504.2) |
 | infantry #38 | 297.0 187.1 482.3 | large Herc | not_for_herc:inside | starts 1.58 m inside collision (rest 299.8 187.5 485.8) |
@@ -1168,7 +1119,7 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 | Point | Position | Unit | Result | Reason |
 |---|---|---|---|---|
 | infantry #2 | 314.0 44.5 123.7 | large Herc | not_for_herc:air | set down 7.1 m above its floor (rest 343.3 40.3 88.7) |
-| infantry #6 | 183.1 84.8 662.6 | large Herc | not_for_herc:inside | starts 2.51 m inside collision (rest 182.0 91.2 663.2) |
+| infantry #6 | 183.1 84.8 662.6 | large Herc | not_for_herc:inside | starts 3.51 m inside collision (rest 181.8 88.2 662.7) |
 | infantry #7 | 170.7 84.8 664.5 | large Herc | not_for_herc:inside | starts 2.81 m inside collision (rest 178.6 88.9 664.2) |
 | infantry #8 | 178.3 84.8 670.7 | large Herc | not_for_herc:inside | starts 2.54 m inside collision (rest 179.0 88.0 668.7) |
 | infantry #9 | 194.5 84.8 666.6 | large Herc | not_for_herc:inside | starts 2.78 m inside collision (rest 195.0 85.3 664.5) |
@@ -1179,18 +1130,17 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 | infantry #15 | 181.4 92.3 673.1 | large Herc | not_for_herc:inside | starts 2.96 m inside collision (rest 183.9 91.1 671.7) |
 | infantry #16 | 170.0 92.5 661.0 | large Herc | not_for_herc:inside | starts 2.73 m inside collision (rest 168.9 91.1 662.9) |
 | infantry #17 | 174.3 92.5 663.2 | large Herc | not_for_herc:inside | starts 2.82 m inside collision (rest 176.4 90.8 665.7) |
-| infantry #18 | 179.0 92.7 662.9 | large Herc | not_for_herc:inside | starts 2.73 m inside collision (rest 182.0 90.9 663.2) |
+| infantry #18 | 179.0 92.7 662.9 | large Herc | not_for_herc:inside | starts 2.73 m inside collision (rest 182.8 90.8 663.5) |
 | infantry #19 | 157.5 90.9 666.3 | large Herc | not_for_herc:stuck | cannot move 2 m in 4 directions (best 1.1 m) (rest 165.8 90.7 668.4) |
-| infantry #20 | 173.5 87.6 651.5 | large Herc | not_for_herc:inside | starts 3.98 m inside collision (rest 172.4 85.9 652.6) |
-| infantry #21 | 169.8 87.0 652.3 | large Herc | not_for_herc:inside | starts 1.63 m inside collision (rest 171.5 86.9 653.7) |
+| infantry #20 | 173.5 87.6 651.5 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest 180.5 86.2 654.3) |
+| infantry #21 | 169.8 87.0 652.3 | large Herc | not_for_herc:inside | starts 1.63 m inside collision (rest 171.2 86.0 653.9) |
 | infantry #22 | 175.3 92.7 674.0 | large Herc | not_for_herc:inside | starts 3.18 m inside collision (rest 179.9 88.9 673.3) |
-| infantry #23 | 179.0 92.3 662.9 | large Herc | not_for_herc:inside | starts 2.54 m inside collision (rest 181.5 90.9 663.3) |
+| infantry #23 | 179.0 92.3 662.9 | large Herc | not_for_herc:inside | starts 2.54 m inside collision (rest 182.0 91.4 663.4) |
 | infantry #24 | 157.5 90.3 666.3 | large Herc | not_for_herc:stuck | cannot move 2 m in 4 directions (best 1.1 m) (rest 165.8 90.7 668.4) |
-| infantry #25 | 173.5 87.0 651.5 | large Herc | not_for_herc:inside | starts 4.13 m inside collision (rest 172.3 85.9 652.6) |
-| infantry #26 | 169.8 86.8 652.3 | large Herc | not_for_herc:inside | starts 2.55 m inside collision (rest 171.1 86.6 653.4) |
+| infantry #25 | 173.5 87.0 651.5 | large Herc | not_for_herc:inside | starts 3.77 m inside collision (rest 180.8 86.0 654.3) |
+| infantry #26 | 169.8 86.8 652.3 | large Herc | not_for_herc:inside | starts 1.39 m inside collision (rest 171.0 86.0 655.7) |
 | infantry #27 | 347.7 41.0 69.0 | large Herc | not_for_herc:stuck | cannot move 2 m in 4 directions (best 1.1 m) (rest 344.5 43.3 67.8) |
-| infantry #28 | 323.8 41.4 68.4 | large Herc | not_for_herc:air | set down 5.6 m above its floor (rest 326.9 38.7 75.4) |
-| infantry #29 | 335.7 41.2 68.3 | large Herc | not_for_herc:inside | starts 3.21 m inside collision (rest 334.9 40.0 68.5) |
+| infantry #29 | 335.7 41.2 68.3 | large Herc | not_for_herc:inside | starts 3.34 m inside collision (rest 338.9 40.1 68.6) |
 | infantry #30 | 351.1 48.5 84.3 | large Herc | not_for_herc:inside | starts 1.19 m inside collision (rest 355.9 55.4 82.1) |
 | infantry #31 | 347.6 48.9 84.3 | large Herc | not_for_herc:inside | starts 2.57 m inside collision (rest 349.3 49.3 84.2) |
 | infantry #32 | 320.0 48.5 82.8 | large Herc | not_for_herc:inside | starts 2.60 m inside collision (rest 321.0 46.7 84.5) |
@@ -1241,7 +1191,7 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 | tribes2:Pyroclasm | 3 | 10 | 0 | 0 | 0 |
 | tribes2:Quagmire | 93 | 253 | 0 | 0 | 0 |
 | tribes2:Rasp | 33 | 106 | 4 | 0 | 0 |
-| tribes2:Recalescence | 91 | 243 | 1 | 1 | 0 |
+| tribes2:Recalescence | 91 | 244 | 1 | 0 | 0 |
 | tribes2:Respite | 87 | 232 | 0 | 1 | 0 |
 | tribes2:Reversion | 93 | 245 | 4 | 0 | 0 |
 | tribes2:Rimehold | 9 | 30 | 0 | 0 | 0 |
@@ -1250,13 +1200,13 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 | tribes2:Sirocco | 97 | 261 | 2 | 0 | 0 |
 | tribes2:Slapdash | 89 | 240 | 0 | 1 | 0 |
 | tribes2:SunDried | 12 | 40 | 0 | 0 | 0 |
-| tribes2:Talus | 6 | 16 | 2 | 2 | 0 |
-| tribes2:ThinIce | 94 | 260 | 1 | 0 | 0 |
+| tribes2:Talus | 6 | 18 | 2 | 0 | 0 |
+| tribes2:ThinIce | 93 | 256 | 1 | 0 | 0 |
 | tribes2:Tombstone | 93 | 253 | 0 | 0 | 0 |
 | tribes2:Training1 | 81 | 213 | 0 | 0 | 0 |
 | tribes2:Training2 | 81 | 213 | 0 | 0 | 0 |
 | tribes2:Training3 | 84 | 223 | 0 | 0 | 0 |
-| tribes2:Training4 | 84 | 221 | 1 | 1 | 0 |
+| tribes2:Training4 | 84 | 223 | 0 | 0 | 0 |
 | tribes2:Training5 | 84 | 223 | 0 | 0 | 0 |
 | tribes2:UltimaThule | 87 | 233 | 0 | 0 | 0 |
 | tribes2:Underhill | 12 | 40 | 0 | 0 | 0 |
@@ -1318,7 +1268,7 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 
 | Point | Position | Unit | Result | Reason |
 |---|---|---|---|---|
-| pad #1 | -365.3 51.4 306.6 | large Herc | not_for_herc:inside | starts 3.00 m inside collision (rest -366.1 51.4 308.4) |
+| pad #1 | -365.3 51.4 306.6 | large Herc | not_for_herc:inside | starts 3.00 m inside collision (rest -365.1 51.4 307.2) |
 
 ### tribes2:Gehenna
 
@@ -1354,15 +1304,14 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 |---|---|---|---|---|
 | infantry #2 | -604.3 53.9 495.7 | large Herc | not_for_herc:inside | starts 3.00 m inside collision (rest -605.2 53.1 510.5) |
 | infantry #5 | -632.0 88.1 448.0 | large Herc | not_for_herc:inside | starts 1.35 m inside collision (rest -631.2 101.0 448.1) |
-| infantry #10 | -635.2 100.1 497.4 | large Herc | not_for_herc:inside | starts 1.19 m inside collision (rest -632.8 97.6 495.3) |
-| infantry #11 | -649.8 100.0 497.2 | large Herc | not_for_herc:inside | starts 1.55 m inside collision (rest -652.0 97.6 496.4) |
+| infantry #10 | -635.2 100.1 497.4 | large Herc | not_for_herc:inside | starts 1.10 m inside collision (rest -632.6 98.0 495.6) |
+| infantry #11 | -649.8 100.0 497.2 | large Herc | not_for_herc:inside | starts 1.38 m inside collision (rest -652.0 97.6 496.4) |
 
 ### tribes2:Recalescence
 
 | Point | Position | Unit | Result | Reason |
 |---|---|---|---|---|
-| pad #2 | -542.9 179.4 290.9 | large Herc | not_for_herc:inside | starts 3.46 m inside collision (rest -542.9 179.4 291.8) |
-| pad #2 | -542.9 179.4 290.9 | large vehicle | exception:stuck | cannot move 2 m in 4 directions (best 1.6 m) (rest -543.7 175.2 288.9) [exception: open: see the reason; start on steep ground or in cramped base geometry that the level-ground search (SpawnClearance.make_level_ground_origin) and clearance did not resolve] |
+| pad #2 | -542.9 179.4 290.9 | large Herc | not_for_herc:inside | starts 3.39 m inside collision (rest -542.7 179.4 290.3) |
 
 ### tribes2:Respite
 
@@ -1374,10 +1323,10 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 
 | Point | Position | Unit | Result | Reason |
 |---|---|---|---|---|
-| infantry #1 | -592.1 70.0 -343.3 | large Herc | not_for_herc:air | set down 5.8 m above its floor (rest -521.5 50.7 -353.0) |
-| infantry #2 | -592.2 71.1 -494.5 | large Herc | not_for_herc:inside | starts 3.33 m inside collision (rest -597.0 69.1 -491.4) |
-| infantry #4 | 669.8 72.3 390.9 | large Herc | not_for_herc:inside | starts 3.37 m inside collision (rest 666.0 71.5 392.3) |
-| infantry #5 | 669.9 73.5 542.0 | large Herc | not_for_herc:inside | starts 1.06 m inside collision (rest 672.6 77.4 540.1) |
+| infantry #1 | -592.1 70.0 -343.3 | large Herc | not_for_herc:inside | starts 3.38 m inside collision (rest -596.4 68.8 -346.9) |
+| infantry #2 | -592.2 76.4 -494.5 | large Herc | not_for_herc:inside | starts 1.32 m inside collision (rest -590.0 75.2 -492.3) |
+| infantry #4 | 669.8 72.3 390.9 | large Herc | not_for_herc:inside | starts 3.40 m inside collision (rest 666.4 71.5 393.8) |
+| infantry #5 | 669.9 78.7 542.0 | large Herc | not_for_herc:inside | starts 1.37 m inside collision (rest 667.6 77.9 539.8) |
 
 ### tribes2:Sirocco
 
@@ -1396,8 +1345,6 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 
 | Point | Position | Unit | Result | Reason |
 |---|---|---|---|---|
-| herc #1 | 226.0 36.7 87.6 | large vehicle | exception:air | set down 10.0 m above its floor (rest 231.0 26.7 55.3) [exception: open: see the reason; start on steep ground or in cramped base geometry that the level-ground search (SpawnClearance.make_level_ground_origin) and clearance did not resolve] |
-| team 0 #1 | 226.0 36.7 87.6 | large vehicle | exception:air | set down 10.0 m above its floor (rest 231.0 26.7 55.3) [exception: open: see the reason; start on steep ground or in cramped base geometry that the level-ground search (SpawnClearance.make_level_ground_origin) and clearance did not resolve] |
 | infantry #1 | 176.0 36.2 87.6 | large Herc | not_for_herc:inside | starts 3.86 m inside collision (rest 174.7 36.1 87.0) |
 | infantry #2 | -76.4 74.8 -98.4 | large Herc | not_for_herc:inside | starts 3.63 m inside collision (rest -75.7 74.8 -96.8) |
 
@@ -1406,13 +1353,6 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 | Point | Position | Unit | Result | Reason |
 |---|---|---|---|---|
 | infantry #1 | 227.2 169.5 -706.7 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest 241.7 147.7 -704.5) |
-
-### tribes2:Training4
-
-| Point | Position | Unit | Result | Reason |
-|---|---|---|---|---|
-| infantry #1 | 388.8 53.2 -296.3 | soldier | exception:stuck | cannot move 2 m in 4 directions (best 0.0 m) (rest 389.0 52.9 -296.6) [exception: open: see the reason; start on steep ground or in cramped base geometry that the level-ground search (SpawnClearance.make_level_ground_origin) and clearance did not resolve] |
-| infantry #1 | 388.8 53.2 -296.3 | large Herc | not_for_herc:inside | starts 3.52 m inside collision (rest 389.4 55.1 -291.1) |
 
 ### tribes2:varuna
 
@@ -1429,23 +1369,23 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 | Map | Points | ok | not for Hercs | exceptions | failures |
 |---|---:|---:|---:|---:|---:|
 | tribes_aa:Abominable | 6 | 16 | 0 | 0 | 0 |
-| tribes_aa:Avalon | 101 | 236 | 1 | 0 | 0 |
+| tribes_aa:Avalon | 101 | 235 | 2 | 0 | 0 |
 | tribes_aa:BeggarsRun | 6 | 16 | 0 | 0 | 0 |
 | tribes_aa:Damnation | 99 | 228 | 2 | 1 | 0 |
-| tribes_aa:DeathBirdsFly | 95 | 215 | 4 | 2 | 0 |
-| tribes_aa:Desiccator | 92 | 212 | 1 | 0 | 0 |
+| tribes_aa:DeathBirdsFly | 95 | 217 | 4 | 0 | 0 |
+| tribes_aa:Desiccator | 92 | 210 | 3 | 0 | 0 |
 | tribes_aa:Equinox | 83 | 188 | 0 | 0 | 0 |
 | tribes_aa:Escalade | 2 | 4 | 1 | 0 | 0 |
 | tribes_aa:Firestorm | 6 | 16 | 0 | 0 | 0 |
-| tribes_aa:Flashpoint | 89 | 205 | 0 | 0 | 0 |
+| tribes_aa:Flashpoint | 89 | 203 | 2 | 0 | 0 |
 | tribes_aa:Gehenna | 2 | 5 | 0 | 0 | 0 |
 | tribes_aa:Insalubria | 89 | 202 | 2 | 1 | 0 |
 | tribes_aa:Invictus | 8 | 20 | 1 | 0 | 0 |
 | tribes_aa:JacobsLadder | 6 | 16 | 0 | 0 | 0 |
-| tribes_aa:Katabatic | 95 | 220 | 1 | 0 | 0 |
+| tribes_aa:Katabatic | 95 | 219 | 2 | 0 | 0 |
 | tribes_aa:Myrkwood | 12 | 32 | 0 | 0 | 0 |
 | tribes_aa:Oasis | 6 | 16 | 0 | 0 | 0 |
-| tribes_aa:Overreach | 89 | 205 | 0 | 0 | 0 |
+| tribes_aa:Overreach | 89 | 203 | 2 | 0 | 0 |
 | tribes_aa:Paranoia | 6 | 16 | 0 | 0 | 0 |
 | tribes_aa:Pyroclasm | 3 | 8 | 0 | 0 | 0 |
 | tribes_aa:Quagmire | 93 | 215 | 0 | 0 | 0 |
@@ -1453,19 +1393,20 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 | tribes_aa:Recalescence | 95 | 218 | 3 | 0 | 0 |
 | tribes_aa:Reversion | 95 | 216 | 5 | 0 | 0 |
 | tribes_aa:Rimehold | 2 | 5 | 0 | 0 | 0 |
-| tribes_aa:Sanctuary | 89 | 205 | 0 | 0 | 0 |
+| tribes_aa:Sanctuary | 89 | 203 | 2 | 0 | 0 |
 | tribes_aa:Sirocco | 89 | 204 | 0 | 0 | 0 |
-| tribes_aa:Slapdash | 89 | 205 | 0 | 0 | 0 |
+| tribes_aa:Slapdash | 89 | 204 | 1 | 0 | 0 |
 | tribes_aa:SunDried | 12 | 33 | 0 | 0 | 0 |
 | tribes_aa:ThinIce | 6 | 16 | 0 | 0 | 0 |
 | tribes_aa:Tombstone | 93 | 215 | 0 | 0 | 0 |
-| tribes_aa:Underhill | 10 | 21 | 1 | 4 | 0 |
+| tribes_aa:Underhill | 10 | 25 | 1 | 0 | 0 |
 | tribes_aa:Whiteout | 6 | 16 | 0 | 0 | 0 |
 
 ### tribes_aa:Avalon
 
 | Point | Position | Unit | Result | Reason |
 |---|---|---|---|---|
+| pad #2 | 1176.5 167.1 -565.4 | large Herc | not_for_herc:inside | starts 1.03 m inside collision (rest 1174.5 166.2 -565.1) |
 | infantry #4 | 1123.6 238.5 -354.5 | large Herc | not_for_herc:inside | starts 2.04 m inside collision (rest 1121.0 236.4 -350.2) |
 
 ### tribes_aa:Damnation
@@ -1480,10 +1421,8 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 
 | Point | Position | Unit | Result | Reason |
 |---|---|---|---|---|
-| herc #4 | 544.0 55.0 -776.2 | large Herc | exception:inside | starts 1.19 m inside collision (rest 544.5 53.0 -774.3) [exception: open: see the reason; start on steep ground or in cramped base geometry that the level-ground search (SpawnClearance.make_level_ground_origin) and clearance did not resolve] |
-| pad #1 | 563.8 99.3 -1164.0 | large Herc | not_for_herc:inside | starts 1.24 m inside collision (rest 564.4 100.1 -1165.4) |
-| pad #2 | 1438.8 141.8 -1038.0 | large Herc | not_for_herc:inside | starts 1.24 m inside collision (rest 1437.6 143.1 -1037.2) |
-| team 1 #2 | 544.0 55.0 -776.2 | large Herc | exception:inside | starts 1.19 m inside collision (rest 544.5 53.0 -774.3) [exception: open: see the reason; start on steep ground or in cramped base geometry that the level-ground search (SpawnClearance.make_level_ground_origin) and clearance did not resolve] |
+| pad #1 | 563.8 99.3 -1164.0 | large Herc | not_for_herc:inside | starts 1.01 m inside collision (rest 560.4 104.1 -1165.7) |
+| pad #2 | 1438.8 141.8 -1038.0 | large Herc | not_for_herc:inside | starts 1.25 m inside collision (rest 1438.2 139.9 -1036.1) |
 | infantry #2 | 1263.7 77.8 -1394.9 | large Herc | not_for_herc:inside | starts 3.18 m inside collision (rest 1265.0 77.3 -1392.4) |
 | infantry #4 | 544.0 54.5 -776.2 | large Herc | not_for_herc:inside | starts 1.47 m inside collision (rest 544.8 53.2 -778.1) |
 
@@ -1491,6 +1430,8 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 
 | Point | Position | Unit | Result | Reason |
 |---|---|---|---|---|
+| pad #1 | 772.5 133.9 -1039.9 | large Herc | not_for_herc:inside | starts 1.03 m inside collision (rest 774.3 132.7 -1042.0) |
+| pad #2 | 1725.9 133.9 -1059.0 | large Herc | not_for_herc:inside | starts 1.03 m inside collision (rest 1724.3 132.1 -1056.8) |
 | infantry #1 | 764.5 134.3 -996.0 | large Herc | not_for_herc:stuck | cannot move 2 m in 4 directions (best 1.1 m) (rest 762.1 131.9 -995.7) |
 
 ### tribes_aa:Escalade
@@ -1499,11 +1440,18 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 |---|---|---|---|---|
 | infantry #1 | 1402.6 101.0 -1053.4 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest 1383.4 72.3 -1062.3) |
 
+### tribes_aa:Flashpoint
+
+| Point | Position | Unit | Result | Reason |
+|---|---|---|---|---|
+| pad #1 | 658.7 56.8 -717.4 | large Herc | not_for_herc:stuck | cannot move 2 m in 4 directions (best 1.1 m) (rest 656.6 55.6 -717.4) |
+| pad #2 | 1251.9 56.6 -1480.7 | large Herc | not_for_herc:stuck | cannot move 2 m in 4 directions (best 1.1 m) (rest 1252.5 55.4 -1478.9) |
+
 ### tribes_aa:Insalubria
 
 | Point | Position | Unit | Result | Reason |
 |---|---|---|---|---|
-| infantry #1 | 922.3 101.7 -221.0 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest 922.8 101.8 -220.1) |
+| infantry #1 | 922.3 101.7 -221.0 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest 922.9 101.8 -221.0) |
 | infantry #2 | 1650.2 72.3 -1046.3 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest 1650.6 72.2 -1046.4) |
 | squad_spot #6 | 880.9 60.6 -171.8 | soldier | exception:air | set down 5.2 m above its floor (rest 885.3 62.1 -148.8) [exception: extraction spot on cliff terrain: no level spot found within 3x the spread (best-effort ExtractionSquads.make_place_around); the unit slides or drops to flat ground, or the zone touches a prop] |
 
@@ -1511,40 +1459,57 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 
 | Point | Position | Unit | Result | Reason |
 |---|---|---|---|---|
-| infantry #3 | 373.9 64.1 -1210.7 | large Herc | not_for_herc:inside | starts 2.61 m inside collision (rest 371.8 62.1 -1212.3) |
+| infantry #3 | 373.9 65.3 -1210.7 | large Herc | not_for_herc:inside | starts 4.32 m inside collision (rest 382.3 61.3 -1220.8) |
 
 ### tribes_aa:Katabatic
 
 | Point | Position | Unit | Result | Reason |
 |---|---|---|---|---|
+| pad #2 | 413.8 79.9 -1565.3 | large Herc | not_for_herc:stuck | cannot move 2 m in 4 directions (best 1.1 m) (rest 412.0 78.3 -1568.1) |
 | infantry #1 | 1350.9 71.5 -855.5 | large Herc | not_for_herc:inside | starts 1.69 m inside collision (rest 1348.7 69.0 -853.9) |
+
+### tribes_aa:Overreach
+
+| Point | Position | Unit | Result | Reason |
+|---|---|---|---|---|
+| pad #1 | 830.4 62.1 -404.9 | large Herc | not_for_herc:stuck | cannot move 2 m in 4 directions (best 1.1 m) (rest 828.6 60.9 -402.2) |
+| pad #2 | 1507.1 100.8 -1361.3 | large Herc | not_for_herc:inside | starts 1.09 m inside collision (rest 1507.0 100.1 -1359.2) |
 
 ### tribes_aa:Recalescence
 
 | Point | Position | Unit | Result | Reason |
 |---|---|---|---|---|
-| pad #1 | 1355.5 129.7 -1179.8 | large Herc | not_for_herc:inside | starts 1.01 m inside collision (rest 1355.4 129.1 -1177.8) |
-| pad #2 | 734.0 166.6 -745.4 | large Herc | not_for_herc:falling | still falling after 90 frames (-13 m/s) (rest 734.4 165.7 -747.5) |
+| pad #1 | 1355.5 129.7 -1179.8 | large Herc | not_for_herc:inside | starts 1.03 m inside collision (rest 1356.2 128.1 -1178.0) |
+| pad #2 | 734.0 166.6 -745.4 | large Herc | not_for_herc:stuck | cannot move 2 m in 4 directions (best 1.1 m) (rest 732.1 165.4 -747.0) |
 | infantry #3 | 684.5 210.6 -768.0 | large Herc | not_for_herc:inside | starts 1.96 m inside collision (rest 681.5 207.8 -769.9) |
 
 ### tribes_aa:Reversion
 
 | Point | Position | Unit | Result | Reason |
 |---|---|---|---|---|
-| pad #1 | 713.5 64.7 -1831.8 | large Herc | not_for_herc:stuck | cannot move 2 m in 4 directions (best 1.1 m) (rest 716.5 63.5 -1830.6) |
-| pad #2 | 1370.0 61.2 -844.9 | large Herc | not_for_herc:stuck | cannot move 2 m in 4 directions (best 1.1 m) (rest 1368.8 60.0 -841.9) |
-| infantry #1 | 751.8 48.9 -1824.2 | large Herc | not_for_herc:stuck | cannot move 2 m in 4 directions (best 1.2 m) (rest 748.0 49.4 -1824.3) |
-| infantry #2 | 953.2 66.2 -1755.2 | large Herc | not_for_herc:inside | starts 2.09 m inside collision (rest 953.4 65.5 -1755.1) |
-| infantry #3 | 1353.9 50.5 -866.4 | large Herc | not_for_herc:inside | starts 4.26 m inside collision (rest 1355.7 60.7 -868.0) |
+| pad #1 | 713.5 64.7 -1831.8 | large Herc | not_for_herc:stuck | cannot move 2 m in 4 directions (best 1.5 m) (rest 715.0 63.5 -1830.8) |
+| pad #2 | 1370.0 61.2 -844.9 | large Herc | not_for_herc:stuck | cannot move 2 m in 4 directions (best 1.1 m) (rest 1369.1 60.0 -841.9) |
+| infantry #1 | 751.8 50.1 -1824.2 | large Herc | not_for_herc:stuck | cannot move 2 m in 4 directions (best 1.1 m) (rest 748.0 49.4 -1824.3) |
+| infantry #2 | 953.2 67.8 -1755.2 | large Herc | not_for_herc:inside | starts 1.91 m inside collision (rest 953.4 65.5 -1755.1) |
+| infantry #3 | 1353.9 56.7 -866.4 | large Herc | not_for_herc:inside | starts 2.99 m inside collision (rest 1353.9 56.7 -867.2) |
+
+### tribes_aa:Sanctuary
+
+| Point | Position | Unit | Result | Reason |
+|---|---|---|---|---|
+| pad #1 | 521.3 217.3 -147.2 | large Herc | not_for_herc:inside | starts 1.06 m inside collision (rest 519.3 216.0 -147.7) |
+| pad #2 | 627.9 220.2 -1390.6 | large Herc | not_for_herc:stuck | cannot move 2 m in 4 directions (best 1.5 m) (rest 628.9 219.0 -1392.5) |
+
+### tribes_aa:Slapdash
+
+| Point | Position | Unit | Result | Reason |
+|---|---|---|---|---|
+| pad #2 | 516.9 128.5 -1560.1 | large Herc | not_for_herc:stuck | cannot move 2 m in 4 directions (best 1.1 m) (rest 517.9 128.2 -1561.7) |
 
 ### tribes_aa:Underhill
 
 | Point | Position | Unit | Result | Reason |
 |---|---|---|---|---|
-| herc #2 | 822.1 95.2 -777.9 | soldier | exception:falling | still falling after 90 frames (-30 m/s) (rest 822.1 63.6 -777.9) [exception: open: see the reason; start on steep ground or in cramped base geometry that the level-ground search (SpawnClearance.make_level_ground_origin) and clearance did not resolve] |
-| herc #2 | 822.1 95.2 -777.9 | large Herc | exception:falling | still falling after 90 frames (-15 m/s) (rest 822.1 63.6 -777.9) [exception: open: see the reason; start on steep ground or in cramped base geometry that the level-ground search (SpawnClearance.make_level_ground_origin) and clearance did not resolve] |
-| team 1 #1 | 822.1 95.2 -777.9 | soldier | exception:falling | still falling after 90 frames (-30 m/s) (rest 822.1 63.6 -777.9) [exception: open: see the reason; start on steep ground or in cramped base geometry that the level-ground search (SpawnClearance.make_level_ground_origin) and clearance did not resolve] |
-| team 1 #1 | 822.1 95.2 -777.9 | large Herc | exception:falling | still falling after 90 frames (-15 m/s) (rest 822.1 63.6 -777.9) [exception: open: see the reason; start on steep ground or in cramped base geometry that the level-ground search (SpawnClearance.make_level_ground_origin) and clearance did not resolve] |
 | infantry #2 | 808.0 94.7 -792.0 | large Herc | not_for_herc:falling | still falling after 90 frames (-15 m/s) (rest 807.7 71.1 -782.0) |
 
 ## Tribes: Vengeance
@@ -1766,26 +1731,49 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 |---|---|---|---|---|
 | player RAPTOR #1 (team 0) | 0.0 0.0 0.0 | large Herc | exception:inside | starts 1.81 m inside collision (rest 2.9 -1.1 -0.3) [exception: Earthsiege 1 mission data: no nav points, so the player starts at the world origin inside the mission's own base structure; the stock Raptor slips out, a Herc as large as the audit's does not fit] |
 
-## missions:tribes_aa
+## missions:tribes_v
 
 | Map | Points | ok | not for Hercs | exceptions | failures |
 |---|---:|---:|---:|---:|---:|
-| mission:tribes_aa:0 Training 1 | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_aa:1 Training 2 | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_aa:2 Training 3 | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_aa:3 Training 4 | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_aa:4 Training 5 | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_aa:5 The Yard | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_aa:6 Cap Time | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_aa:7 Shades of Death | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_aa:8 To Have and To Hold | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_aa:9 Full-Fledged | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_aa:10 Onslaught | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_aa:11 Dystopia | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_aa:12 Scorched Earth | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_aa:13 Death From Above | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_aa:14 Gen Defender | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_aa:15 Bastion | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_v:0 Victoria: The Past - Origins | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_v:1 Victoria: The Past - Captured | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_v:2 Victoria: The Past - Captured | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_v:3 Julia: The Present - Coliseum | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_v:4 Julia: The Present - Coliseum | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_v:5 Julia: The Present - Coliseum | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_v:6 Julia: The Present - Discovery | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_v:7 Julia: The Present - Discovery | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_v:8 Julia: The Present - Discovery | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_v:9 Julia: The Past - Bloodlines | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_v:10 Julia: The Past - Bloodlines | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_v:11 Daniel: The Past - Rescue | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_v:12 Victoria: The Past - Rescue | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_v:13 Daniel: The Past - Rescue | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_v:14 Daniel: The Past - Mercy | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_v:15 Mercury: The Past - Assassination | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_v:16 Mercury: The Past - Assassination | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_v:17 Jericho: The Present - Deliverance | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_v:18 Jericho: The Present - Deliverance | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_v:19 Jericho: The Present - Deliverance | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_v:20 Mercury: The Present - Redemption | 1 | 1 | 0 | 1 | 0 |
+| mission:tribes_v:21 Mercury: The Present - Redemption | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_v:22 Victoria: The Past - Proof | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_v:23 Daniel: The Past - Judgement | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_v:24 Victoria: The Past - Retribution | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_v:25 Victoria: The Past - Retribution | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_v:26 Victoria: The Past - Retribution | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_v:27 Julia: The Present - Trials | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_v:28 Julia: The Present - Revelation | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_v:29 Julia: The Present - Revelation | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_v:30 Julia: The Present - Revelation | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_v:31 Julia: The Present - Vengeance | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_v:32 Julia: The Present - Vengeance | 1 | 2 | 0 | 0 | 0 |
+
+### mission:tribes_v:20 Mercury: The Present - Redemption
+
+| Point | Position | Unit | Result | Reason |
+|---|---|---|---|---|
+| player LIGHT #1 (team 0) | 260.1 -231.3 180.8 | soldier | exception:inside | starts 0.38 m inside collision (rest 260.1 -230.9 180.8) [exception: mission start 0.4-0.8 m inside the imported floor mesh of the training level / Coliseum shell; the physics engine lifts the soldier out in the first frame and he walks (data: approximate interior shells)] |
 
 ## missions:tribes
 
@@ -1806,6 +1794,27 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 |---|---|---|---|---|
 | player LIGHT #1 (team 0) | 62.7 133.2 -25.6 | soldier | exception:inside | starts 0.78 m inside collision (rest 62.7 134.0 -25.6) [exception: mission start 0.4-0.8 m inside the imported floor mesh of the training level / Coliseum shell; the physics engine lifts the soldier out in the first frame and he walks (data: approximate interior shells)] |
 | player LIGHT #1 (team 0) | 62.7 133.2 -25.6 | bot soldier | exception:inside | starts 0.48 m inside collision (rest 62.7 134.0 -25.6) [exception: mission start 0.4-0.8 m inside the imported floor mesh of the training level / Coliseum shell; the physics engine lifts the soldier out in the first frame and he walks (data: approximate interior shells)] |
+
+## missions:tribes_aa
+
+| Map | Points | ok | not for Hercs | exceptions | failures |
+|---|---:|---:|---:|---:|---:|
+| mission:tribes_aa:0 Training 1 | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_aa:1 Training 2 | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_aa:2 Training 3 | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_aa:3 Training 4 | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_aa:4 Training 5 | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_aa:5 The Yard | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_aa:6 Cap Time | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_aa:7 Shades of Death | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_aa:8 To Have and To Hold | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_aa:9 Full-Fledged | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_aa:10 Onslaught | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_aa:11 Dystopia | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_aa:12 Scorched Earth | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_aa:13 Death From Above | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_aa:14 Gen Defender | 1 | 2 | 0 | 0 | 0 |
+| mission:tribes_aa:15 Bastion | 1 | 2 | 0 | 0 | 0 |
 
 ## missions:starsiege
 
@@ -1835,7 +1844,7 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 | mission:starsiege:HA4 | 14 | 42 | 0 | 0 | 0 |
 | mission:starsiege:HA5 | 17 | 51 | 0 | 0 | 0 |
 | mission:starsiege:HA6 | 15 | 45 | 0 | 0 | 0 |
-| mission:starsiege:HB1 | 9 | 21 | 0 | 6 | 0 |
+| mission:starsiege:HB1 | 9 | 27 | 0 | 0 | 0 |
 | mission:starsiege:HB3 | 23 | 69 | 0 | 0 | 0 |
 | mission:starsiege:HB4 | 23 | 69 | 0 | 0 | 0 |
 | mission:starsiege:HC1 | 14 | 42 | 0 | 0 | 0 |
@@ -1865,82 +1874,8 @@ From `game/tests/spawn_audit_exceptions.json` (key `map|point|unit`):
 
 | Point | Position | Unit | Result | Reason |
 |---|---|---|---|---|
-| unit rb_oly #2 (team 0) | 168.0 455.0 -2426.0 | soldier | exception:air | set down 7.5 m above its floor (rest 168.0 442.6 -2452.1) [exception: Starsiege mission data: the unit is placed far above the ground (an air-dropped or hovering unit); the importer keeps the file position, nothing to snap it to] |
-| unit rb_oly #2 (team 0) | 168.0 455.0 -2426.0 | large Herc | exception:air | set down 7.3 m above its floor (rest 168.0 440.0 -2465.6) [exception: Starsiege mission data: the unit is placed far above the ground (an air-dropped or hovering unit); the importer keeps the file position, nothing to snap it to] |
-
-### mission:starsiege:HB1
-
-| Point | Position | Unit | Result | Reason |
-|---|---|---|---|---|
-| unit kn_mino #6 (team 1) | -1881.0 717.0 1995.0 | soldier | exception:falling | still falling after 90 frames (-30 m/s) (rest -1881.0 611.3 1995.0) [exception: Starsiege mission data: the unit is placed far above the ground (an air-dropped or hovering unit); the importer keeps the file position, nothing to snap it to] |
-| unit kn_mino #6 (team 1) | -1881.0 717.0 1995.0 | large Herc | exception:falling | still falling after 90 frames (-15 m/s) (rest -1881.0 638.3 1995.0) [exception: Starsiege mission data: the unit is placed far above the ground (an air-dropped or hovering unit); the importer keeps the file position, nothing to snap it to] |
-| unit kn_myrm #7 (team 1) | -1871.0 717.0 1985.0 | soldier | exception:falling | still falling after 90 frames (-30 m/s) (rest -1871.0 614.8 1985.0) [exception: Starsiege mission data: the unit is placed far above the ground (an air-dropped or hovering unit); the importer keeps the file position, nothing to snap it to] |
-| unit kn_myrm #7 (team 1) | -1871.0 717.0 1985.0 | large Herc | exception:falling | still falling after 90 frames (-15 m/s) (rest -1871.0 638.3 1985.0) [exception: Starsiege mission data: the unit is placed far above the ground (an air-dropped or hovering unit); the importer keeps the file position, nothing to snap it to] |
-| unit kn_gorg #9 (team 1) | 3530.0 607.0 4470.0 | soldier | exception:air | set down 6.2 m above its floor (rest 3529.9 606.8 4445.7) [exception: Starsiege mission data: the unit is placed far above the ground (an air-dropped or hovering unit); the importer keeps the file position, nothing to snap it to] |
-| unit kn_gorg #9 (team 1) | 3530.0 607.0 4470.0 | large Herc | exception:air | set down 6.2 m above its floor (rest 3529.9 610.1 4432.8) [exception: Starsiege mission data: the unit is placed far above the ground (an air-dropped or hovering unit); the importer keeps the file position, nothing to snap it to] |
-
-## missions:tribes_v
-
-| Map | Points | ok | not for Hercs | exceptions | failures |
-|---|---:|---:|---:|---:|---:|
-| mission:tribes_v:0 Victoria: The Past - Origins | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_v:1 Victoria: The Past - Captured | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_v:2 Victoria: The Past - Captured | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_v:3 Julia: The Present - Coliseum | 1 | 1 | 0 | 1 | 0 |
-| mission:tribes_v:4 Julia: The Present - Coliseum | 1 | 1 | 0 | 1 | 0 |
-| mission:tribes_v:5 Julia: The Present - Coliseum | 1 | 0 | 0 | 2 | 0 |
-| mission:tribes_v:6 Julia: The Present - Discovery | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_v:7 Julia: The Present - Discovery | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_v:8 Julia: The Present - Discovery | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_v:9 Julia: The Past - Bloodlines | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_v:10 Julia: The Past - Bloodlines | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_v:11 Daniel: The Past - Rescue | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_v:12 Victoria: The Past - Rescue | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_v:13 Daniel: The Past - Rescue | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_v:14 Daniel: The Past - Mercy | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_v:15 Mercury: The Past - Assassination | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_v:16 Mercury: The Past - Assassination | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_v:17 Jericho: The Present - Deliverance | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_v:18 Jericho: The Present - Deliverance | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_v:19 Jericho: The Present - Deliverance | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_v:20 Mercury: The Present - Redemption | 1 | 1 | 0 | 1 | 0 |
-| mission:tribes_v:21 Mercury: The Present - Redemption | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_v:22 Victoria: The Past - Proof | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_v:23 Daniel: The Past - Judgement | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_v:24 Victoria: The Past - Retribution | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_v:25 Victoria: The Past - Retribution | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_v:26 Victoria: The Past - Retribution | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_v:27 Julia: The Present - Trials | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_v:28 Julia: The Present - Revelation | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_v:29 Julia: The Present - Revelation | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_v:30 Julia: The Present - Revelation | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_v:31 Julia: The Present - Vengeance | 1 | 2 | 0 | 0 | 0 |
-| mission:tribes_v:32 Julia: The Present - Vengeance | 1 | 2 | 0 | 0 | 0 |
-
-### mission:tribes_v:3 Julia: The Present - Coliseum
-
-| Point | Position | Unit | Result | Reason |
-|---|---|---|---|---|
-| player LIGHT #1 (team 0) | 89.4 8.6 702.2 | soldier | exception:inside | starts 0.53 m inside collision (rest 89.4 9.1 702.2) [exception: mission start 0.4-0.8 m inside the imported floor mesh of the training level / Coliseum shell; the physics engine lifts the soldier out in the first frame and he walks (data: approximate interior shells)] |
-
-### mission:tribes_v:4 Julia: The Present - Coliseum
-
-| Point | Position | Unit | Result | Reason |
-|---|---|---|---|---|
-| player LIGHT #1 (team 0) | 87.2 8.7 702.2 | soldier | exception:inside | starts 0.49 m inside collision (rest 87.2 9.1 702.2) [exception: mission start 0.4-0.8 m inside the imported floor mesh of the training level / Coliseum shell; the physics engine lifts the soldier out in the first frame and he walks (data: approximate interior shells)] |
-
-### mission:tribes_v:5 Julia: The Present - Coliseum
-
-| Point | Position | Unit | Result | Reason |
-|---|---|---|---|---|
-| player MEDIUM #1 (team 0) | 95.0 8.4 702.7 | soldier | exception:inside | starts 0.74 m inside collision (rest 95.0 9.1 702.7) [exception: mission start 0.4-0.8 m inside the imported floor mesh of the training level / Coliseum shell; the physics engine lifts the soldier out in the first frame and he walks (data: approximate interior shells)] |
-| player MEDIUM #1 (team 0) | 95.0 8.4 702.7 | bot soldier | exception:inside | starts 0.44 m inside collision (rest 95.0 9.1 702.7) [exception: mission start 0.4-0.8 m inside the imported floor mesh of the training level / Coliseum shell; the physics engine lifts the soldier out in the first frame and he walks (data: approximate interior shells)] |
-
-### mission:tribes_v:20 Mercury: The Present - Redemption
-
-| Point | Position | Unit | Result | Reason |
-|---|---|---|---|---|
-| player LIGHT #1 (team 0) | 260.1 -231.3 180.8 | soldier | exception:inside | starts 0.38 m inside collision (rest 260.1 -230.9 180.8) [exception: mission start 0.4-0.8 m inside the imported floor mesh of the training level / Coliseum shell; the physics engine lifts the soldier out in the first frame and he walks (data: approximate interior shells)] |
+| unit rb_oly #2 (team 0) | -381.0 455.0 -2701.0 | soldier | exception:air | set down 13.1 m above its floor (rest -381.0 441.6 -2727.1) [exception: Starsiege mission data: the unit is placed far above the ground (an air-dropped or hovering unit); the importer keeps the file position, nothing to snap it to] |
+| unit rb_oly #2 (team 0) | -381.0 455.0 -2701.0 | large Herc | exception:inside | starts 3.99 m inside collision (rest -381.0 441.9 -2701.0) [exception: Starsiege mission data: the unit is placed far above the ground (an air-dropped or hovering unit); the importer keeps the file position, nothing to snap it to] |
 
 ## missions:es2
 

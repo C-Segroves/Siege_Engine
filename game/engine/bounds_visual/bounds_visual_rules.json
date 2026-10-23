@@ -1,0 +1,15 @@
+{
+	"_comment": "The out-of-area wall and tint (BoundsVisual): remake values, client-side visuals only.",
+	"show_range_foot_m": 80.0,
+	"show_range_vehicle_m": 200.0,
+	"span_m": 180.0,
+	"step_m": 8.0,
+	"height_m": 140.0,
+	"sink_m": 20.0,
+	"rebuild_move_m": 4.0,
+	"tint_alpha": 0.32,
+	"pulse_hz": 0.7,
+	"pulse_depth": 0.35,
+	"warning_text": "RETURN TO THE COMBAT AREA",
+	"countdown_text": "Damage in %d s"
+}

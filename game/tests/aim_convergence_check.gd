@@ -17,17 +17,18 @@ const TARGET_RADIUS := 1.0
 const INDIRECT_KINDS := ["mine", "bomb", "artillery", "grenade"]
 
 var _failures := 0
+var _only := []
 var _checked := 0
 var _worst := {}          # pack -> [miss m, where]
 
 
 func _ready() -> void:
-	var only := []
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--only="):
-			only = Array(a.substr(7).split(","))
-	for v in Packs.pilotable(only):
+			_only = Array(a.substr(7).split(","))
+	for v in Packs.pilotable(_only):
 		await _check_vehicle(v)
+	await _check_soldiers()
 	for pack in _worst:
 		print("  %s: worst miss %.3f m (%s)" % [pack, _worst[pack][0], _worst[pack][1]])
 	_expect(_checked > 0, "some vehicles checked")
@@ -117,6 +118,51 @@ func _check_pose(host: Herc, cam: Camera3D, cockpit: CockpitDisplay, where: Stri
 			var miss := _miss_distance(from, dir, at)
 			_note(host, miss, "%s %s at %.0f m" % [where, w.weapon_id, r])
 			_expect(miss <= MISS_TOLERANCE, "%s: %s at %.0f m misses the crosshair target by %.2f m" % [where, w.weapon_id, r, miss])
+		body.free()
+
+
+## Soldiers with the hand weapons of Aerial Assault and Vengeance (infantry_rules.json): the shot from the muzzle in hand
+## passes through a target on the eye's aim ray, level and pitched, at several ranges.
+func _check_soldiers() -> void:
+	var armor_pack := InfantryCatalog.make_default_pack()
+	for pack in ["tribes_aa", "tribes_v"]:
+		if armor_pack == "" or not Assets.installed_packs().has(pack) or (not _only.is_empty() and not _only.has(pack)):
+			continue
+		for size in ["LIGHT", "HEAVY"]:
+			var rules := InfantryCatalog.make_pack_rules(pack, size)
+			var s := Infantry.new()
+			s.armor_id = "%s:%s" % [armor_pack, size]
+			s.net_id = 1
+			add_child(s)
+			s.set_physics_process(false)
+			s.equip((rules.weapons as Array).slice(0, int(rules.max_weapons)))
+			_checked += 1
+			for slot in s.weapons.size():
+				s.apply_weapon_slot(slot)
+				s.weapons[slot].set_physics_process(false)
+				for pitch in [0.0, 0.5, -0.3]:
+					s.pitch = pitch
+					s._animate(0.0)
+					await _check_soldier_weapon(s, s.weapons[slot], "%s pitch %.1f" % [s.armor_id, pitch])
+			s.free()
+
+
+func _check_soldier_weapon(s: Infantry, w: Weapon, where: String) -> void:
+	if w.is_passive() or w.kind in INDIRECT_KINDS:
+		return
+	var eye: Vector3 = s.aim_origin()
+	var dir: Vector3 = -s.aim_basis().z
+	for r in [20.0, 60.0]:
+		if r > w.weapon_range:
+			continue
+		var at: Vector3 = eye + dir * r
+		var body := _build_target(at)
+		await get_tree().physics_frame
+		await get_tree().physics_frame
+		var from: Vector3 = w.muzzle().global_position
+		var miss := _miss_distance(from, w.make_aim_direction(from), at)
+		_note(s, miss, "%s %s at %.0f m" % [where, w.weapon_id, r])
+		_expect(miss <= MISS_TOLERANCE, "%s: %s at %.0f m misses the aim point by %.2f m" % [where, w.weapon_id, r, miss])
 		body.free()
 
 

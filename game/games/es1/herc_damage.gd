@@ -147,6 +147,28 @@ static func integrity_of(components: Array) -> float:
 	return sum / maxf(mx, 1.0)
 
 
+## True when a standing component is hurt: field repair mends those (a component at 0 is a lost part).
+static func needs_repair(components: Array) -> bool:
+	for c in components:
+		if c.hp > 0.0 and c.hp < c.max:
+			return true
+	return false
+
+
+## Heals the hurt standing components in order with `amount` points (a lost part is not brought back); returns the
+## integrity afterwards.
+static func apply_repair(components: Array, amount: float) -> float:
+	var left := amount
+	for c in components:
+		if left <= 0.0:
+			break
+		if c.hp > 0.0 and c.hp < c.max:
+			var given := minf(left, float(c.max) - float(c.hp))
+			c.hp += given
+			left -= given
+	return integrity_of(components)
+
+
 ## Destroyed: a fatal top-level component is gone or the integrity is too low.
 static func is_destroyed(components: Array, integrity: float) -> bool:
 	for c in components:

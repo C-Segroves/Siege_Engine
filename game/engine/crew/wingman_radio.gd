@@ -126,7 +126,7 @@ func _check_targets() -> void:
 		var u: Herc = w.unit
 		if not is_instance_valid(u) or not u.alive:
 			continue
-		var has_target := _is_hostile_alive(u, u.target)
+		var has_target := TargetSelector.is_hostile_live(u, u.target)
 		if has_target and not w.had_target and _clock >= _spotted_until and _try_say(w, MSG_ENEMY_SPOTTED):
 			_spotted_until = _clock + SPOTTED_SQUAD_GAP
 		w.had_target = has_target
@@ -199,5 +199,3 @@ func _is_human_squad_member(v: Node) -> bool:
 	return _is_squad_side(v) and not v.has_meta("ai")
 
 
-func _is_hostile_alive(me: Herc, t: Node) -> bool:
-	return t != null and is_instance_valid(t) and t is Herc and t.alive and int(t.team) != int(me.team)

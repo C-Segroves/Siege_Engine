@@ -15,6 +15,8 @@ extends RefCounted
 ## through the roster entry keys "infantry_armor", "infantry_body", "infantry_skin" (BattleInfantry).
 
 const ARMORS_FILE := "gameplay/armors.json"
+## The per-size carry rules of a weapons-only pack (Aerial Assault, Vengeance).
+const RULES_FILE := "gameplay/infantry_rules.json"
 
 ## Packs that have infantry, in preference order (the original Tribes first).
 const INFANTRY_PACKS := ["tribes", "tribes2"]
@@ -22,6 +24,7 @@ const LIGHT := "LIGHT"
 const SIZES := ["LIGHT", "MEDIUM", "HEAVY"]
 
 static var _armors := {}      # id -> record
+static var _pack_rules := {}  # pack -> {SIZE: rules record} of the weapons-only packs
 static var _loaded := false
 
 
@@ -210,14 +213,28 @@ static func make_ammo_capacity(armor_id: String, weapon_id: String) -> int:
 static func make_rules_armor(armor_id: String, weapon_id: String) -> Dictionary:
 	var a := armor(armor_id)
 	var weapon_pack := weapon_id.get_slice(":", 0)
-	if a.is_empty() or weapon_pack == str(a.get("pack", "")) or not INFANTRY_PACKS.has(weapon_pack):
+	if a.is_empty() or weapon_pack == str(a.get("pack", "")):
 		return a
-	return armor("%s:%s" % [weapon_pack, armor_id.get_slice(":", 1)])
+	var rules := make_pack_rules(weapon_pack, armor_id.get_slice(":", 1))
+	if not rules.is_empty():
+		return rules
+	return armor("%s:%s" % [weapon_pack, armor_id.get_slice(":", 1)]) if INFANTRY_PACKS.has(weapon_pack) else a
+
+
+## What armour size `size` may carry of the weapons of a pack that has weapons but no armours of its own (Aerial Assault,
+## Vengeance: gameplay/infantry_rules.json, tools/aa_weapons.py / tv_weapons.py): {max_weapons, weapons, ammo,
+## default_loadout, hp, max_energy}; {} for any other pack.
+static func make_pack_rules(pack: String, size: String) -> Dictionary:
+	if not _pack_rules.has(pack):
+		var j = Assets.load_json(RULES_FILE, pack)
+		_pack_rules[pack] = (j as Dictionary).get("sizes", {}) if j is Dictionary else {}
+	return (_pack_rules[pack] as Dictionary).get(size, {})
 
 
 ## Drops the cache (tests, pack reloads).
 static func reload() -> void:
 	_armors.clear()
+	_pack_rules.clear()
 	_loaded = false
 	_tv_bodies = []
 	_tv_loaded = false

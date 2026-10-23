@@ -27,9 +27,10 @@ static func apply_vehicle_risk(pilot: String, vehicle_ref: String) -> bool:
 	return profile.at_risk.has(id)
 
 
-## The raid ended: extracted keeps everything.
-static func apply_survived(pilot: String) -> void:
+## The raid ended: extracted keeps everything, and the `money` he carried out (plus tasks and bonus) joins his credits.
+static func apply_survived(pilot: String, money := 0) -> void:
 	var profile := OperatorProfile.load_for(pilot)
+	profile.apply_deposit(money)
 	profile.apply_raid_survived()
 	profile.save()
 

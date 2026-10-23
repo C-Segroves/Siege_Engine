@@ -77,6 +77,14 @@ func apply_award(award: Dictionary) -> void:
 	stats.matches = int(stats.get("matches", 0)) + 1
 
 
+## Pays `amount` into the wallet (credits carried out of a raid, items sold); returns what was paid.
+func apply_deposit(amount: int) -> int:
+	var paid := maxi(amount, 0)
+	credits += paid
+	stats.earned = int(stats.get("earned", 0)) + paid
+	return paid
+
+
 func is_affordable(price: int) -> bool:
 	return price >= 0 and credits >= price
 

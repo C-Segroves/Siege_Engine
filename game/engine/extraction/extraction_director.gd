@@ -659,7 +659,7 @@ func _raid_result(result: String, stacks: Array, money: int) -> void:
 		profile.apply_extracted(stacks, money)
 		PlayerHold.apply(battle, true)
 		callins.points.apply_save()
-		RaidOperator.apply_survived(Net.player_name)
+		RaidOperator.apply_survived(Net.player_name, money)
 	else:
 		var insured_id := ExtractionProfile.make_insured_id_of(profile.last_kit.get("insured", []) if profile.last_kit.get("insured") is Array else [])
 		profile.apply_died(stacks)

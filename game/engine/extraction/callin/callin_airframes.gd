@@ -109,6 +109,7 @@ static func build(battle: Battle, vehicle_id: String, team: int, peer: int, kind
 		return null
 	craft.global_position = at   # the spawner lifts an AI flyer to its patrol altitude; this is where the run starts
 	craft.rotation.y = yaw
+	SupportCraft.mark(craft)
 	craft.set_meta(CALLER_META, peer)
 	craft.set_meta(KIND_META, kind)
 	return craft

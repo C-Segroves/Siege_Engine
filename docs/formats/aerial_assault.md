@@ -277,3 +277,35 @@ success 0x22; ct2: weapons (the originals let the player pick the five weapons i
 rifle, the zoom and two training bots, success 0x3E; ct3: repair patch and kit, four throwables, mortar and missile launcher at five
 turrets, success 0x40; ct4: repair pack, skiing, repairing the inventory station, shield pack, remote station, turret barrel,
 turret, sensor, satchel, success 0x52; ct5: four vehicle lessons (grav cycle, transport, bomber, fighter), success 0x6E.
+
+## Infantry weapons (`tools/aa_weapons.py`, importer step `weapons`)
+The disc has no weapon script: the numbers are tables in the PS2 executable (symbols are present) and the character define files.
+Output: `gameplay/weapons_infantry.json` (9 weapons, weapon schema, category infantry), `gameplay/infantry_rules.json` (what each armour
+size carries), effects `aa_*_impact` / `aa_*_muzzle` in `fx/effects.json`, fire sounds `audio/sfx/sim/aa_<weapon>_fire.wav`.
+Evidence:
+- `player_object::s_WeaponInfo` (13 records x 28 bytes, indexed by invent_type): ammo type, minimum, cost, refire s, -, speed m/s,
+  lifetime s. Fields read by `Weapon_Setup_FIRE` 0x241c80 (+0 ammo type, +4 minimum, +8 cost, +0xc refire), `disk::Setup` 0x174e20 /
+  `bullet::Initialize` 0x2150e0 (+0x14 speed, +0x18 lifetime), `GrenadeLauncher_Setup_FIRE` 0x2ce1b0 (+0x14 speed). Types: 1 disk,
+  2 plasma, 3 sniper (laser) rifle, 4 mortar, 5 grenade launcher, 6 chain gun, 7 blaster, 8 ELF, 9 missile launcher (10 repair gun,
+  11 shocklance, 12 targeting laser are not exported: no health damage / no model); ammo 13 disk, 14 bullet, 15 grenade, 16 plasma,
+  17 mortar, 18 missile.
+- Damage: `GetWeaponPainType` (jump table 0x39f4e0) -> `g_PainBase` (68 x 28 bytes: id, flag, damage radii, impulse) ->
+  `g_MetalDamageTable` (68 rows x 24 floats, columns 21/22/23 = light/medium/heavy armour: `ApplyPain` 0x1573d0 adds 0x15 to
+  the armour type). `InflictPain` 0x156ce8 multiplies the row by the explosion scale and the falloff and **clamps the hit at 1.0**
+  (0x157354), so the value is a fraction of the victim's health; the export keeps the light-armour fraction x 1980 hp and the three
+  fractions in the weapon `notes`. Disc 0.35/0.18/0.11, chaingun 0.15, blaster 0.30, plasma 0.45, GL 0.73, mortar 1.97, missile 1.21,
+  laser 0.68 (light/medium/heavy in notes).
+- Other constants (addresses in `aa_weapons.py`, checked against the executable at export): chaingun 0.125 s period (0x29b024), spread
+  +-0.03 rad, laser ray 800 m (0x1de7b8), missile 30 m/s +30 m/s^2 clamped at 200 m/s (0x1a3d84, 0x1a2820), gravity -20
+  (`COMMONDEFINES.TXT`). Energy: MAX_ENERGY 1 = 60 (DEFAULTLIGHTDEFINES.TXT "from pc = 60").
+- Per armour size (`DATA\CHARACTERS\DEFAULT{LIGHT,MEDIUM,HEAVY}DEFINES.TXT`): `MAX_WEAPONS` 3/4/5, `INVENT_MAX` weapons (light has the laser
+  rifle, medium and heavy the missile launcher, heavy the mortar) and ammo (disc 25, bullet 100/150/200, grenade 10/12/15, plasma
+  20/40/50, mortar 10, missile 4/8); default loadouts from `LoadoutList` (0x38cac8).
+- Sounds: ids `0x02000000 | n` are indexes of the EFFECTS bank (`audio/effects/NNN.wav`), found in each weapon's OnAdd / Setup (plasma 0x1b,
+  chaingun 0x27, mortar 0x13, grenade launcher 0x5f, blaster 0x77, laser 0x71, ELF 0x96, missile 0x86; the disc only sets its flight
+  loop 9).
+- Models: `weapon_*.shp` shapes of the pack, turned so the barrel points along the shape's +Y (`aa_weapons.BARREL_AXIS`, found from
+  the geometry; disc and grenade launcher are ambiguous). The laser rifle and grenade launcher have no skin in the pack (drawn white).
+- Estimates (marked in the notes): ELF reach and drain strength, missile lifetime, laser refire (recharge limited). The blaster's
+  ricochet, the laser's charge scaling and the mortar auto-aim are not modelled.
+Check: `res://tests/aa_tv_weapons_check.tscn`; renders `held_weapon_shots.tscn -- --game=tribes_aa --group=0..2`.

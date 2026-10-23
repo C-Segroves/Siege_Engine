@@ -193,6 +193,7 @@ func _build_ui() -> void:
 	hud = overlay.hud
 	overlay.add_child(InfantryHud.new(occupancy))
 	overlay.build_objectives_panel(self)
+	BoundsVisual.build_for(self)   # the area wall and the outside tint (nothing on a dedicated server)
 	chat = BattleChat.new(self)
 	add_child(chat)
 	var plates := Nameplates.new(self)

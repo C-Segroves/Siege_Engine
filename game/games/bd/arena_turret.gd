@@ -21,6 +21,7 @@ var refire := 1.4
 var shield_damage := 600.0
 var armor_damage := 900.0
 var _cool := 0.0
+var _target_profile: TargetProfile
 var shape: ShapeInstance
 ## "bd:<shape>": its destruction plays the Battledrome turret death (DeathFx, SIM turret.cpp 0x1537e).
 var shape_id := ""
@@ -77,8 +78,10 @@ func _physics_process(delta: float) -> void:
 	_cool -= delta
 	if _cool > 0.0:
 		return
-	var best := TurretTargeting.find_nearest(get_tree(), {"from": global_position, "range": range_m,
-		"is_hostile": is_hostile})
+	if _target_profile == null:
+		_target_profile = TargetProfile.make_turret()
+	_target_profile.range_m = range_m
+	var best := TargetSelector.pick(get_tree(), _target_profile, {"from": global_position, "team": side})
 	if best == null:
 		return
 	_cool = refire

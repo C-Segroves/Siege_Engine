@@ -9,6 +9,8 @@ const INDOOR_SPAWN_GAP := 3.0
 ## Explicit "above_terrain" beyond this keeps the spawn's own height.
 const RAISED_SPAWN_HEIGHT := 2.0
 const SPAWN_LIFT := 0.5
+## Free height a soldier's drop point needs above it (his body is about 2.2 m); under a lower deck he stands on the deck.
+const INFANTRY_HEADROOM := 2.6
 ## A start over a terrain hole with a building's floor within this far below it stands on that floor (a deck over the hole).
 const HOLE_FLOOR_REACH := 12.0
 ## A start with no ground under it (over a hole, or beside the heightfield) moves to the nearest solid ground within this far.
@@ -153,6 +155,7 @@ static func _make_spawns(parent: Node3D, m: Dictionary) -> Dictionary:
 	if ground.is_empty():
 		ground = pads.duplicate()
 	ground = _make_open_facings(ground, clearance, make_centre(m))
+	pads = _make_open_facings(pads, clearance, make_centre(m))   # (a vehicle leaves its pad towards open ground, not into a wall)
 	return {"herc": ground, "pad": pads, "infantry": infantry}
 
 
@@ -239,6 +242,8 @@ static func make_spawn_transform(parent: Node3D, s: Dictionary, clearance: Spawn
 	else:
 		# Above the collision triangles too, which on a steep square rise over the bilinear height.
 		xf.origin.y = MapTerrain.make_collision_height(parent, xf.origin) + SPAWN_LIFT
+	if String(s.get("kind", "")) == "infantry":
+		xf.origin = (clearance if clearance != null else SpawnClearance.make(parent)).make_headroom_origin(xf.origin, INFANTRY_HEADROOM)
 	return xf
 
 

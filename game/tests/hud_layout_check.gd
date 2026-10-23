@@ -77,7 +77,7 @@ func _check_all_elements() -> void:
 		var rects := layout.make_rects()
 		var ids := HudLayout.ELEMENTS.keys().filter(func(id) -> bool: return HudLayout.ELEMENTS[id].max != Vector2.ZERO)
 		var losers := ids.filter(func(id) -> bool: return not rects.has(id))
-		_expect(losers.size() == 2 and losers.all(func(id) -> bool: return HudLayout.ELEMENTS[id].has("group")),
+		_expect(losers.size() == 3 and losers.all(func(id) -> bool: return HudLayout.ELEMENTS[id].has("group")),
 			"%s: only the alternative banners give way (%s)" % [s, losers])
 		_expect_clear(rects, s, "all elements at %s" % s)
 		var chat := ChatPlacement.make_free_rect(layout.make_occupied_rects(), ChatPanel.make_closed_size(ChatSettings.make_defaults()), s)

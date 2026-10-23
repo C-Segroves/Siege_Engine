@@ -2,7 +2,8 @@ class_name InfantryPack
 extends RefCounted
 ## What the worn backpack does each frame and to each hit (docs/formats/tribes_infantry.md section 6):
 ##   energy  adds recharge (T1 EnergyPackImage negative energy use, T2 rechargeRateBoost);
-##   repair  while on: repairs its wearer at repair_per_s, spending energy_per_s (T1 RepairBolt with no
+##   repair  while on: repairs the structure, teammate or vehicle in reach (RepairDirector), else its wearer at
+##           repair_per_s, spending energy_per_s (T1 RepairBolt with no
 ##           target, T2 RepairGunImage repairFactorPlayer);
 ##   shield  while on: the energy absorbs hits, energy_per_damage per point (T1 Player::onDamage
 ##           shieldStrength, T2 Armor checkShields / energyPerDamagePoint); spends energy_per_s;
@@ -34,7 +35,7 @@ static func apply_frame(soldier: Infantry, delta: float) -> void:
 		kit.pack_active = false
 	if kit.pack_active:
 		soldier.capacitor = maxf(0.0, soldier.capacitor - float(p.get("energy_per_s", 0.0)) * delta)
-		if p.effect == "repair":
+		if p.effect == "repair" and not RepairWork.has_target(soldier):    # the gun heals its user only with nothing else to mend
 			apply_repair(soldier, float(p.get("repair_per_s", 0.0)) * delta)
 	_apply_jamming(soldier, kit.pack_active and p.get("effect", "") == "jammer", p)
 	soldier.cloak.apply_follow(kit.pack_active and p.get("effect", "") == "cloak", soldier)

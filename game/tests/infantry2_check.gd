@@ -525,6 +525,8 @@ func _check_bots(battle: Battle) -> void:
 	_expect(bots.any(func(b: Infantry) -> bool: return b.team == 0) and bots.any(func(b: Infantry) -> bool: return b.team == 1),
 		"bots on both teams")
 	_expect(bots.all(func(b: Infantry) -> bool: return b.get_node_or_null("Bot") is InfantryBot), "each bot has a brain")
+	for b in bots:   # a bot beyond sight and off every radar sleeps by design (BotSleep ASLEEP; bot_lod_check): this measures walking
+		(b as Infantry).set_meta(BotSleep.META_KEEP_AWAKE, true)
 	var paths := await _measure_bot_paths(bots)
 	var walkers := paths.keys()
 	var still := walkers.filter(func(b: Infantry) -> bool: return float(paths[b]) < BOT_MIN_PATH)

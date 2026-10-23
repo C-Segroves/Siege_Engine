@@ -14,7 +14,7 @@ extends RefCounted
 ## vehicle a player starts in has "pilot_peer"; a bot's soldier has "bot": true and a bot id as "owner".
 ## It also adds the battle's hand-item and backpack director (InfantryGearDirector, child "Gear") and the
 ## infantry bots (InfantryBots, child "InfantryBots": config "infantry_bots") and the interact action
-## (InfantryInteraction, child "Interaction").
+## (InfantryInteraction, child "Interaction") and the battle's repair work (RepairDirector, child "Repair").
 
 const START_ON_FOOT := "on_foot"
 const START_IN_VEHICLE := "vehicle"
@@ -39,6 +39,8 @@ var gear: InfantryGearDirector
 var bots: InfantryBots
 ## The soldiers' interact action (pickups, loot, switches, boarding).
 var interaction: InfantryInteraction
+## Repair packs, the Herc hold-repair and the repair beams.
+var repair: RepairDirector
 var _respawn_queue := []      # [net_id, seconds left]
 
 
@@ -52,6 +54,8 @@ func _init(p_battle: Battle) -> void:
 	interaction = InfantryInteraction.new(battle)
 	battle.add_child(interaction)
 	interaction.add_provider(battle.occupancy.make_boarding_offer)
+	repair = RepairDirector.new(battle)
+	battle.add_child(repair)
 
 
 ## Host, after the roster: the match's infantry bots (InfantryBots; none in missions or without infantry; the

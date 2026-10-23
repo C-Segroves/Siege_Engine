@@ -16,7 +16,7 @@ const CONTEXTS := {
 		"aim_left", "aim_right", "aim_up", "aim_down", "torso_center", "ascend", "descend", "fire_group_1",
 		"fire_group_2", "target_next", "target_nearest", "view_toggle", "scoreboard", "cockpit_mode_1",
 		"cockpit_mode_2", "cockpit_mode_3", "cockpit_mode_4", "cockpit_mode_5", "cockpit_mode_6",
-		"cockpit_mode_next", "radar_mode_toggle", "cloak_toggle", "hdd_page_1", "hdd_page_2", "look_up", "look_down", "look_left", "look_right", "vehicle_enter_exit", "seat_next", "objectives_toggle", "missile_cam_toggle", "command_map", "chat_all",
+		"cockpit_mode_next", "radar_mode_toggle", "cloak_toggle", "hdd_page_1", "hdd_page_2", "look_up", "look_down", "look_left", "look_right", "vehicle_enter_exit", "structure_repair", "seat_next", "objectives_toggle", "missile_cam_toggle", "command_map", "chat_all",
 		"chat_team", "chat_quick", "chat_history"],
 	## On foot (Tribes armour) and in a passenger seat: boarding is folded into interact (E, pad X: the nearest
 	## thing in reach - an item, a loot cache, a switch, a vehicle hatch; InfantryInteraction), so

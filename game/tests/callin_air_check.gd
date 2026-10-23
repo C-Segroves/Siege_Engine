@@ -85,6 +85,24 @@ func _frames(n: int) -> void:
 		await get_tree().physics_frame
 
 
+## Takes the bomber over the area's edge and keeps it there past the damage delay and two damage ticks: a support craft is exempt
+## from the out-of-area rule, so it is outside, the rule is on, and it stays unhurt.
+func _check_bomber_outside_area(battle: Battle, craft: Flyer) -> void:
+	var bounds: BattleBounds = battle.bounds
+	var area := bounds.bounds.area
+	var before := craft.integrity
+	craft.global_position = Vector3(area.end.x + 300.0, craft.global_position.y, area.get_center().y)
+	var wait := BattleBounds.SETTLE_SECONDS + BattleBounds.DAMAGE_DELAY + 2.0 * BattleBounds.DAMAGE_INTERVAL + 1.0
+	var left := wait
+	while left > 0.0 and is_instance_valid(craft):
+		craft.global_position = Vector3(area.end.x + 300.0, craft.global_position.y, area.get_center().y)   # (its pilot flies on)
+		await get_tree().physics_frame
+		left -= get_physics_process_delta_time()
+	_expect(is_instance_valid(craft) and SupportCraft.is_craft(craft) and bounds.checks_area and bounds.bounds.is_outside(craft.global_position)
+		and not bounds.is_out_of_area(craft) and craft.integrity >= before,
+		"the bomber, a support craft, is outside the area for %.0f s with the rule on and took no out-of-area damage" % wait)
+
+
 func _wait_for(cond: Callable, seconds: float) -> bool:
 	var t0 := Time.get_ticks_msec()
 	while Time.get_ticks_msec() - t0 < seconds * 1000.0:
@@ -295,6 +313,9 @@ func _check_bombing(battle: Battle, x: ExtractionDirector, c: CallinDirector, me
 	var st := {"first_impact_msec": 0, "craft": null, "shown": false, "in_table": false}
 	var track := func() -> void:
 		seen[order.state] = true
+		if st.craft != null and is_instance_valid(st.craft):
+			st["outside"] = bool(st.get("outside", false)) or battle.bounds.bounds.is_outside((st.craft as Node3D).global_position)
+			st["hurt"] = bool(st.get("hurt", false)) or (st.craft as Herc).integrity < 1.0
 		if st.craft == null and flight.craft_id >= 0:
 			st.craft = c.air.bombing.make_craft(flight)
 		var aircraft = st.craft
@@ -324,7 +345,11 @@ func _check_bombing(battle: Battle, x: ExtractionDirector, c: CallinDirector, me
 	_expect(not victim.alive and c.points.get_balance(1) - gain_before >= 20, "a hostile killed by the bombs credits the caller (+%d RP)" % (c.points.get_balance(1) - gain_before))
 	await _check_air_sync(battle, craft)
 	c.tap = Callable()
-	_expect(await _wait_for(func() -> bool: return not battle.vehicles.has(flight.craft_id) or flight.craft_id < 0, 60.0), "the bomber flies out and is taken out of the battle")
+	await _check_bomber_outside_area(battle, craft)
+	_expect(await _wait_for(func() -> bool:
+		track.call()
+		return not battle.vehicles.has(flight.craft_id) or flight.craft_id < 0, 60.0), "the bomber flies out and is taken out of the battle")
+	_expect(not bool(st.get("hurt", false)), "the bomber took no damage on its run")
 	_expect(c.air.bombing.flights.is_empty(), "the run is forgotten")
 	_expect(c.make_refusal(1, "bombing_run", "").contains("cooldown"), "the kind is on cooldown: '%s'" % c.make_refusal(1, "bombing_run", ""))
 	for u in [victim, near_mate, enemy_player]:
@@ -462,7 +487,7 @@ func _check_attack(battle: Battle, x: ExtractionDirector, c: CallinDirector, me:
 	_expect(hud.size() == 1 and (hud[0] as String).contains("ACTIVE"), "the HUD shows it with the time left: %s" % str(hud))
 	await _check_air_sync(battle, craft)
 	var credit_before := c.points.get_balance(1)
-	var reacted := await _wait_for(func() -> bool: return is_instance_valid(watcher) and watcher.get_node_or_null("Bot") != null and (watcher.get_node("Bot") as InfantryBot)._find_target() == craft, 10.0)
+	var reacted := await _wait_for(func() -> bool: return is_instance_valid(watcher) and watcher.get_node_or_null("Bot") != null and (watcher.get_node("Bot") as InfantryBot)._find_target() == craft, 20.0)   # (wall seconds: a loaded machine steps the bot rarely)
 	_expect(reacted or _no_watcher, "hostile AI targets the craft")
 	var trace_at := [0]
 	_expect(await _wait_for(func() -> bool:

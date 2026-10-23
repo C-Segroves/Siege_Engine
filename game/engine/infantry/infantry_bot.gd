@@ -12,7 +12,7 @@ extends Node
 ##           drives / flies it (InfantryBots); it gets out when the vehicle is crippled;
 ##   REPAIR  a guard soldier (guard_radius > 0, a faction's squad) with nobody to fight: walk to the nearest
 ##           damaged or downed base object of its own side - generators first, one soldier per object - and repair it
-##           at the object repair rate (TribesBase.find_job_for; BaseRepairRules faction_repair);
+##           at the object repair rate (TribesBase.find_job_for; RepairRules faction_repair);
 ##   in a passenger seat it fires within the seat's arc, in a gunner seat it works the turret.
 ## Terrain: it follows a walkable path to its goal (InfantryBotRoute over BattleNavigation: into and out of bases),
 ## else runs straight at it, jumps and jets over what blocks its way (a knee-high probe ahead),
@@ -92,6 +92,7 @@ var skill := 0.5
 var task := Task.ROAM
 var goal := Vector3.ZERO
 var target: Herc
+var _target_profile := _make_eyes_profile()
 ## Where a guard stays (guard_radius 0: no guard post, it roams the map).
 var guard_point := Vector3.ZERO
 var guard_radius := 0.0
@@ -224,7 +225,7 @@ func _choose_task(d: float) -> void:
 		task = Task.REPAIR
 		var at := _repair_job.global_position
 		goal = Vector3(at.x, soldier.global_position.y, at.z)      # walks up beside it (no jetting up to a generator on a pad)
-		if TribesBase.make_reach_distance(soldier, _repair_job) <= float(BaseRepairRules.faction().get("reach_m", 4.5)) * REPAIR_STAND_SHARE:
+		if _repair_job.make_reach_distance(soldier.global_position) <= float(RepairRules.faction().get("reach_m", 4.5)) * REPAIR_STAND_SHARE:
 			goal = soldier.global_position                          # in reach: stands and works
 	elif not objective.is_empty():
 		_apply_objective_task()
@@ -250,8 +251,8 @@ func _choose_repair() -> bool:
 			func(o: TribesBaseObject) -> bool: return _progress.is_unreachable(InfantryBotProgress.make_repair_key(o)))
 	else:
 		base.apply_job_claim(_repair_job, bot_id)
-	if _repair_job == null and soldier.has_meta(TribesBase.META_REPAIR_JOB):
-		soldier.remove_meta(TribesBase.META_REPAIR_JOB)
+	if _repair_job == null and soldier.has_meta(RepairWork.META_JOB):
+		soldier.remove_meta(RepairWork.META_JOB)
 	return _repair_job != null
 
 
@@ -260,14 +261,14 @@ func _apply_repair_work(delta: float) -> void:
 	var base := TribesBase.of(battle())
 	var working := task == Task.REPAIR and base != null and _repair_job != null and is_instance_valid(_repair_job) \
 		and not _repair_job.is_fully_repaired() \
-		and TribesBase.make_reach_distance(soldier, _repair_job) <= float(BaseRepairRules.faction().get("reach_m", 4.0))
+		and _repair_job.make_reach_distance(soldier.global_position) <= float(RepairRules.faction().get("reach_m", 4.0))
 	if working:
-		soldier.set_meta(TribesBase.META_REPAIR_JOB, _repair_job)
+		soldier.set_meta(RepairWork.META_JOB, _repair_job)
 		base.apply_job_claim(_repair_job, bot_id)
-		base.apply_object_repair(_repair_job, soldier.team,
-			float(base.repair.get("per_s", 0.0)) * float(BaseRepairRules.faction().get("per_s_scale", 1.0)) * delta)
-	elif soldier.has_meta(TribesBase.META_REPAIR_JOB):
-		soldier.remove_meta(TribesBase.META_REPAIR_JOB)
+		BaseCapture.apply_work(_repair_job, soldier.team,
+			float(base.repair.get("per_s", 0.0)) * float(RepairRules.faction().get("per_s_scale", 1.0)) * delta)
+	elif soldier.has_meta(RepairWork.META_JOB):
+		soldier.remove_meta(RepairWork.META_JOB)
 
 
 func _apply_objective_task() -> void:
@@ -285,21 +286,16 @@ func _apply_objective_task() -> void:
 ## The nearest enemy within `reach` it can sense (a jamming soldier hides beyond his jam radius, a cloaked one beyond
 ## the cloak's reveal range: Tribes 2 ai.cs AIFindClosestEnemy).
 func _find_target(reach := SENSOR_RANGE) -> Herc:
-	var best: Herc = null
-	var best_d := reach
-	var at := soldier.global_position
-	for v in soldier.get_tree().get_nodes_in_group("vehicles"):
-		# the native distance test first: every bot asks every few tenths of a second, and most units are out of reach
-		var d := at.distance_to((v as Node3D).global_position)
-		if d >= best_d:
-			continue
-		var h := v as Herc
-		if h == null or h == soldier or not h.alive or not TeamRelations.is_hostile(soldier.team, h.team) or h.has_meta("dormant"):
-			continue
-		if not InfantryPack.is_hidden_at(h, d) and not CloakRules.is_hidden_from_eyes(h, d):
-			best_d = d
-			best = h
-	return best
+	_target_profile.range_m = reach
+	return TargetSelector.pick(soldier.get_tree(), _target_profile,
+		{"from": soldier.global_position, "team": soldier.team}) as Herc
+
+
+static func _make_eyes_profile() -> TargetProfile:
+	var profile := TargetProfile.new()
+	profile.visibility = TargetProfile.Visibility.EYES
+	profile.herc_only = true
+	return profile
 
 
 func _needs_refill() -> bool:
@@ -575,7 +571,7 @@ func _apply_progress(delta: float) -> void:
 		key = InfantryBotProgress.make_vehicle_key(_vehicle_goal)
 	elif task == Task.REPAIR and is_instance_valid(_repair_job):
 		key = InfantryBotProgress.make_repair_key(_repair_job)
-		if TribesBase.make_reach_distance(soldier, _repair_job) <= float(BaseRepairRules.faction().get("reach_m", 4.0)):
+		if _repair_job.make_reach_distance(soldier.global_position) <= float(RepairRules.faction().get("reach_m", 4.0)):
 			return   # at work
 	if key == "" or soldier.global_position.distance_to(goal) <= ARRIVE * 2.0:
 		return   # there (standing on the station): no progress to make

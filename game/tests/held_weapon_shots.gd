@@ -3,6 +3,7 @@ extends Node
 ## held_<game>_first.png): a row per body, a column per weapon, to be checked by eye next to held_weapon_check.
 ##   godot --audio-driver Dummy --path game res://tests/held_weapon_shots.tscn -- --shots=<dir> [--game=tribes2] [--pitch=0.5]
 ## --game limits the run to one body game (tribes, tribes2, tribes_aa, tribes_v); --pitch looks up (+) or down (-) in radians.
+## The Aerial Assault and Vengeance bodies hold their own game's weapons (infantry_rules.json): --group=N shows the Nth three of them.
 
 const CELL := Vector2i(360, 300)
 const SPACING := 6.0
@@ -17,6 +18,7 @@ const BODY_GAMES := ["tribes", "tribes2", "tribes_aa", "tribes_v"]
 var _shots := ""
 var _game := ""
 var _pitch := 0.0
+var _group := 0
 var _stage: Node3D
 
 
@@ -28,6 +30,8 @@ func _ready() -> void:
 			_game = a.substr(7)
 		elif a.begins_with("--pitch="):
 			_pitch = float(a.substr(8))
+		elif a.begins_with("--group="):
+			_group = int(a.substr(8))
 	if _shots == "" or DisplayServer.get_name() == "headless":
 		print("held_weapon_shots: needs a window and --shots=<dir>")
 		get_tree().quit(1)
@@ -106,15 +110,19 @@ func _add_soldier(row: Dictionary, column: int, index: int) -> Infantry:
 	s.net_id = index + 1
 	_stage.add_child(s)
 	s.global_position = Vector3(index * SPACING, 0.2, 0.0)
-	s.equip(_make_loadout(row.armor))
+	s.equip(_make_loadout(row.armor, str(row.body.id)))
 	s.apply_weapon_slot(mini(column, s.weapons.size() - 1))
 	s.pitch_target = _pitch
 	s.pitch = _pitch
 	return s
 
 
-## Up to WEAPON_COLUMNS weapons the armour may carry, the preferred ones first.
-func _make_loadout(armor: Dictionary) -> Array:
+## Up to WEAPON_COLUMNS weapons the armour may carry, the preferred ones first; an Aerial Assault / Vengeance body holds the
+## `_group`th three weapons of its own game.
+func _make_loadout(armor: Dictionary, body_id: String) -> Array:
+	var rules := InfantryCatalog.make_pack_rules(body_id.get_slice(":", 0), str(armor.get("size", "light")).to_upper())
+	if not rules.is_empty():
+		return (rules.weapons as Array).slice(_group * WEAPON_COLUMNS, (_group + 1) * WEAPON_COLUMNS)
 	var allowed: Array = armor.get("weapons", [])
 	var out := []
 	for want in PREFERRED_WEAPONS:

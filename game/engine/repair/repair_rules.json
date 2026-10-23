@@ -1,0 +1,48 @@
+{
+  "version": 2,
+  "notes": "Remake rules for repairing and capturing base objects and structures, one shared mechanic (engine/repair) with per-game data. The originals only disable an object at its disabled damage (Tribes 1 StaticShape::onDamage / Tribes 2 GameBase disabled damage state) and the repair pack brings it back (T1 scripts/item.cs RepairPack::onUse mounts the RepairGun, scripts/baseProjData.cs RepairBolt::onAcquire repairRate 0.05 /s on its own user, 0.1 /s on any other target, boltLength 5; T2 scripts/packs/repairpack.cs RepairGunImage: repairFactorPlayer 0.002 and repairFactorObject 0.004 per tick, DefaultRepairBeam beamRange 10, the beam finds players, vehicles, static shapes and turrets); Earthsiege 1, Earthsiege 2 and Starsiege have no repair of structures in the field at all (ES1 / ES2 repair only in the hangar, Starsiege has a NanoRepair equipment slot whose rate is not decoded), so the 'hold' block, the capture-by-repair rule and the faction repair crew are remake design values. 'default' is used by every game without its own block; a game's block overrides single keys.",
+  "default": {
+    "capture": {
+      "enabled": true,
+      "seconds": 120.0,
+      "text": "A unit whose repair work touches an object of a team that is not allied to him takes it for this long (or until it is destroyed or its owner repairs it back); then it returns to its owner."
+    },
+    "hold": {
+      "enabled": true,
+      "reach_m": 30.0,
+      "hp_share_per_s": 0.04,
+      "text": "A Herc without a repair pack holds the repair action next to a structure: the structure regains this share of its hit points per second while the Herc stays within reach_m of its surface (remake values; the originals have no field repair for Hercs)."
+    },
+    "pack_unit_rate": "object"
+  },
+  "games": {
+    "tribes": {
+      "pack_unit_rate": "object",
+      "note": "RepairBolt::onAcquire repairRate 0.1 for every target but the user (players too)."
+    },
+    "tribes2": {
+      "pack_unit_rate": "pack",
+      "note": "RepairGunImage repairFactorPlayer (half of repairFactorObject) for a player, repairFactorObject for vehicles and objects."
+    },
+    "es1": {"note": "Earthsiege 1 structures (Structure): remake capture and hold rules."},
+    "es2": {"note": "Earthsiege 2 structures: remake capture and hold rules."},
+    "starsiege": {"note": "Starsiege structures (SSStructure): remake capture and hold rules."}
+  },
+  "pack_alias": {
+    "tribes_aa": "tribes2",
+    "tribes_v": "tribes2",
+    "bd": "es1"
+  },
+  "faction_repair": {
+    "enabled": true,
+    "search_m": 300.0,
+    "reach_m": 6.0,
+    "per_s_scale": 1.0,
+    "generator_priority": 0.5,
+    "text": "A guard soldier of a faction walks to the nearest damaged or downed object of its own side (generators first, one soldier per object) and repairs it at the pack's object repair rate."
+  },
+  "feedback": {
+    "note_seconds": 2.5,
+    "beam_radius_m": 0.06
+  }
+}

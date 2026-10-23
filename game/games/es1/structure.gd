@@ -6,6 +6,8 @@ extends StaticBody3D
 signal destroyed(s: Structure, killer: Node)
 ## Host: a hit landed (before a destroying one is reported by `destroyed`).
 signal damaged(s: Structure, attacker: Node)
+## Its side changed (captured, released) or, for a base object, it was disabled or repaired: power and targets follow.
+signal state_changed(obj: Structure)
 
 ## Group of everything the targeting system may lock besides the vehicles ("vehicles"): Herc-like fields
 ## display_name, team, alive and integrity (0..1).
@@ -29,9 +31,23 @@ var shape_id := ""
 ## DeathFx kind and keys (Starsiege: the record's explosion tag) of its destruction.
 var death_kind := DeathFx.KIND_STRUCTURE
 var death_keys: Array = []
+## The owner's team while the structure is captured (valid when capture_left > 0).
+var home_team := -1
+## Seconds the capture still holds (0: not captured). BaseCapture decides who captures and for how long.
+var capture_left := 0.0
+## A destroyed structure can be repaired back to life (a Tribes base object stays standing as a ruin); the other
+## games' destroyed structures are gone for good.
+var repairs_ruins := false
+## Half width of the shape (metres), measured once.
+var _half_width := -1.0
+var _repair_sent_msec := 0
 ## True once the structure has its shape collision (scenery built without one keeps none).
 var _collides := false
 
+## A capture's timer is renewed by the capturer's repair work at most this often (seconds).
+const CAPTURE_REFRESH_STEP := 1.0
+## A repair is sent to the clients at most this often while it goes on (seconds); a revival or the last point at once.
+const REPAIR_SEND_STEP := 0.2
 ## Meta of the CollisionShape3D built from the shape (rebuilt when the shape changes).
 const SHAPE_COLLISION_META := "shape_collision"
 ## A ruined structure's shape: flattened to this share of its height.
@@ -161,6 +177,9 @@ func _apply_integrity(value: float) -> void:
 func destroy(killer: Node = null) -> void:
 	if not alive:
 		return
+	if is_captured():       # a captured structure that is destroyed returns to its owner as his ruin
+		team = home_team
+		capture_left = 0.0
 	alive = false
 	integrity = 0.0
 	if Net.is_online() and multiplayer.is_server():
@@ -193,3 +212,123 @@ func make_body_size() -> Vector2:
 	if not found:
 		return Vector2(DEFAULT_HALF_WIDTH, DEFAULT_HEIGHT)
 	return Vector2(maxf(box.size.x, box.size.z) * 0.5, maxf(box.end.y, 0.0))
+
+
+# ------------------------------------------------------------------ repair and capture (BaseCapture, RepairDirector)
+
+## The pack of the structure's game ("es1", "starsiege", "tribes2" ...): the key of its RepairRules block.
+func make_pack() -> String:
+	return shape_id.get_slice(":", 0) if shape_id.contains(":") else ""
+
+
+## True when repair work can do something here: damaged, and alive or a ruin that may be repaired back.
+func can_repair() -> bool:
+	return (alive or repairs_ruins) and not is_fully_repaired()
+
+
+func is_fully_repaired() -> bool:
+	return alive and hp >= max_hp
+
+
+## Distance from `from` to the structure's surface, roughly: centre distance less the shape's half width.
+func make_reach_distance(from: Vector3) -> float:
+	if _half_width < 0.0:
+		_half_width = make_body_size().x
+	return maxf(0.0, from.distance_to(global_position) - _half_width)
+
+
+## Host: `amount` points of repair; a ruin comes back once it has hit points again. The clients follow by RPC.
+func apply_repair(amount: float) -> void:
+	if not multiplayer.is_server() or amount <= 0.0 or not can_repair():
+		return
+	var was_alive := alive
+	hp = minf(max_hp, maxf(hp, 0.0) + amount)
+	var ratio := clampf(hp / maxf(max_hp, 1.0), 0.0, 1.0)
+	var now := Time.get_ticks_msec()
+	if Net.is_online() and (not was_alive or hp >= max_hp or now - _repair_sent_msec >= int(REPAIR_SEND_STEP * 1000.0)):
+		_repair_sent_msec = now
+		_apply_repaired.rpc(ratio)
+	_apply_repaired(ratio)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _apply_repaired(ratio: float) -> void:
+	integrity = ratio
+	hp = max_hp * ratio
+	if not alive and hp > 0.0:
+		alive = true
+		apply_intact_look()
+
+
+func is_captured() -> bool:
+	return capture_left > 0.0
+
+
+## The owner's team: the captured object's home team, else its own.
+func make_owner_team() -> int:
+	return home_team if is_captured() else team
+
+
+## Host: `by_team` takes the structure for `seconds` (a new capture, or the capturer's repair work refreshing it). When
+## `by_team` is the owner's own team the structure goes home (recaptured).
+func apply_capture(by_team: int, seconds: float) -> void:
+	if not multiplayer.is_server() or seconds <= 0.0:
+		return
+	if is_captured() and by_team == home_team:
+		apply_release()
+		return
+	if is_captured() and by_team == team:
+		if capture_left < seconds - CAPTURE_REFRESH_STEP:      # the capturer's work renews it, a packet a second
+			_send_team_state(team, seconds, home_team)
+		return
+	_send_team_state(by_team, seconds, team if not is_captured() else home_team)
+
+
+## Host: the structure returns to its owner.
+func apply_release() -> void:
+	if not multiplayer.is_server() or not is_captured():
+		return
+	_send_team_state(home_team, 0.0, home_team)
+
+
+func _send_team_state(p_team: int, left: float, p_home: int) -> void:
+	if Net.is_online():
+		_apply_team_state.rpc(p_team, left, p_home)
+	_apply_team_state(p_team, left, p_home)
+
+
+@rpc("authority", "call_remote", "reliable")
+func _apply_team_state(p_team: int, left: float, p_home: int) -> void:
+	var changed := p_team != team
+	team = p_team
+	capture_left = left
+	home_team = p_home
+	apply_side_changed()
+	if changed:
+		state_changed.emit(self)
+
+
+## A kind of structure reacts to its side changing (a turret drops its target).
+func apply_side_changed() -> void:
+	pass
+
+
+## A faction ownership assignment (TribesBase.apply_owners): the owner changes; a held capture goes on.
+func apply_owner_team(p_team: int) -> void:
+	if is_captured():
+		home_team = p_team
+	else:
+		team = p_team
+
+
+func _physics_process(delta: float) -> void:
+	apply_capture_tick(delta)
+
+
+## The capture runs out; the host then sends the structure home.
+func apply_capture_tick(delta: float) -> void:
+	if capture_left <= 0.0:
+		return
+	capture_left = maxf(capture_left - delta, 0.0)
+	if capture_left <= 0.0 and multiplayer.is_server():
+		_send_team_state(home_team, 0.0, home_team)

@@ -27,6 +27,7 @@ const FALLBACK_HEAD_HEIGHT := 6.0
 
 var guns: Array[SSTurretGun] = []
 var engage_range := DEFAULT_RANGE
+var _target_profile: TargetProfile
 var turn_rate := DEFAULT_TURN_RATE
 var check_interval := DEFAULT_CHECK_INTERVAL
 var rearm_period := DEFAULT_REARM_PERIOD
@@ -120,18 +121,24 @@ func _physics_process(delta: float) -> void:
 ## True while the current target is alive, hostile and within the activation distance plus the
 ## deactivation buffer.
 func keeps_target() -> bool:
-	if target == null or not is_instance_valid(target) or not target.alive:
-		return false
-	if not SSTeams.is_hostile(team, target.team) or target.has_meta("dormant"):
-		return false
-	var distance := global_position.distance_to(target.global_position)
-	return distance <= engage_range + deactivate_buffer and not CloakRules.is_hidden_from_sensor(target, {}, distance)
+	return TargetSelector.keeps(_make_target_profile(), {"from": global_position, "team": team}, target)
 
 
 ## The nearest live vehicle of a hostile team within range; null when there is none.
 func find_target() -> Node3D:
-	return TurretTargeting.find_nearest(get_tree(), {"from": global_position, "range": engage_range,
-		"is_hostile": func(v: Node) -> bool: return SSTeams.is_hostile(team, v.team)})
+	return TargetSelector.pick(get_tree(), _make_target_profile(), {"from": global_position, "team": team})
+
+
+## Starsiege turrets: the nearest hostile by SSTeams within the activation distance (engage_range), held until it
+## leaves engage_range + the deactivation buffer; the search interval is check_interval from the turret's datablock.
+func _make_target_profile() -> TargetProfile:
+	if _target_profile == null:
+		_target_profile = TargetProfile.make_turret()
+		_target_profile.hostile_rule = func(a: int, b: int) -> bool: return SSTeams.is_hostile(a, b)
+	_target_profile.range_m = engage_range
+	_target_profile.keep_buffer = deactivate_buffer
+	_target_profile.think_seconds = check_interval
+	return _target_profile
 
 
 func _aim_point() -> Vector3:

@@ -24,7 +24,7 @@ const CUTTLEFISH := 831
 const STATION_FLASH_S := 0.5
 const PAD_CLOAK_S := 4.8
 const STEP := 0.1
-const SITE_RINGS := [0, 1, 2, 3, 4, 5, 6]
+const SITE_RINGS := [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
 const SITE_DIRECTIONS := 8
 const SITE_RING_STEP_M := 25.0
 const SITE_CLEAR_M := 40.0
@@ -335,8 +335,11 @@ func _check_soldiers(battle: Battle) -> void:
 
 
 func _turret_finds(target: Node3D, sensor: Dictionary) -> bool:
-	return TurretTargeting.find_nearest(get_tree(), {"from": target.global_position + Vector3(0, 1, 30), "range": 80.0,
-		"is_hostile": func(v: Node) -> bool: return v == target, "sensor": sensor}) == target
+	var profile := TargetProfile.make_turret().with_range(80.0)
+	profile.sensor = sensor
+	profile.hostile_rule = func(_a: int, _b: int) -> bool: return true
+	return TargetSelector.pick(get_tree(), profile, {"from": target.global_position + Vector3(0, 1, 30), "team": -1,
+		"accepts": func(v: Node3D, _p: Vector3) -> bool: return v == target}) == target
 
 
 func _check_bot_search(battle: Battle, wearer: Infantry) -> void:
