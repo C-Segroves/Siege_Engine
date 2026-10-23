@@ -578,25 +578,31 @@ func _explode() -> void:
 ## and comes off its health; dead at zero (Tribes maxDamage). A soldier inside a vehicle cannot be hit.
 ## A weapon hit (DamageModel): soldiers take it through their own armour rules (apply_hit), not a vehicle's.
 func apply_weapon_hit(hit: Dictionary) -> void:
-	apply_hit(float(hit.shield), float(hit.armor), hit.attacker, hit.pos)
+	apply_damage_event(DamageEvent.make_from_hit(hit))
 
 
-func apply_hit(_shield_dmg: float, armor_dmg: float, attacker: Node = null, _hit_pos := Vector3.ZERO) -> void:
+func apply_hit(shield_dmg: float, armor_dmg: float, attacker: Node = null, hit_pos := Vector3.ZERO) -> void:
+	apply_damage_event(DamageEvent.make(shield_dmg, armor_dmg, attacker, hit_pos))
+
+
+## The event through the worn shield pack, then the armour's scale of its type (DamageProfile), off the health.
+func apply_damage_event(event: DamageEvent) -> void:
 	if not alive or is_puppet or stowed or is_spawn_protected():
 		return
-	var type := DamageTypes.current
-	var dmg := InfantryPack.apply_shield(self, armor_dmg, type) * DamageTypes.make_scale(armor.get("damage_scale", {}), type)
+	var profile := DamageProfile.new()
+	profile.scale_by_type = armor.get("damage_scale", {})
+	var dmg := InfantryPack.apply_shield(self, event.amount, event.type) * profile.make_scale(event.type)
 	var c: Dictionary = components[0]
 	c.hp = maxf(0.0, float(c.hp) - dmg)
 	integrity = HercDamage.integrity_of(components)
 	cloak.apply_damaged(dmg)
-	damaged.emit(self, attacker)
+	damaged.emit(self, event.attacker)
 	if c.hp <= 0.0:
-		if lethal_hit_guard.is_valid() and bool(lethal_hit_guard.call(self, attacker)):
+		if lethal_hit_guard.is_valid() and bool(lethal_hit_guard.call(self, event.attacker)):
 			return
 		jetting = false
 		_sounds.apply_jet(self)
-		_die(attacker)
+		_die(event.attacker)
 
 
 ## Out-of-bounds damage (BattleBounds): `share` of the full health, no shield pack, no armour scale.

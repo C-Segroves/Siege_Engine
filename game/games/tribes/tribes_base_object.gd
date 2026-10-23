@@ -22,10 +22,6 @@ const KIND_TURRET := "turret"
 const KIND_SENSOR := "sensor"
 ## Station kinds the soldier uses (TribesStations) and every kind that needs base power to work.
 const STATION_KINDS := ["inventory", "ammo", "command", "vehicle", "vehicle_pad"]
-## Tribes 1 StaticShape::onDamage (scripts/staticshape.cs): a team's own hits on its Generator / Station class
-## objects stop just short of disabling them (this much below the disabled damage, in Tribes damage units).
-const T1_TEAM_DAMAGE_MARGIN := 0.05
-const T1_PACK := "tribes"
 const UNPOWERED_KINDS := [KIND_GENERATOR]
 
 var spec: Dictionary = {}
@@ -38,17 +34,20 @@ var power_group := -1
 var powered := false
 ## Powers itself (a deployed object: Tribes 2 setSelfPowered, Tribes 1 deployables ignore base power).
 var self_powered := false
-var energy := 0.0
+## The shield's energy (DamageTarget) and its pool size.
+var energy: float:
+	get: return damage.shield_energy
+	set(value): damage.shield_energy = value
 var energy_max := 0.0
 var energy_recharge := 0.0
-var disabled_damage := 0.0
-var invincible := false
+var disabled_damage: float:
+	get: return damage.profile.disabled_damage
+var invincible: bool:
+	get: return damage.profile.invincible
 ## Palette the shape was built in (a mounted part, the Tribes 2 turret barrel, uses it too).
 var palette := ""
 ## Its glowing parts and cast light (null when the shape has none); lit while it works.
 var lights: TribesBaseLights
-var _shield_cost := 0.0              # energy per point of damage the shield absorbs (0: no shield)
-var _damage_scale: Dictionary = {}
 var _was_enabled := true
 
 
@@ -88,14 +87,12 @@ func apply_spec(p_spec: Dictionary) -> void:
 	var dmg: Dictionary = p_spec.get("damage", {})
 	max_hp = float(dmg.get("hp", max_hp))
 	hp = max_hp
-	disabled_damage = float(dmg.get("disabled_damage", max_hp))
+	damage.profile = TribesDamageProfile.make_object(p_spec, pack, kind)
+	damage.shield_online = has_power
 	var en: Dictionary = p_spec.get("energy", {})
 	energy_max = float(en.get("max", 0.0))
 	energy_recharge = float(en.get("recharge_per_s", 0.0))
 	energy = energy_max
-	_shield_cost = float((p_spec.get("shield", {}) as Dictionary).get("energy_per_point", 0.0))
-	_damage_scale = p_spec.get("damage_scale", {})
-	invincible = bool(p_spec.get("invincible", false))
 	repairs_ruins = true
 	SensorTowers.apply_register(self)
 
@@ -125,19 +122,17 @@ static func make_shape_bounds(frame: Node3D, shape: ShapeInstance) -> AABB:
 
 ## Damage taken so far (engine points), from the integrity every peer has.
 func make_damage_taken() -> float:
-	return max_hp * (1.0 - integrity)
+	return damage.make_damage_taken()
 
 
 ## Enabled: not destroyed and below its disabled damage (Tribes damage state "Enabled").
 func is_enabled() -> bool:
-	return alive and make_damage_taken() < disabled_damage
+	return damage.is_enabled()
 
 
 ## "Enabled", "Disabled" or "Destroyed" (GameBase::getDamageState).
 func make_damage_state() -> String:
-	if not alive:
-		return "Destroyed"
-	return "Enabled" if is_enabled() else "Disabled"
+	return damage.make_state()
 
 
 ## Does its job: enabled and powered (a generator only needs to be enabled).
@@ -183,40 +178,6 @@ func _physics_process(delta: float) -> void:
 	if has_power() and is_enabled() and energy < energy_max:
 		energy = minf(energy_max, energy + energy_recharge * delta)
 	apply_capture_tick(delta)
-
-
-# ------------------------------------------------------------------ damage and repair
-
-## A hit: the shield's energy first, then the damage profile's scale for the hit's type; a Tribes 1 team's own
-## hit on a generator or station stops short of disabling it.
-func apply_hit(shield_dmg: float, armor_dmg: float, attacker: Node = null, hit_pos := Vector3.ZERO) -> void:
-	if invincible or not alive or not multiplayer.is_server():
-		return
-	var dmg := _absorb_with_shield(armor_dmg) * DamageTypes.make_scale(_damage_scale, DamageTypes.current)
-	dmg = _cap_team_damage(dmg, attacker)
-	if dmg <= 0.0:
-		return
-	super.apply_hit(shield_dmg, dmg, attacker, hit_pos)
-
-
-func _absorb_with_shield(dmg: float) -> float:
-	if _shield_cost <= 0.0 or not has_power() or energy <= 0.0:
-		return dmg
-	var capacity := energy / _shield_cost
-	if dmg <= capacity:
-		energy -= dmg * _shield_cost
-		return 0.0
-	energy = 0.0
-	return dmg - capacity
-
-
-func _cap_team_damage(dmg: float, attacker: Node) -> float:
-	if pack != T1_PACK or not (kind == KIND_GENERATOR or kind in STATION_KINDS) or attacker == null:
-		return dmg
-	if not ("team" in attacker) or int(attacker.team) != team:
-		return dmg
-	var cap := disabled_damage - T1_TEAM_DAMAGE_MARGIN * TribesMissionRuntime.TRIBES_DAMAGE_SCALE
-	return clampf(cap - make_damage_taken(), 0.0, dmg)
 
 
 # ------------------------------------------------------------------ repair and capture (Structure)

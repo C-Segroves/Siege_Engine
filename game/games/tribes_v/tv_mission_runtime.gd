@@ -42,6 +42,8 @@ var _npcs: Array = []                    # [{rec, enabled, spawned, dead, brain}
 var _npc_of := {}                        # soldier net id -> npc entry
 var _squad_alive := {}                   # squad label -> living members
 var _speech: AudioStreamPlayer
+## The placed drivable vehicles (map.json "vehicles").
+var fleet: TVVehicleFleet
 var _bodies := {}                        # body id -> body record (bodies.json)
 
 
@@ -100,6 +102,8 @@ func setup(p_battle: Node3D, mission: Dictionary, vars := PackedInt32Array()) ->
 	for b in InfantryCatalog.make_tv_all_bodies():
 		_bodies[str(b.id)] = b
 	player_team = str(map.get("player_team", ""))
+	fleet = TVVehicleFleet.new(self)
+	fleet.build(map.get("vehicles", []))
 	_speech = AudioStreamPlayer.new()
 	_speech.bus = VOICE_BUS if AudioServer.get_bus_index(VOICE_BUS) >= 0 else "Master"
 	add_child(_speech)
@@ -131,13 +135,13 @@ func _physics_process(delta: float) -> void:
 		script_run.fire("MessageLevelStart", "all")
 		script_run.fire("MessagePlayerStart", "all")
 		script_run.tick(0.0)          # the start-up scripts disable the soldiers that are not there yet, before any spawns
-		_sync_npcs()
+		_sync_placed()
 	script_run.tick(delta)
 	_check_triggers(p)
 	script_host.apply_tick(delta)
 	if make_rules_step(delta, CHECK_INTERVAL) <= 0.0:
 		return
-	_sync_npcs()
+	_sync_placed()
 
 
 # ------------------------------------------------------------------ triggers
@@ -173,6 +177,14 @@ func _build_npcs() -> void:
 		var squad := str(rec.get("squad", ""))
 		if squad != "":
 			_squad_alive[squad] = int(_squad_alive.get(squad, 0)) + 1
+
+
+## Streams the placed soldiers and vehicles in around the player.
+func _sync_placed() -> void:
+	_sync_npcs()
+	var p: Herc = battle.player
+	if p != null and is_instance_valid(p):
+		fleet.sync(p.global_position)
 
 
 func _sync_npcs() -> void:
@@ -256,6 +268,11 @@ func _is_ally(team: String) -> bool:
 	return team == player_team
 
 
+## True when the TeamInfo name `team` is the player's side (a placed vehicle of it is his; "" = nobody's, parked for the taking).
+func is_ally_team(team: String) -> bool:
+	return _is_ally(team)
+
+
 static func _vec(p: Array) -> Vector3:
 	return Vector3(float(p[0]), float(p[1]), float(p[2]))
 
@@ -269,7 +286,12 @@ func _entries_named(label: String) -> Array:
 ## MessageSquadDeath; Aerial Assault's kill count stays for the fallback).
 func on_unit_destroyed(h: Herc) -> void:
 	super.on_unit_destroyed(h)
-	if script_run == null or not (h is Infantry):
+	if script_run == null:
+		return
+	if not (h is Infantry):
+		var vehicle_label := fleet.apply_death(h)
+		if vehicle_label != "":
+			script_run.fire("MessageDeath", vehicle_label)
 		return
 	var e: Dictionary = _npc_of.get(int((h as Infantry).net_id), {})
 	if e.is_empty() or bool(e.dead):
@@ -292,6 +314,7 @@ func has_overlay() -> bool:
 
 
 func apply_enable(label: String, on: bool) -> void:
+	fleet.apply_enable(label, on)
 	for t in _triggers:
 		if str(t.rec.label) == label:
 			t.enabled = on
@@ -302,6 +325,7 @@ func apply_enable(label: String, on: bool) -> void:
 
 
 func apply_destroy(label: String) -> void:
+	fleet.apply_destroy(label)
 	for t in _triggers:
 		if str(t.rec.label) == label:
 			t.enabled = false
@@ -339,7 +363,7 @@ func apply_damage(label: String, amount: float) -> void:
 	if label.to_lower() == "player":
 		var p: Herc = battle.player
 		if p != null and is_instance_valid(p):
-			p.apply_environment_damage(clampf(amount / DAMAGE_HP, 0.0, 1.0))
+			ScriptedDamage.apply_share(p, amount / DAMAGE_HP)
 
 
 func apply_end(success: bool) -> void:

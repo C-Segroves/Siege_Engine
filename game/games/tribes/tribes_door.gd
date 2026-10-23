@@ -15,10 +15,13 @@ extends TribesMover
 const CLOSE_DELAY := 3.0
 
 var _close_t := 0.0
-var hp := 0.0
-var max_hp := 0.0
+## Hit points of a destroyable door (engine/damage; max_hp 0: not destroyable).
+var damage := DamageTarget.new()
+var hp: float:
+	get: return damage.hp
+var max_hp: float:
+	get: return damage.max_hp
 var _triggers: Array = []      # [Transform3D, AABB local box]
-var _door_scale: Dictionary = {}
 
 
 func _build(parent: Node3D, p_record: Dictionary, pal: String) -> void:
@@ -29,9 +32,10 @@ func _build(parent: Node3D, p_record: Dictionary, pal: String) -> void:
 		var hi := Vector3(float(b[1][0]), float(b[1][1]), float(b[1][2]))
 		_triggers.append([MapBuilder.make_transform(t), AABB(lo, hi - lo)])
 	if str(p_record.get("destroyable", "")).to_lower() == "true":
-		max_hp = float(p_record.get("max_damage", 0.0)) * TribesMissionRuntime.TRIBES_DAMAGE_SCALE
-		hp = max_hp
-		_door_scale = TribesBase.load_specs("tribes").get("door_scale", {})
+		damage.max_hp = float(p_record.get("max_damage", 0.0)) * TribesMissionRuntime.TRIBES_DAMAGE_SCALE
+		damage.hp = damage.max_hp
+		damage.profile = TribesDamageProfile.make_door(TribesBase.load_specs("tribes").get("door_scale", {}))
+		damage.killed.connect(_on_killed)
 		add_to_group(Projectile.SPLASH_TARGETS)
 
 
@@ -48,15 +52,18 @@ func is_in_trigger(who: Node3D) -> bool:
 	return false
 
 
-## Host: a hit, scaled by the door's damage scale of the hit's type.
-func apply_hit(_shield_dmg: float, armor_dmg: float, _attacker: Node = null, _hit_pos := Vector3.ZERO) -> void:
+## Host: a hit, scaled by the door's damage scale of the hit's type (TribesDamageProfile.make_door).
+func apply_hit(shield_dmg: float, armor_dmg: float, attacker: Node = null, hit_pos := Vector3.ZERO) -> void:
 	if max_hp <= 0.0 or stopped or not multiplayer.is_server():
 		return
-	hp -= armor_dmg * float(_door_scale.get(DamageTypes.current, 0.0))
-	if hp <= 0.0:
-		_stop()
-		if Net.is_online():
-			_stop.rpc()
+	damage.apply_event(DamageEvent.make(shield_dmg, armor_dmg, attacker, hit_pos))
+
+
+func _on_killed(_event: DamageEvent) -> void:
+	damage.alive = false
+	_stop()
+	if Net.is_online():
+		_stop.rpc()
 
 
 @rpc("authority", "call_remote", "reliable")

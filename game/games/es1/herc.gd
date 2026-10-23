@@ -536,20 +536,12 @@ func shield_bank_at(hit_pos: Vector3) -> float:
 
 ## Takes shield damage from the front or rear bank; returns the fraction that gets through (DamageModel).
 func absorb_with_shield(shield_dmg: float, front: bool) -> float:
-	var bank := shield_front if front else shield_rear
-	var through := 1.0
-	if shield_dmg > 0.0:
-		if bank >= shield_dmg:
-			bank -= shield_dmg
-			through = 0.0
-		else:
-			through = (shield_dmg - bank) / shield_dmg
-			bank = 0.0
+	var left := ShieldAbsorb.make_through_bank(shield_front if front else shield_rear, shield_dmg)
 	if front:
-		shield_front = bank
+		shield_front = left[1]
 	else:
-		shield_rear = bank
-	return through
+		shield_rear = left[1]
+	return left[0]
 
 
 ## Armour damage straight to component `index`, past the shields (Earthsiege blast splash: DBSIM 0x13a7c ->

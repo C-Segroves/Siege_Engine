@@ -463,7 +463,7 @@ func vm_destroy(tag: String) -> void:
 	for at in _tag_positions(tag):
 		var o := _base_object_at(base, at)
 		if o != null and is_instance_valid(o) and o.alive:
-			o.apply_hit(1.0e9, 1.0e9)
+			ScriptedDamage.apply_lethal(o)
 
 
 ## SetInventCount: the spawn kit already holds the lessons' grenades, mines and repair items; nothing is given.

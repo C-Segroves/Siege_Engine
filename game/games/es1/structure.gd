@@ -20,11 +20,21 @@ const DEFAULT_HEIGHT := 12.0
 var net_id := 0
 var team := 0
 var display_name := "Structure"
-var hp := 15000.0
-var max_hp := 15000.0
-var alive := true
-## hp / max_hp for the target displays; the host sends it to the clients with every hit.
-var integrity := 1.0
+## Hit points, alive flag and integrity (hp / max_hp for the target displays; the host sends it to the clients with
+## every hit) live in `damage`, the one damage code of every game (engine/damage).
+var damage := DamageTarget.new()
+var hp: float:
+	get: return damage.hp
+	set(value): damage.hp = value
+var max_hp: float:
+	get: return damage.max_hp
+	set(value): damage.max_hp = value
+var alive: bool:
+	get: return damage.alive
+	set(value): damage.alive = value
+var integrity: float:
+	get: return damage.integrity
+	set(value): damage.integrity = value
 var shape: ShapeInstance
 ## "<pack>:<shape>": the pack whose death effects play when it is destroyed (DeathFx).
 var shape_id := ""
@@ -52,6 +62,12 @@ const REPAIR_SEND_STEP := 0.2
 const SHAPE_COLLISION_META := "shape_collision"
 ## A ruined structure's shape: flattened to this share of its height.
 const RUINED_SCALE := Vector3(1, 0.35, 1)
+
+
+func _init() -> void:
+	damage.damaged.connect(_on_damage_taken)
+	damage.killed.connect(_on_damage_killed)
+	damage.team_of_owner = func() -> int: return team
 
 
 static func create(parent: Node3D, shape_id: String, xf: Transform3D, pal: String, p_team: int, p_hp: float) -> Structure:
@@ -156,17 +172,26 @@ func health_scale(health: float) -> void:
 	integrity = clampf(hp / maxf(max_hp, 1.0), 0.0, 1.0)
 
 
-## Shield-less structures take armour damage directly.
-func apply_hit(_shield_dmg: float, armor_dmg: float, attacker: Node = null, _hit_pos := Vector3.ZERO) -> void:
+## A hit: the plain call every weapon, ram and blast makes (a thin forward to apply_damage_event).
+func apply_hit(shield_dmg: float, armor_dmg: float, attacker: Node = null, hit_pos := Vector3.ZERO) -> void:
+	apply_damage_event(DamageEvent.make(shield_dmg, armor_dmg, attacker, hit_pos))
+
+
+## Host: the event through the structure's DamageTarget (its game's profile); shield-less structures take armour damage directly.
+func apply_damage_event(event: DamageEvent) -> void:
 	if not alive or not multiplayer.is_server():
 		return
-	hp -= armor_dmg
-	integrity = clampf(hp / maxf(max_hp, 1.0), 0.0, 1.0)
-	damaged.emit(self, attacker)
+	damage.apply_event(event)
+
+
+func _on_damage_taken(event: DamageEvent, _dealt: float) -> void:
+	damaged.emit(self, event.attacker)
 	if Net.is_online():
 		_apply_integrity.rpc(integrity)
-	if hp <= 0.0:
-		destroy(attacker)
+
+
+func _on_damage_killed(event: DamageEvent) -> void:
+	destroy(event.attacker)
 
 
 @rpc("authority", "call_remote", "unreliable_ordered")
@@ -242,8 +267,8 @@ func apply_repair(amount: float) -> void:
 	if not multiplayer.is_server() or amount <= 0.0 or not can_repair():
 		return
 	var was_alive := alive
-	hp = minf(max_hp, maxf(hp, 0.0) + amount)
-	var ratio := clampf(hp / maxf(max_hp, 1.0), 0.0, 1.0)
+	damage.apply_repair(amount)
+	var ratio := damage.make_ratio()
 	var now := Time.get_ticks_msec()
 	if Net.is_online() and (not was_alive or hp >= max_hp or now - _repair_sent_msec >= int(REPAIR_SEND_STEP * 1000.0)):
 		_repair_sent_msec = now
@@ -253,10 +278,9 @@ func apply_repair(amount: float) -> void:
 
 @rpc("authority", "call_remote", "reliable")
 func _apply_repaired(ratio: float) -> void:
-	integrity = ratio
-	hp = max_hp * ratio
-	if not alive and hp > 0.0:
-		alive = true
+	var was_alive := alive
+	damage.apply_synced_ratio(ratio)
+	if alive and not was_alive:
 		apply_intact_look()
 
 

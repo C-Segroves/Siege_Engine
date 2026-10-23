@@ -9,13 +9,20 @@ const BLASTER_ID := "bd:TURRET_BLASTER"
 ## Turret body for its death effects (metres; the collision sphere's size).
 const BODY_RADIUS := 3.0
 const BODY_HEIGHT := 3.0
+const DEFAULT_HP := 6000.0
 
 var side := 0
 ## The owning side as a team (other code asks vehicles and turrets alike for `team`).
 var team: int:
 	get: return side
-var hp := 6000.0
-var alive := true
+## Hit points and alive flag live in `damage` (engine/damage); the arena turret has no shield and no scale.
+var damage := DamageTarget.new()
+var hp: float:
+	get: return damage.hp
+	set(value): damage.hp = value
+var alive: bool:
+	get: return damage.alive
+	set(value): damage.alive = value
 var range_m := 220.0
 var refire := 1.4
 var shield_damage := 600.0
@@ -28,6 +35,12 @@ var shape_id := ""
 ## The wreck that replaces it (arena turret_shapes "destroyed": TURHLK, battledrome.md section 6); "" hides it.
 var wreck_shape_id := ""
 var _pal := ""
+
+
+func _init() -> void:
+	damage.hp = DEFAULT_HP
+	damage.max_hp = DEFAULT_HP
+	damage.killed.connect(_on_killed)
 
 
 static func create(parent: Node3D, shape_id: String, xf: Transform3D, pal: String, metres_per_unit: float) -> ArenaTurret:
@@ -53,13 +66,14 @@ func is_hostile(v: Node) -> bool:
 	return TeamRelations.is_hostile(side, int(v.get("team")) if v.get("team") != null else -1)
 
 
-func apply_hit(_s: float, armor: float, _attacker: Node = null, _p := Vector3.ZERO) -> void:
-	if not alive or not multiplayer.is_server():
-		return
-	hp -= armor
-	if hp <= 0.0:
-		apply_destroyed()
-		get_parent().fx("turret_down", [get_path()], true) if get_parent().has_method("fx") else null
+func apply_hit(shield: float, armor: float, attacker: Node = null, hit_pos := Vector3.ZERO) -> void:
+	if multiplayer.is_server():
+		damage.apply_event(DamageEvent.make(shield, armor, attacker, hit_pos))
+
+
+func _on_killed(_event: DamageEvent) -> void:
+	apply_destroyed()
+	get_parent().fx("turret_down", [get_path()], true) if get_parent().has_method("fx") else null
 
 
 ## Destroyed (host, or a client told by the turret_down message): its game's turret death, then hidden.

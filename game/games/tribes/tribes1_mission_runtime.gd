@@ -187,10 +187,11 @@ func set_objective(index: int, text: String) -> void:
 
 ## calcRadiusDamage(object, position, radius, damage, ...): soldiers within the radius take the damage.
 func radius_damage(pos: Vector3, radius: float, amount: float) -> void:
-	var c := TribesSimObjects.to_engine(pos)
+	var soldiers: Array = []
 	for h in battle.vehicles.values():
-		if h is Infantry and (h as Infantry).alive and (h as Infantry).global_position.distance_to(c) <= radius:
-			KillText.apply_caused_hit(h, [0.0, amount * TRIBES_DAMAGE_SCALE, null], KillText.CAUSE_SCRIPTED)
+		if h is Infantry and (h as Infantry).alive:
+			soldiers.append(h)
+	ScriptedDamage.apply_area(soldiers, TribesSimObjects.to_engine(pos), radius, amount * TRIBES_DAMAGE_SCALE, false)
 
 
 ## The item name of an infantry weapon id (Player::getMountedItem).

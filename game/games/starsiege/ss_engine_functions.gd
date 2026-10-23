@@ -368,42 +368,21 @@ func _damage_area(_n: String, a: Array):
 	var amount := SSScript.num(_arg(a, 5, 0))
 	var c := tree.position_of(did) + _orig_point(a, 1)
 	var r := SSScript.num(_arg(a, 4))
-	var targets := []
+	var nodes: Array = []
 	for k in tree.objects:
-		var n := tree.node_of(k)
-		if n != null and n.has_method("apply_hit") and n.global_position.distance_to(c) <= r:
-			targets.append(k)
-	for t in targets:
-		var n := tree.node_of(t)
-		var falloff := clampf(1.0 - n.global_position.distance_to(c) / maxf(r, 1.0), 0.0, 1.0)
-		_damage(n, amount * rt.damage_factor * falloff)
+		nodes.append(tree.node_of(k))
+	ScriptedDamage.apply_area(nodes, c, r, amount * rt.damage_factor, true, _damage)
 	return ""
 
 
-## Scripted damage: Hercs take it spread over all components in proportion to their hit points
-## (a heavy hit wounds, only damage >= the total destroys) and then run the engine's death check;
-## structures take it directly.
+## Scripted damage: Hercs take it spread over their components, structures take it directly.
 static func _damage(n: Node, amount: float) -> void:
 	if n == null or not n.has_method("apply_hit") or not n.get("alive"):
 		return
-	if not n is Herc:
-		KillText.apply_caused_hit(n, [0.0, amount, null, n.global_position], KillText.CAUSE_SCRIPTED)
-		return
-	var h := n as Herc
-	var total := 0.0
-	for c in h.components:
-		total += float(c.hp)
-	if total <= 0.0:
-		return
-	var f := clampf(amount / total, 0.0, 1.0)
-	var mx := 0.0
-	var sum := 0.0
-	for c in h.components:
-		c.hp = 0.0 if f >= 1.0 else float(c.hp) * (1.0 - f)
-		sum += float(c.hp)
-		mx += float(c.max)
-	h.integrity = sum / maxf(mx, 1.0)
-	KillText.apply_caused_hit(h, [0.0, 0.0, null, h.global_position], KillText.CAUSE_SCRIPTED)
+	if n is Herc:
+		ScriptedDamage.apply_spread(n as Herc, amount)
+	else:
+		ScriptedDamage.apply(n, amount)
 
 
 func _heal_object(_n: String, a: Array):

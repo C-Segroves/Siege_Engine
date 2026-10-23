@@ -93,7 +93,7 @@ static func _apply_ram_structure(mover: Herc, st: Structure, moved_at: Vector3, 
 	if impact <= RAM_THRESHOLD or not st.alive:
 		return
 	mover.apply_collision_damage(impact, st, contact)
-	st.apply_hit(0.0, impact, mover, mover.global_position)
+	st.apply_damage_event(DamageEvent.make_ram(impact, mover, mover.global_position))
 
 
 static func _apply_run_over(mover: Herc, soldier: Infantry, moved_at: Vector3) -> void:

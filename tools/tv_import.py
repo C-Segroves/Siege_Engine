@@ -5,7 +5,8 @@
 The game root is the unpacked installer's "app/Tribes Vengeance" folder (tools/tv_unpack.py makes it; a zip is
 unpacked into a short scratch folder first and the scratch is deleted afterwards).
 
-Also terrain, static meshes and editor brushes (tv_terrain, tv_statics, tv_bsp; --only=<map> converts one map).
+Also terrain, static meshes and editor brushes (tv_terrain, tv_statics, tv_bsp; --only=<map> converts one map) and the drivable
+vehicles (tv_vehicles: hercs.json, weapons_engine.json, vehicle_seats.json and the maps' "vehicles" lists).
 Writes: campaign/campaign.json (16 chapters, 29 maps in play order: names, objective text, a dialogue excerpt for
 the briefing), maps/<Id>/map.json (player and NPC spawns, objective markers as waypoints, placeholder flat ground,
 positions in metres) and maps/_index.json. No geometry yet. Everything is read from the user's own copy.
@@ -31,6 +32,7 @@ import tv_script  # noqa: E402
 import tv_skeletal  # noqa: E402
 import tv_statics  # noqa: E402
 import tv_terrain  # noqa: E402
+import tv_vehicles  # noqa: E402
 
 PACK = 'tribes_v'
 METRES_PER_UU = 1.0 / 70.0          # the Pawn collision is 156 units tall; the engine soldier is 2.2 m (docs/formats/tribes_vengeance.md)
@@ -162,6 +164,8 @@ def export_map(pkg, map_id, name, props=None):
             waypoints.append({'pos': actor_pos(target[1]), 'objective': key, 'marker': marker})
     placed = []
     for _e, cls, p in actors:
+        if tv_vehicles.vehicle_id_of(cls):               # drivable: a vehicle record below, not scenery
+            continue
         mesh = tv_skeletal.prop_for_class(cls)
         shape = (props or {}).get(mesh) if mesh else None
         if shape:
@@ -177,6 +181,7 @@ def export_map(pkg, map_id, name, props=None):
          'mode_objects': [], 'mode_settings': {},
          'bounds': {'min': [round(min(xs) - 50, 1), round(min(zs) - 50, 1)], 'max': [round(max(xs) + 50, 1), round(max(zs) + 50, 1)]},
          'ground_y': round(ground, 3), 'environment': {}, 'interiors': [], 'statics': [], '_props': placed, 'spawns': spawns + [],
+         'vehicles': tv_vehicles.export_vehicles(actors, to_world, tv_statics._basis, _team_of, yaw_degrees),
          'stations': [], 'power': [], 'switch': [], 'power_groups': [], 'waypoints': waypoints, 'cameras': [],
          'npc_spawns': npcs, 'objectives': objectives,
          'notes': 'Tribes: Vengeance %s: terrain heightmap, textured static meshes and the editor brushes (approximate '
@@ -259,6 +264,7 @@ def import_campaign(game_root, pack_dir, log=print, only=None):
     else:
         with open(props_file, encoding='utf-8') as f:
             props = json.load(f)['props']
+    log('vehicles: %d drivable' % tv_vehicles.export(game_root, pack_dir, log=log))      # after the props (their shapes) and the weapon sounds
     prompts = read_int(os.path.join(system_dir(game_root), 'Localisation', 'GUI', 'Prompts.int'))
     voice_files = tv_audio.find_voice_files(game_root)
     shape_cache = {}
@@ -358,7 +364,7 @@ def main(argv):
             root = find_game_root(src)
         os.makedirs(pack_dir, exist_ok=True)
         res = import_campaign(root, pack_dir, only=only or None)
-        write_pack_json(pack_dir, {'provides': {'missions': res['missions']}})
+        write_pack_json(pack_dir, {'provides': {'missions': res['missions'], 'hercs': len(tv_vehicles.VEHICLES)}})
         print(res)
     finally:
         if scratch and not keep:

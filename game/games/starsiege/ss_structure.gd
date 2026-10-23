@@ -15,7 +15,9 @@ const DEFAULT_FIRE_HEIGHT := 6.0
 const FIRE_SPREAD := 0.3
 
 var ss_id := 0
-var indestructible := false
+var indestructible: bool:
+	get: return damage.profile.indestructible
+	set(value): damage.profile.indestructible = value
 ## Engine-scale hit points at which the shape catches fire (0 = never) and its burn damage per second.
 var fire_threshold := 0.0
 var burn_rate := 0.0
@@ -68,15 +70,15 @@ func is_burning() -> bool:
 	return alive and fire_threshold > 0.0 and burn_rate > 0.0 and hp <= fire_threshold
 
 
-func apply_hit(shield_dmg: float, armor_dmg: float, attacker: Node = null, hit_pos := Vector3.ZERO) -> void:
+## A hit is remembered (the burn credits it) and reported to the scripts (onAttacked) even when the shape takes none.
+func apply_damage_event(event: DamageEvent) -> void:
 	if not alive:
 		return
-	if attacker != null:
-		_last_attacker = attacker
-	if not indestructible:
-		super.apply_hit(shield_dmg, armor_dmg, attacker, hit_pos)
+	if event.attacker != null:
+		_last_attacker = event.attacker
+	super.apply_damage_event(event)
 	if multiplayer.is_server():
-		attacked.emit(self, attacker)
+		attacked.emit(self, event.attacker)
 
 
 func _physics_process(delta: float) -> void:
@@ -96,10 +98,7 @@ func can_repair() -> bool:
 func _apply_burn(delta: float) -> void:
 	if _fire == null:
 		_fire = _build_fire()
-	hp -= burn_rate * delta
-	integrity = clampf(hp / maxf(max_hp, 1.0), 0.0, 1.0)
-	if hp <= 0.0:
-		destroy(_last_attacker if is_instance_valid(_last_attacker) else null)
+	damage.apply_event(DamageEvent.make_burn(burn_rate * delta, _last_attacker if is_instance_valid(_last_attacker) else null))
 
 
 func destroy(killer: Node = null) -> void:

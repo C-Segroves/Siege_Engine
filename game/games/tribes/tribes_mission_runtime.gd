@@ -300,24 +300,21 @@ func move_object(id: int, p: Vector3) -> void:
 
 ## The damage level of a soldier or vehicle as a share of its health (0 = unhurt, 1 = destroyed).
 func damage_level(id: int) -> float:
-	var h := _damageable(id)
-	return 1.0 - h.integrity if h else 0.0
+	return ScriptedDamage.make_level(_damageable(id))
 
 
 func set_damage_level(id: int, level: float) -> void:
 	var s := actors.soldier_of(id)
 	if s == null or not s.alive:
 		return
-	var c: Dictionary = s.components[0]
-	c.hp = float(c.max) * clampf(1.0 - level, 0.0, 1.0)
-	s.integrity = HercDamage.integrity_of(s.components)
+	ScriptedDamage.apply_level(s, level)
 
 
 ## Damage (the remake's units) to a soldier or a vehicle the script means.
 func apply_damage(id: int, amount: float) -> void:
 	var h := _damageable(id)
 	if h and h.alive:
-		KillText.apply_caused_hit(h, [0.0, amount, null, h.global_position], KillText.CAUSE_SCRIPTED)
+		ScriptedDamage.apply(h, amount)
 
 
 func _damageable(id: int) -> Herc:

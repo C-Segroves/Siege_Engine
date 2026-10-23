@@ -158,8 +158,50 @@ named character; the class defaults that hold the real mesh are not read).
 Pod, Tank, AssaultShip, Buggy and their gunners, base objects (turret, catapult, generator, resupply, sensor tower, inventory station,
 spawn pads) and deployables are skeletal meshes: exported as rest-pose shapes `tv_prop_<mesh>` (`gameplay/props.json`), bound to the
 root bone when their influence table is not found, and placed in the maps where a `Vehicle*`, `BaseTurret*`, `BaseCatapult` ... actor
-stands (the class -> mesh table `PROP_CLASSES`; the real assignment is in class defaults). They are scenery: no driving, no turret
-control, no animation.
+stands (the class -> mesh table `PROP_CLASSES`; the real assignment is in class defaults). The base objects and deployables are scenery:
+no animation. The four vehicles are drivable (next section).
+
+## Drivable vehicles (`tools/tv_vehicles.py`, `game/games/tribes_v/tv_vehicle_fleet.gd`)
+Pod ("fighter"), Tank ("jump tank"), AssaultShip and Buggy ("rover") are catalog vehicles of the pack (`tribes_v:POD`, `TANK`,
+`ASSAULT_SHIP`, `BUGGY`; `gameplay/hercs.json`, engine schema 1, category "vehicle", fixed loadout, crew rules "tribes2": a soldier boards
+by touching the hull, heavy armour may not pilot), run by the shared Flyer / Herc code. Everything below is read from the UnrealScript class
+defaults (`ue2_classes.py`: VehicleClasses.pkg over Gameplay.u; 1/70 m per unit, 65536 rotation units per turn, one health point = 26.4
+Earthsiege points):
+
+| | Pod | Tank | AssaultShip | Buggy |
+|---|---|---|---|---|
+| class | VehiclePod | VehicleTank | VehicleAssaultShip | VehicleBuggy |
+| Health -> hull | 140 -> 3696 hp | 800 -> 21120 | 550 -> 14520 | 450 -> 11880 |
+| kind (engine) | flyer | tank | flyer | wheeled |
+| TopSpeed | 4400 uu/s = 62.9 m/s | 5000 uu/s, scaled to 17.0 m/s | 2100 = 30.0 m/s | 13250, scaled to 45 m/s |
+| mass | HavokDataPod hkMass 1500 | ChassisMass 3000 | hkMass 10000 | ChassisMass 3000 |
+| seats (`positions`) | 1 | 2: driver, gunner | 3: pilot, 2 gunners | 6: driver, gunner, 4 passengers |
+| turret | none | cannon: +54.9 / -27.5 deg, 132 deg/s (cannonMaximum / MinimumPitch, cannonClientTurnRate 24000) | none (guns fixed to the crew aim) | gun: +65.9 / -16.5 deg, 165 deg/s (gunnerClientTurnRate 30000) |
+
+Aircraft (`flier_data` for `FlightPresets.make_tribes_datablock`): maxSpeed = TopSpeed; accel = forward force x ForceScale (250) / hkMass as
+a share of the top speed per second (Pod 9.5 m/s^2, ship 7.9); lift from the up thrust force the same way; maxPitch = maximumAircraftPitch
+(Pod 4000 = 0.38 rad, ship 5000); hoverHeight half of gearTraceLength (600 uu); bank 0.5 rad x angularBankScale (clamped 0.15..0.5).
+The cars (Havok wheel physics, no speed limit in the defaults): the Rover's TopSpeed is capped at the Tribes 2 Wildcat's 45 m/s and the
+tank's scaled by the same factor; reversing at 0.4 x, full speed in 5 s, turn rates those of the Beowulf (1.2 rad/s) and the Wildcat (2.0).
+These four numbers are remake choices, not decoded.
+Weapons (`gameplay/weapons_engine.json`, category "vehicle", no energy use; the fields of the hand weapons, `tv_weapons.py`):
+FIGHTER rockets (WeaponVehicleFighterRocket 2.2/s, 13000 uu/s, radius 300 uu, 35 dmg; two guns share the rate), TANK_CANNON
+(WeaponVehicleTank 0.32/s, 8000 uu/s, radius 1600, 140), TANK_CHAINGUN (the gunner's WeaponVehicleTurretSentry 16/s, 30000 uu/s, 14),
+SHIP_BOMB (WeaponVehicleAssaultShipBomb 0.32/s, a lobbed 4000 uu/s bomb, gravity 1.2x level, radius 1600, 150), SHIP_AA (the two turrets,
+ProjectileAntiAircraft 2.2/s, radius 900, 25), BUGGY_AA (3/s). Fire groups: group 1 the guns (rockets, chaingun, AA), group 2 the cannon and
+the bomb (the Beowulf's arrangement). A gunner aboard works every weapon of the vehicle (`TurretCrew`); alone the pilot fires them.
+Shapes: the rest-pose props get a second-root `turret` node (tank, buggy: yaw about the world's up axis), `muzzlepoint` nodes at the barrel
+tips of the turret models (`tv_prop_tankcannon`, `tankgunner`, `assaultshipgun`, and `tv_prop_turretbuggy` exported from Weapons.pkg) and the
+guns hang on them as weapon models. The wheels, shocks, track teeth, wings and landing gear are not animated (no influence table is decoded
+for them). Seat riders are not drawn (the seat offsets are raw bytes in the class defaults).
+Maps: a placed `Vehicle*` actor becomes a record of `map.json` "vehicles" ({vehicle, actor, label, pos, basis, yaw, team_name,
+health_modifier, ai_goals}); the vehicle meshes are no longer scenery statics (54 in the 33 maps). `TVVehicleFleet` makes each appear within 450 m
+of the player, standing on the floor under the actor: parked and empty (boardable) when it is the player's side's or nobody's, crewed by the
+AI pilot (`FlyerAI` loop of 150 m, `AIPilot` to and fro; they attack what they meet) when it is the enemy's and the actor has AI goals. The goal
+objects (VehicleGuard, VehiclePatrol, VehicleAttack ...) and the vehicle pads that spawn vehicles (`BaseObjectVehicleSpawn*`: one in SP-Proof,
+still drawn as a prop) are not decoded. A script label addresses the vehicle: ActionDestroy / ActionEnable and MessageDeath work as for soldiers.
+Tests: `tests/tv_vehicles_check` (catalog, maps, boarding, driving, firing, destruction, AI crews), windowed `tests/tv_vehicle_shots`
+(`TV_SHOT_DIR`), the facing is `vehicle_facing_check`'s.
 
 ## Mission scripts (done, `tools/tv_script.py`, `game/games/tribes_v/tv_script_run.gd`)
 A map's logic is its `Script` actors. Each has a Label (the name `targetScript` uses), a MessageClass (the event) with TriggeredBy
@@ -191,7 +233,7 @@ Run time is roughly 15 to 25 minutes (inflating 3 GB, innoextract, 33 maps).
 ## Remaining geometry work
 - Compiled BSP (`Model`): points, vectors, nodes, surfaces, vertices to replace the brush shells (L).
 - Terrain layers/detail/holes, `TerrainSector` visibility; decoration layers (grass, trees) (M).
-- Weapon first-person skeletal meshes and the vehicle bindings / animations (L); the unplayed speech (about half of the 6353 files, MP quick chat).
+- Weapon first-person skeletal meshes and the vehicle wheel / wing / track animations (L); the unplayed speech (about half of the 6353 files, MP quick chat).
 - AI goals, cinematics and the remaining script messages (M); the class defaults (real meshes, sounds, weapons per character) (M).
 - Baked lightmaps (BSP, terrain) and vertex lighting, water, sky boxes (`Content/Art/SkyBoxes`), particle emitters.
 

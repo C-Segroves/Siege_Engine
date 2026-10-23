@@ -80,12 +80,9 @@ static func apply_shield(soldier: Infantry, damage: float, type: String) -> floa
 	per_point /= float((p.get("weak_types", {}) as Dictionary).get(type, 1.0))
 	if per_point <= 0.0:
 		return damage
-	var capacity := soldier.capacitor / per_point
-	if damage <= capacity:
-		soldier.capacitor -= damage * per_point
-		return 0.0
-	soldier.capacitor = 0.0
-	return damage - capacity
+	var left := ShieldAbsorb.make_through_energy(soldier.capacitor, per_point, damage)
+	soldier.capacitor = left[1]
+	return left[0]
 
 
 ## How far homing missiles aimed at a jamming soldier turn off (the engine's ECM effect, Projectile): the
