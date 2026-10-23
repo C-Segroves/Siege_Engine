@@ -130,7 +130,7 @@ def actor_pos(props):
     return to_world(U.vec3(props['Location']))
 
 
-def export_map(pkg, map_id, name, props=None):
+def export_map(pkg, map_id, name, props=None, pad_table=None):
     """The engine map dictionary of one mission package, and its objective keys in script order."""
     actors = read_actors(pkg)
     by_label = {p.get('Label'): (c, p) for _e, c, p in actors if p.get('Label')}
@@ -164,7 +164,7 @@ def export_map(pkg, map_id, name, props=None):
             waypoints.append({'pos': actor_pos(target[1]), 'objective': key, 'marker': marker})
     placed = []
     for _e, cls, p in actors:
-        if tv_vehicles.vehicle_id_of(cls):               # drivable: a vehicle record below, not scenery
+        if tv_vehicles.vehicle_id_of(cls) or tv_vehicles.is_pad(cls):       # drivable or a pad: a record below, not scenery
             continue
         mesh = tv_skeletal.prop_for_class(cls)
         shape = (props or {}).get(mesh) if mesh else None
@@ -177,12 +177,13 @@ def export_map(pkg, map_id, name, props=None):
     all_pos = [actor_pos(p) for _e, c, p in actors if not tv_skeletal.prop_for_class(c)]
     xs, zs = [q[0] for q in all_pos] or [0.0], [q[2] for q in all_pos] or [0.0]
     ground = (min(s['pos'][1] for s in spawns) - SPAWN_LIFT_M) if spawns else 0.0
+    pads = tv_vehicles.export_pads(actors, pad_table or {}, to_world, tv_statics._basis, _team_of, yaw_degrees)
     m = {'pack': PACK, 'id': map_id, 'name': name, 'source': map_id + '.tvm', 'modes': [], 'original_modes': [],
          'mode_objects': [], 'mode_settings': {},
          'bounds': {'min': [round(min(xs) - 50, 1), round(min(zs) - 50, 1)], 'max': [round(max(xs) + 50, 1), round(max(zs) + 50, 1)]},
          'ground_y': round(ground, 3), 'environment': {}, 'interiors': [], 'statics': [], '_props': placed, 'spawns': spawns + [],
          'vehicles': tv_vehicles.export_vehicles(actors, to_world, tv_statics._basis, _team_of, yaw_degrees),
-         'stations': [], 'power': [], 'switch': [], 'power_groups': [], 'waypoints': waypoints, 'cameras': [],
+         'vehicle_pads': pads, 'stations': tv_vehicles.make_pad_stations(pads), 'power': [], 'switch': [], 'power_groups': [], 'waypoints': waypoints, 'cameras': [],
          'npc_spawns': npcs, 'objectives': objectives,
          'notes': 'Tribes: Vengeance %s: terrain heightmap, textured static meshes and the editor brushes (approximate '
                   'room shells) are converted, with the sun, zone ambient, fog and point lights; the compiled BSP, lightmaps, water, decorations and skeletal models are not. '
@@ -251,6 +252,25 @@ def _ci_file(folder, name):
     return None
 
 
+def load_texts(game_root):
+    """(chapters of Campaign.ini, {chapter number: its text sections}, the prompt sections): the mission text of every campaign map."""
+    system = os.path.join(game_root, 'Content', 'System')
+    loc = os.path.join(system, 'Localisation', 'Maps', 'text files')
+    chapters = parse_campaign_ini(read_text(os.path.join(system, 'Campaign.ini')))
+    chapter_texts = {}
+    for f in os.listdir(loc):
+        m = re.match(r'SP-(\d\d)', f)
+        if m:
+            chapter_texts[int(m.group(1))] = read_int(os.path.join(loc, f))
+    prompts = read_int(os.path.join(system_dir(game_root), 'Localisation', 'GUI', 'Prompts.int'))
+    return chapters, chapter_texts, prompts
+
+
+def make_map_texts(chapter_texts, prompts, number):
+    """{lower-case key: text} the scripts of a chapter's maps look their speech and prompts up in."""
+    return {k.lower(): v for sec in list(tx_sections(chapter_texts.get(number, {}))) + list(prompts.values()) for k, v in sec.items()}
+
+
 def import_campaign(game_root, pack_dir, log=print, only=None):
     idx = tv_assets.PackageIndex(game_root)
     tv_audio.export_sounds(game_root, pack_dir, log=log)
@@ -265,18 +285,12 @@ def import_campaign(game_root, pack_dir, log=print, only=None):
         with open(props_file, encoding='utf-8') as f:
             props = json.load(f)['props']
     log('vehicles: %d drivable' % tv_vehicles.export(game_root, pack_dir, log=log))      # after the props (their shapes) and the weapon sounds
-    prompts = read_int(os.path.join(system_dir(game_root), 'Localisation', 'GUI', 'Prompts.int'))
+    chapters, chapter_texts, prompts = load_texts(game_root)
+    pad_table = tv_vehicles.make_pad_table(game_root)
     voice_files = tv_audio.find_voice_files(game_root)
     shape_cache = {}
     content = os.path.join(game_root, 'Content')
     system, maps_dir = os.path.join(content, 'System'), os.path.join(content, 'Maps')
-    loc = os.path.join(system, 'Localisation', 'Maps', 'text files')
-    chapters = parse_campaign_ini(read_text(os.path.join(system, 'Campaign.ini')))
-    chapter_texts = {}
-    for f in os.listdir(loc):
-        m = re.match(r'SP-(\d\d)', f)
-        if m:
-            chapter_texts[int(m.group(1))] = read_int(os.path.join(loc, f))
     out_maps = os.path.join(pack_dir, 'maps')
     os.makedirs(os.path.join(pack_dir, 'campaign'), exist_ok=True)
     missions, index = [], []
@@ -294,7 +308,7 @@ def import_campaign(game_root, pack_dir, log=print, only=None):
             pkg = U.load(path)
             pkg.stem = entry['map'].lower()
             title = read_int(os.path.join(system, entry['map'] + '.int')).get('LevelSummary', {}).get('Title', '').strip()
-            m = export_map(pkg, os.path.splitext(os.path.basename(path))[0], title or entry['map'], props)
+            m = export_map(pkg, os.path.splitext(os.path.basename(path))[0], title or entry['map'], props, pad_table)
             m['statics'], failed = tv_statics.export_statics(idx, pkg, pack_dir, METRES_PER_UU, shape_cache)
             m['statics'].extend(m.pop('_props'))
             if failed:
@@ -304,7 +318,7 @@ def import_campaign(game_root, pack_dir, log=print, only=None):
                 m['statics'].insert(0, bsp)
             m['environment'], m['point_lights'] = tv_lights.export_lighting(pkg, to_world, METRES_PER_UU)
             m['sounds'], m['voice'] = map_sounds(pkg, voice_files, pack_dir)
-            texts = {k.lower(): v for sec in list(tx_sections(chapter_texts.get(ch['number'], {}))) + list(prompts.values()) for k, v in sec.items()}
+            texts = make_map_texts(chapter_texts, prompts, ch['number'])
             script = tv_script.compile_map(pkg, to_world, texts, METRES_PER_UU)
             m['player_team'] = next((sp.get('team_name', '') for sp in m['spawns'] if sp.get('team_name')), '')
             keys = [q['key'] for q in m['objectives'] if q['key'] in objective_text]

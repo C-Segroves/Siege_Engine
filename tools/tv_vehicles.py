@@ -14,11 +14,13 @@ Units: 1/70 m per unreal unit; one health point = 26.4 Earthsiege points (tools/
 It writes, for the pack:
   gameplay/hercs.json            the four vehicles (engine schema 1, category "vehicle", docs/formats/tribes_vehicles.md section 3);
   gameplay/weapons_engine.json   their weapons ("category": "vehicle");
-  gameplay/vehicle_seats.json    seat roles (pilot / gunner / passenger);
+  gameplay/vehicle_seats.json    seat roles (pilot / gunner / passenger), the node a drawn rider stands on and his pose (tv_vehicle_parts);
   shapes/tv_prop_*.json          the shapes get a turret node (a second root, so the yaw is about the world's up axis) and "muzzlepoint"
                                  nodes at the barrel tips; the buggy's gun shape is exported from Weapons.pkg;
 and for the maps (map.json "vehicles": the placed Vehicle* actors, drawn as statics until now, become vehicle records:
-class, vehicle id, position, orientation, team, label and the actor's healthModifier).
+class, vehicle id, position, orientation, team, label and the actor's healthModifier), "vehicle_pads" and the pads' "stations": the BaseObjectVehicleSpawn* actors),
+and the mission scripts of the installed maps are compiled again for the vehicle goal and spawn ops (retrofit_scripts).
+The shapes, their moving parts, seat nodes and the riders' poses are tv_vehicle_parts.py's.
 
     python tools/tv_vehicles.py <game root> [pack folder]        (the game root holds Content/ and Program/)
 """
@@ -34,6 +36,7 @@ sys.path.insert(0, HERE)
 import infantry_weapon_json as W  # noqa: E402
 import siege_paths as P  # noqa: E402
 import tv_skeletal as SK  # noqa: E402
+import tv_vehicle_parts as VP  # noqa: E402
 import tv_weapons as TW  # noqa: E402
 import ue2_package as U  # noqa: E402
 
@@ -217,18 +220,6 @@ def flier_data(d, hk, top_mps):
             'mass': mass, 'length_m': 0.0}
 
 
-def seat_records(roles, gunner_pitch):
-    """vehicle_seats.json rows: pilot, the gunner with its pitch range (degrees), passengers. Riders are not drawn (the class data
-    gives seat offsets as raw property bytes, not decoded), so shown is false."""
-    rows = []
-    for i, role in enumerate(roles):
-        row = {'seat': i, 'role': role, 'node': 'mount0', 'shown': False, 'pose': ['sitting'], 'weapon_shown': False}
-        if role == 'gunner':
-            row['pitch_min_deg'], row['pitch_max_deg'] = gunner_pitch
-        rows.append(row)
-    return rows
-
-
 class Builder:
     def __init__(self, game_root, pack_dir):
         self.src = TW.Source(game_root)
@@ -274,7 +265,7 @@ class Builder:
         w['fx'] = fx
         return w, effects
 
-    def vehicle(self, key, spec, weapon_records):
+    def vehicle(self, key, spec, weapon_records, body):
         d = self.classes.defaults(spec['cls'])
         hk = self.classes.defaults(str(d.get('havokDataClass', ''))) if self.classes.has(str(d.get('havokDataClass', ''))) else {}
         js = read_shape(self.pack_dir, spec['shape'])
@@ -316,7 +307,8 @@ class Builder:
                        'note': 'pilot at seat 0 (heavy armour may not pilot: heavyAttemptedToPilot); the gunner works the turret weapons '
                                'of the vehicle (TurretCrew); positions count %d in the class defaults' % len(spec['seats'])}
         rec['pilotable'] = bool(rec.get('guns'))
-        return rec, seat_records(spec['seats'], gunner)
+        rec['parts'] = body['parts']
+        return rec, VP.seat_records(spec['seats'], body['rows'], body['placed'], gunner)
 
     def add_mounts(self, key, rec, d, js, weapon_records):
         """guns / default_loadout / turret of the vehicle (positions: see MOUNTS)."""
@@ -375,6 +367,9 @@ def export(game_root, pack_dir=None, log=print):
     idx = tv_assets.PackageIndex(game_root)
     b = Builder(game_root, pack_dir)
     export_turret_shapes(b.src, idx, pack_dir, log)
+    bodies = VP.export_vehicle_bodies(idx, game_root, pack_dir, log)       # the shapes with their bones, sequences and seat nodes
+    for body in bodies.values():
+        VP.write_shape(pack_dir, body['stem'], body['js'])
     muzzles = prepare_shapes(pack_dir, log)
     weapons, effects = [], {}
     for key in WEAPONS:
@@ -394,9 +389,10 @@ def export(game_root, pack_dir=None, log=print):
         if js is None:
             log('vehicle %s skipped: shape %s missing' % (key, spec['shape']))
             continue
-        rec, rows = b.vehicle(key, spec, weapons)
+        rec, rows = b.vehicle(key, spec, weapons, bodies[key])
         hercs[key] = rec
         seats['%s:%s' % (PACK, key)] = rows
+    log('rider poses added to %d bodies' % VP.patch_rider_poses(idx, game_root, pack_dir, log))
     W.write_json(os.path.join(pack_dir, HERC_FILE), hercs)
     W.write_json(os.path.join(pack_dir, SEATS_FILE), {'pack': PACK, 'engine_schema': 1, 'vehicles': seats})
     log('vehicles: %d, vehicle weapons: %d' % (len(hercs), len(weapons)))
@@ -427,6 +423,78 @@ def export_vehicles(actors, to_world, basis_of, team_of, yaw_of):
     return out
 
 
+PAD_PREFIX = 'BaseObjectVehicleSpawn'      # the pads: ...Buggy, ...Fighter, ...Tank, ...AssaultShip
+PAD_SHAPE_PREFIX = 'tv_prop_'
+
+
+def is_pad(cls):
+    return cls.startswith(PAD_PREFIX)
+
+
+def make_pad_table(game_root):
+    """{pad actor class: {vehicle, shape, spawn_s, offset_m, abandon_radius_m, abandon_s}} from the class defaults (VehicleClass, Mesh,
+    spawnDuration, spawnOffsetHeight, abandonmentDesturctionStartRadius / Period: an empty vehicle left that far from its pad that long is
+    destroyed, so the pad can build the next)."""
+    import ue2_classes
+    classes = ue2_classes.ClassIndex(game_root)
+    table = {}
+    for name in classes.by_name:
+        d = classes.defaults(name) if is_pad(name) else {}
+        vehicle = vehicle_id_of(str(d.get('VehicleClass', '')))
+        if vehicle:
+            table[name] = {'vehicle': vehicle, 'shape': '%s:%s%s' % (PACK, PAD_SHAPE_PREFIX, str(d.get('Mesh', '')).lower()),
+                           'spawn_s': float(d.get('spawnDuration', 0.0)), 'offset_m': round(TW.uu(d.get('spawnOffsetHeight', 0.0)), 3),
+                           'abandon_radius_m': round(TW.uu(d.get('abandonmentDesturctionStartRadius', 0.0)), 1),
+                           'abandon_s': float(d.get('abandonmentDesturctionPeriod', 0.0))}
+    return table
+
+
+def export_pads(actors, table, to_world, basis_of, team_of, yaw_of):
+    """The map's vehicle pads [{vehicle, actor, label, shape, pos, basis, yaw, team_name, spawn_s, offset_m}]: a pad holds its vehicle
+    (the script's label is the pad's label + "vehicle") and builds a new one `spawn_s` seconds after it is gone."""
+    out = []
+    for _e, cls, p in actors:
+        info = table.get(cls)
+        if info is None:
+            continue
+        rec = dict(info)
+        rec.update({'actor': cls, 'label': p.get('Label', ''), 'pos': to_world(U.vec3(p['Location'])),
+                    'basis': [[round(float(x), 5) for x in row] for row in basis_of(p.get('Rotation'), [1.0, 1.0, 1.0])],
+                    'yaw': yaw_of(p.get('Rotation')), 'team_name': team_of(p)})
+        out.append(rec)
+    return out
+
+
+def make_pad_stations(pads):
+    """The pads as vehicle stations of the shared Tribes station code (TribesStations): neutral, one vehicle each, drawn as the pad."""
+    return [{'kind': 'vehicle', 'shape': pad['shape'], 'pos': pad['pos'], 'basis': pad['basis'], 'yaw': pad['yaw'], 'team': -1,
+             'vehicle': pad['vehicle'], 'label': pad['label'], 'lift_m': pad['offset_m'], 'collide': True} for pad in pads]
+
+
+def retrofit_scripts(game_root, pack_dir, log=print):
+    """Compiles the mission scripts of the installed maps again (the goal and vehicle ops) from the original map packages."""
+    import tv_import as T
+    import tv_script
+    chapters, chapter_texts, prompts = T.load_texts(game_root)
+    maps_dir = os.path.join(game_root, 'Content', 'Maps')
+    count = 0
+    for ch in chapters:
+        texts = T.make_map_texts(chapter_texts, prompts, ch['number'])
+        for entry in ch['maps']:
+            src = T._ci_file(maps_dir, entry['map'] + '.tvm')
+            target = os.path.join(pack_dir, 'maps', os.path.splitext(os.path.basename(src))[0], 'script.json') if src else ''
+            if not target or not os.path.isfile(target):
+                continue
+            pkg = U.load(src)
+            pkg.stem = entry['map'].lower()
+            script = tv_script.compile_map(pkg, T.to_world, texts, METRES_PER_UU)
+            with open(target, 'w', encoding='utf-8') as f:
+                json.dump(script, f, separators=(',', ':'), ensure_ascii=False)
+            count += 1
+    log('scripts compiled again: %d' % count)
+    return count
+
+
 def retrofit_maps(game_root, pack_dir, log=print):
     """Gives the installed maps their `vehicles` list and takes the vehicle meshes out of their statics (what tv_import does on a fresh
     import), reading the actors of the original map packages again."""
@@ -436,6 +504,7 @@ def retrofit_maps(game_root, pack_dir, log=print):
     with open(idx_path, encoding='utf-8') as f:
         ids = [m['id'] for m in json.load(f)]
     maps_dir = os.path.join(game_root, 'Content', 'Maps')
+    pad_table = make_pad_table(game_root)
     total = 0
     for map_id in ids:
         path = os.path.join(pack_dir, 'maps', map_id, 'map.json')
@@ -446,9 +515,13 @@ def retrofit_maps(game_root, pack_dir, log=print):
             continue
         pkg = U.load(src)
         pkg.stem = map_id.lower()
-        vehicles = export_vehicles(T.read_actors(pkg), T.to_world, tv_statics._basis, T._team_of, T.yaw_degrees)
-        m['statics'] = [s for s in m.get('statics', []) if not is_vehicle_static(s)]
+        actors = T.read_actors(pkg)
+        vehicles = export_vehicles(actors, T.to_world, tv_statics._basis, T._team_of, T.yaw_degrees)
+        pads = export_pads(actors, pad_table, T.to_world, tv_statics._basis, T._team_of, T.yaw_degrees)
+        m['statics'] = [s for s in m.get('statics', []) if not is_vehicle_static(s) and not is_pad(str(s.get('actor', '')))]
         m['vehicles'] = vehicles
+        m['vehicle_pads'] = pads
+        m['stations'] = [s for s in m.get('stations', []) if not s.get('vehicle')] + make_pad_stations(pads)
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(m, f, indent=1, ensure_ascii=False)
         total += len(vehicles)
@@ -479,6 +552,7 @@ def main(argv):
     pack_dir = argv[1] if len(argv) > 1 else P.pack(PACK)
     n = export(root, pack_dir)
     retrofit_maps(root, pack_dir)
+    retrofit_scripts(root, pack_dir)
     update_pack_json(pack_dir, n)
     return 0
 

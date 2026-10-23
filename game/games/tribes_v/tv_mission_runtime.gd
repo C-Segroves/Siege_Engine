@@ -20,6 +20,7 @@ const TRIGGER_PLAYER := "player"
 const VOICE_BUS := "Ducked"
 const TELEPORT_LIFT := 1.0
 const DAMAGE_HP := 100.0
+const EXPEL_OFFSET_M := 3.0
 const CHARACTER_BODIES := {"victoria": "tv_princessvictoria", "juliachild": "tv_imperiallightjulia", "julia": "tv_imperiallightjulia",
 	"daniel": "tv_phoenixmediumdaniel", "mercury": "tv_mercury", "jericho": "tv_phoenixheavyjericho"}
 const TEAM_BODIES := {"imperial": "tv_imperialmedium", "phoenix": "tv_phoenixmedium", "beagle": "tv_bloodeaglemedium"}
@@ -103,7 +104,7 @@ func setup(p_battle: Node3D, mission: Dictionary, vars := PackedInt32Array()) ->
 		_bodies[str(b.id)] = b
 	player_team = str(map.get("player_team", ""))
 	fleet = TVVehicleFleet.new(self)
-	fleet.build(map.get("vehicles", []))
+	fleet.build(map.get("vehicles", []), map.get("vehicle_pads", []))
 	_speech = AudioStreamPlayer.new()
 	_speech.bus = VOICE_BUS if AudioServer.get_bus_index(VOICE_BUS) >= 0 else "Master"
 	add_child(_speech)
@@ -112,7 +113,9 @@ func setup(p_battle: Node3D, mission: Dictionary, vars := PackedInt32Array()) ->
 		var parsed = JSON.parse_string(FileAccess.get_file_as_string(path))
 		if parsed is Dictionary and not (parsed.get("scripts", []) as Array).is_empty():
 			script_data = parsed
-			script_host = TVScriptHost.new(self, script_data.scripts, script_data.get("actors", {}), _speech)
+			script_data["actors"] = script_data.get("actors", {})
+			fleet.apply_label_positions(script_data.actors)
+			script_host = TVScriptHost.new(self, script_data.scripts, script_data.actors, _speech)
 			script_run = script_host.tasks
 			_build_triggers()
 			_build_npcs()
@@ -256,10 +259,21 @@ func _entries_for_goal(label: String) -> Array:
 
 
 func apply_goal(label: String, mode: String, name: String, goal: Dictionary) -> void:
+	if fleet.apply_goal(label, mode, name, goal):
+		return
 	for e in _entries_for_goal(label):
 		TVNpcGoals.apply(e, mode, name, goal)
 		if bool(e.spawned) and not bool(e.dead) and e.brain != null:
 			_steer(e)
+
+
+## The soldier a placed-soldier label names, null when it is not (yet) in the world.
+func find_soldier(label: String) -> Node3D:
+	for e in _entries_named(label):
+		var b = e.brain
+		if b != null and is_instance_valid(b) and is_instance_valid(b.soldier) and b.soldier.alive:
+			return b.soldier
+	return null
 
 
 func _is_ally(team: String) -> bool:
@@ -340,6 +354,36 @@ func apply_spawn_point(label: String, on: bool) -> void:
 	for e in _entries_named(label):
 		e.enabled = on
 		if on and not bool(e.spawned) and not bool(e.dead):
+			_spawn_npc(e)
+
+
+## ActionSpawnRook of a Vehicle* class: a crewed vehicle called `label` appears at the script's actor `at`.
+func apply_spawn_vehicle(vehicle_class: String, label: String, team_name: String, at: Array) -> void:
+	fleet.apply_spawn_vehicle(vehicle_class, label, team_name, at)
+
+
+## ActionEnterVehicle: the soldier `character` takes the pilot's seat of `vehicle`: he is gone from the world (no death message) and the
+## vehicle is crewed by its own pilot.
+func apply_enter_vehicle(character: String, vehicle: String) -> void:
+	if not fleet.has_label(vehicle):
+		return
+	for e in _entries_named(character):
+		e.enabled = false
+		e.dead = true
+		var b = e.brain
+		if b != null and is_instance_valid(b) and is_instance_valid(b.soldier) and b.soldier.alive:
+			b.soldier.apply_environment_damage(1.0)
+	fleet.apply_crew(vehicle)
+
+
+## The soldier `character`, put into a vehicle by ActionEnterVehicle, gets out beside it at `at` (AI_VehicleExpellOccupantGoal).
+func apply_expelled(character: String, at: Vector3) -> void:
+	for e in _entries_named(character):
+		if bool(e.dead):
+			e.rec["pos"] = [at.x + EXPEL_OFFSET_M, at.y, at.z]
+			e.enabled = true
+			e.dead = false
+			e.spawned = false
 			_spawn_npc(e)
 
 

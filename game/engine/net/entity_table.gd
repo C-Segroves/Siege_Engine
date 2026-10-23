@@ -156,20 +156,26 @@ func _move_row(from: int, to: int) -> void:
 func _read_row(row: int, tick_number: int) -> void:
 	var unit := _nodes[row]
 	var at := unit.global_position
-	var velocity: Vector3 = unit.get("velocity") if unit.get("velocity") is Vector3 else Vector3.ZERO
+	var velocity: Variant = unit.get("velocity")   # one property lookup each: this runs for every unit every tick
+	var integrity: Variant = unit.get("integrity")
+	var side: Variant = unit.get("team")
 	var new_flags := _make_flags(unit)
-	var new_health := clampf(float(unit.get("integrity")) if unit.get("integrity") != null else 1.0, 0.0, 1.0)
+	var new_health := clampf(float(integrity) if integrity != null else 1.0, 0.0, 1.0)
 	var new_yaw := unit.global_rotation.y
-	var changed := at.x != pos_x[row] or at.y != pos_y[row] or at.z != pos_z[row] or new_yaw != yaw[row] \
-		or new_flags != flags[row] or new_health != health[row] or last_changed_tick[row] == NO_TICK
+	var changed := at.x != pos_x[row] or at.y != pos_y[row] or at.z != pos_z[row] or new_yaw != yaw[row] 		or new_flags != flags[row] or new_health != health[row] or last_changed_tick[row] == NO_TICK
 	pos_x[row] = at.x
 	pos_y[row] = at.y
 	pos_z[row] = at.z
-	vel_x[row] = velocity.x
-	vel_y[row] = velocity.y
-	vel_z[row] = velocity.z
+	if velocity is Vector3:
+		vel_x[row] = velocity.x
+		vel_y[row] = velocity.y
+		vel_z[row] = velocity.z
+	else:
+		vel_x[row] = 0.0
+		vel_y[row] = 0.0
+		vel_z[row] = 0.0
 	yaw[row] = new_yaw
-	team[row] = clampi(int(unit.get("team")) if unit.get("team") != null else 0, 0, 255)
+	team[row] = clampi(int(side) if side != null else 0, 0, 255)
 	flags[row] = new_flags
 	health[row] = new_health
 	if unit.has_method("make_hit_capsule"):

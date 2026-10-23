@@ -117,7 +117,7 @@ def _find_bones(pkg, d, start):
 
 
 def _find_geometry(d, start):
-    """(wedges, triangles, points, end) found from `start`: wedge array, dword, triangle array, dword, point array."""
+    """(wedges, triangles, points, end, wedge offset) found from `start`: wedge array, dword, triangle array, dword, point array."""
     size = len(d)
     wedge_dt = np.dtype([('i', '<u2'), ('u', '<f4'), ('v', '<f4')])
     tri_dt = np.dtype([('w', '<u2', 3), ('m', '<u2')])
@@ -158,16 +158,16 @@ def _find_geometry(d, start):
         points = np.frombuffer(d, '<f4', count=p * 3, offset=pq).reshape(-1, 3)
         if (wedges['i'].max() < p and tris['w'].max() < n and tris['m'].max() < 32 and np.isfinite(points).all()
                 and np.abs(points).max() < 1e5 and np.isfinite(wedges['u']).all() and np.isfinite(wedges['v']).all()):
-            return wedges, tris, points, pq + 12 * p
+            return wedges, tris, points, pq + 12 * p, q
         pos += 1
     return None
 
 
-def _find_influences(d, start, point_count, bone_count):
+def _find_influences(d, start, point_count, bone_count, stop=None):
     """Rigid / smooth vertex influences: the first count k >= point_count of (f32 weight, u16 point, u16 bone) records
-    after `start` that cover every point with sane weights."""
+    after `start` (and before `stop`) that cover every point with sane weights."""
     dt = np.dtype([('w', '<f4'), ('p', '<u2'), ('b', '<u2')])
-    size = len(d)
+    size = len(d) if stop is None else min(len(d), stop)
     pos = start
     while pos < size - 8 * point_count:
         head = _try_index(d, pos)
@@ -202,8 +202,10 @@ def parse_skeletal_mesh(pkg, export, lenient=False):
     geo = _find_geometry(d, bend)
     if geo is None:
         raise MeshError('no wedge/triangle/point arrays')
-    wedges, tris, points, gend = geo
+    wedges, tris, points, gend, wedge_at = geo
     inf = _find_influences(d, gend, len(points), len(bones))
+    if inf is None:                      # the vehicles' levels of detail are: influences, wedges, triangles, points
+        inf = _find_influences(d, bend, len(points), len(bones), wedge_at)
     if inf is None:
         if not lenient:
             raise MeshError('no vertex influences')

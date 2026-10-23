@@ -107,9 +107,24 @@ ReplaceGoal, 4 RemoveGoal in the first five maps alone; every soldier has an imp
 `nameOfGoalToReplace`). Goal properties read: `goalName`, `Priority` (default 50), `destinationName` (a node label, MoveTo /
 SquadMoveTo), `targetName` (Attack / Follow; `Player` is the player), `movementAreaCenterName` + `movementAreaRadius` (Guard /
 SquadGuard, units), `proximity` (Follow), `patrolPointNames` (a compact-index array of name-table indices naming the nodes;
-`bExecuteOnce`). Converted kinds: move, guard, wander, patrol, attack, follow. Not converted (no engine counterpart yet): vehicle
-goals (VehicleMoveTo / Patrol / Attack / Guard, EnterVehicle, ExpellOccupant), turret goals (GunnerGuard / GunnerFireAt, FireAt),
-animation / turn / ski goals, dodge / react / get-out-of-way (reflexes the bot brain has).
+`bExecuteOnce`). Converted kinds: move, guard, wander, patrol, attack, follow, and the crewed vehicles' (below). Not converted (no engine
+counterpart yet): turret goals (GunnerGuard / GunnerFireAt, FireAt), animation / turn / ski goals, dodge / react / get-out-of-way (reflexes
+the bot brain has).
+Vehicle goals (`TVVehicleGoals`, host side): the same ops with the vehicle's label as Target. `AI_VehiclePatrolGoal` -> `vehicle_patrol`
+(`patrolPointNames`, `bExecuteOnce`, `attackTargetName`, `DesiredSpeed` uu/s), `AI_VehicleMoveToGoal` -> `vehicle_move` (`destinationName`,
+`DesiredSpeed`), `AI_VehicleAttackGoal` -> `vehicle_attack` (`targetName`), `AI_VehicleGuardGoal` -> `vehicle_guard` (holds where the vehicle
+stands), `AI_EnterVehicleGoal` -> `enter_vehicle` (`vehicleOrTurretName`, `VehiclePosition`), `AI_VehicleExpellOccupantGoal` -> `expel`
+(`occupantName`). The goal of highest Priority steers: it becomes an `AIOrder` (patrol = PATROL route, or TRAVEL when done once; move = MOVE
+plan; attack = ATTACK on the target; guard = hold) that `VehicleOrders` gives the vehicle's FlyerAI (its `patrol` path and `target`, a flyer
+flies the goal's DesiredSpeed as its cruise) or AIPilot (route, objective); an achieved goal (node reached, target dead, a once-patrol's last
+node) is dropped and the next one takes over, then the vehicle holds where it stopped (a flyer circles). At equal Priority the goal done once
+(move, attack) comes before the one that repeats (patrol, guard). A vehicle that is given a goal is crewed even when it is the player's side's
+(the Mercy-Escape supply rover drives itself until the script has its pilot expelled). `ActionEnterVehicle` (a soldier takes the pilot's seat:
+he leaves the world, the vehicle is crewed) and `ActionSpawnRook` with a `Vehicle*` SpawnClass (a crewed vehicle appears at the
+`locationByActor` node, in the air for an air node, as `rookLabel`, of the team named by `teamLabel`; Mercy-Escape's two fighters) are the
+script ops `enter_vehicle` and `spawn_vehicle`. Verified on the 11 SP maps that use them: 47 VehiclePatrol, 37 VehicleMoveTo, 7 VehicleAttack,
+2 VehicleGuard, 4 EnterVehicle, 2 ExpellOccupant goal objects. Not decoded: `EnterVehicle` / `ExpellOccupant` goals of soldiers (the soldier
+brain has no seat of its own), the speed of a ground vehicle's goal.
 
 ## Editor brushes (approximation, `tools/tv_bsp.py`)
 The compiled BSP (`Model` exports of 4 to 20 MB) is not decoded. Instead every `Brush` actor with CsgOper add/subtract is read
@@ -192,16 +207,47 @@ ProjectileAntiAircraft 2.2/s, radius 900, 25), BUGGY_AA (3/s). Fire groups: grou
 the bomb (the Beowulf's arrangement). A gunner aboard works every weapon of the vehicle (`TurretCrew`); alone the pilot fires them.
 Shapes: the rest-pose props get a second-root `turret` node (tank, buggy: yaw about the world's up axis), `muzzlepoint` nodes at the barrel
 tips of the turret models (`tv_prop_tankcannon`, `tankgunner`, `assaultshipgun`, and `tv_prop_turretbuggy` exported from Weapons.pkg) and the
-guns hang on them as weapon models. The wheels, shocks, track teeth, wings and landing gear are not animated (no influence table is decoded
-for them). Seat riders are not drawn (the seat offsets are raw bytes in the class defaults).
+guns hang on them as weapon models.
+Moving parts and riders (`tools/tv_vehicle_parts.py`, `game/engine/vehicle_parts.gd`): the vehicle meshes keep their vertex influences in front
+of each level of detail (influences, wedges, triangles, points; `ue2_skeletal` looks there when the usual place behind the points has none).
+Only the Rover's list is in step with its points (no triangle spans two bones); the Pod's, Tank's and Assault Ship's list is not (44 / 90 / 76
+per cent of their triangles span bones, wings of both sides among them), so for those the connected parts of the mesh (points that share
+triangles: a wing disc, a leg, an engine, a track) follow the bone nearest their centre, the root when none is within 1.2 part radii. The
+shapes now have every part on its own node and the sequences of the MeshAnimation of the same package as `ds_sequences`: AssaultShip
+GearDown / GearUp, WingsOpen / WingsClosed / WingsLeft / WingsRight, Hatch*; Tank leftforward / rightforward / ...backward (10 frames, the
+track teeth move 1.07 m per cycle), jetopen / jetclose; Pod Idle (201 frames) and the engine poses thrust / dive / throttleForward / Back /
+strafeLeft / Right; Buggy Hatch*. GearDown, WingsOpen and the Idle first frame are the rest pose, so every sequence is a pose relative to the
+rest pose and `VehicleParts` stacks them by weight: wheels (the Rover's four, radius = WheelRadius 0.857 m) turn by the distance driven and the
+front pair steers (SteeringMaxAngle 6500 = 35.7 degrees, by the heading change); the ship's gear folds as it climbs from half its
+gearTraceLength (4.3 m, where it hovers) to the whole (8.6 m), its wings are folded while it stands and open in flight and bank with the turn;
+the tank's tracks run by each side's speed (one tooth pitch per cycle); the pod's engines idle and tilt with throttle, climb and strafe. The
+motion is read from the replicated position and heading, so every peer shows the same. Not done: the tank's turret mesh does not turn with its
+gun (the `tankturret` part stays on the hull), the Rover's shocks do not compress, the mirrored back legs of the ship share one bone (a pitch
+about the lateral axis folds both alike).
+Seats: the `positions` struct array of each vehicle class (read with the class's own name table: the Rover's is in `Buggy`) says who is drawn:
+`hideOccupant` false only for the Pod's pilot (`occupantConnection` Character, `occupantAnimation` Pod_Stand), the Rover's driver (Character,
+Buggy_Stand) and the Assault Ship's two gunners (gunnerleft / gunnerright, AShipGunner_Stand); the Tank's crew, the ship's pilot, the Rover's
+gunner and its four passengers are hidden. The animation's `Character` / `CharacterLeft` / `CharacterRight` bone is where the rider's body
+stands, so the shape gets a `seat<i>` node there and `vehicle_seats.json` lists `{node, shown, pose}` for the shared rider code
+(`InfantrySeat`); the seat poses are added to the soldier bodies (`tv_phoenixmedium` ... have `pod_stand`, `buggy_stand`, `ashipgunner_stand`,
+`aship_stand`; the heavy armour has only the gunner's). The riders keep no weapon in hand.
 Maps: a placed `Vehicle*` actor becomes a record of `map.json` "vehicles" ({vehicle, actor, label, pos, basis, yaw, team_name,
 health_modifier, ai_goals}); the vehicle meshes are no longer scenery statics (54 in the 33 maps). `TVVehicleFleet` makes each appear within 450 m
 of the player, standing on the floor under the actor: parked and empty (boardable) when it is the player's side's or nobody's, crewed by the
-AI pilot (`FlyerAI` loop of 150 m, `AIPilot` to and fro; they attack what they meet) when it is the enemy's and the actor has AI goals. The goal
-objects (VehicleGuard, VehiclePatrol, VehicleAttack ...) and the vehicle pads that spawn vehicles (`BaseObjectVehicleSpawn*`: one in SP-Proof,
-still drawn as a prop) are not decoded. A script label addresses the vehicle: ActionDestroy / ActionEnable and MessageDeath work as for soldiers.
-Tests: `tests/tv_vehicles_check` (catalog, maps, boarding, driving, firing, destruction, AI crews), windowed `tests/tv_vehicle_shots`
-(`TV_SHOT_DIR`), the facing is `vehicle_facing_check`'s.
+AI pilot (`FlyerAI` loop of 150 m, `AIPilot` to and fro; they attack what they meet) when it is the enemy's and the actor has AI goals, and
+steered by the goals its script gives it (see "AI goals"). A script label addresses the vehicle: ActionDestroy / ActionEnable and MessageDeath
+work as for soldiers, and the seats raise MessageDriverEnter / DriverLeave / GunnerEnter / GunnerLeave (10 + 4 + 1 + 5 scripts use them).
+Vehicle pads: `BaseObjectVehicleSpawn{Fighter,Buggy,Tank,AssaultShip}` (one in SP-Proof, the Assault Ship's) become `map.json` "vehicle_pads"
+({vehicle, shape (the class's Mesh: `tv_prop_vehiclespawn*`), spawn_s (spawnDuration 90 / 90 / 180 / 210 s), offset_m (spawnOffsetHeight 40 uu),
+abandon_radius_m / abandon_s (abandonmentDesturctionStartRadius 5000 uu and Period 60 / 90 s)}), also as "stations" of kind vehicle with a
+`vehicle` field. The pad holds its vehicle, which scripts call by the pad's label + "vehicle" (the objective markers and goals of SP-Proof
+and SP-Prison-Exterior do): it appears like a placed vehicle, a new one is built `spawn_s` after it is gone, and an empty one left
+`abandon_radius_m` away for `abandon_s` is destroyed. The shared `TribesStations` sells the pad's own vehicle to a soldier standing on it
+(`make_station_vehicles`, `find_own_pad`: the same menu and the same clear-pad rule as the Tribes 2 vehicle stations; one vehicle on the
+pad at a time). Vengeance has no vehicle-pad cloak (its pack has no timed cloak profile), so no flash.
+Tests: `tests/tv_vehicles_check` (catalog, maps, boarding, driving, firing, destruction, AI crews, riders, wheels / gear / wings / treads,
+pad, pad station, abandonment, VehiclePatrol, VehicleMoveTo, script-spawned vehicle), windowed `tests/tv_vehicle_shots` (`TV_SHOT_DIR`: riders
+and pads too), the facing is `vehicle_facing_check`'s.
 
 ## Mission scripts (done, `tools/tv_script.py`, `game/games/tribes_v/tv_script_run.gd`)
 A map's logic is its `Script` actors. Each has a Label (the name `targetScript` uses), a MessageClass (the event) with TriggeredBy

@@ -71,11 +71,11 @@ static func steer(e: Dictionary, actors: Dictionary, player: Vector3, spawn: Vec
 	var priority := int(g.get("priority", DEFAULT_PRIORITY))
 	match str(g.kind):
 		"move":
-			var at := _make_point(str(g.get("dest", "")), actors, player)
+			var at := make_point(str(g.get("dest", "")), actors, player)
 			if at != Vector3.INF:
 				brain.objective = {"point": at, "urgent": priority >= URGENT_PRIORITY, "radius": ARRIVE_RADIUS, "hold": true}
 		"guard":
-			var centre := _make_point(str(g.get("center", "")), actors, player)
+			var centre := make_point(str(g.get("center", "")), actors, player)
 			brain.guard_point = spawn if centre == Vector3.INF else centre
 			brain.guard_radius = clampf(float(g.get("radius", 0.0)), MIN_AREA_RADIUS, MAX_AREA_RADIUS)
 		"wander":
@@ -83,7 +83,7 @@ static func steer(e: Dictionary, actors: Dictionary, player: Vector3, spawn: Vec
 		"attack":
 			brain.guard_radius = 0.0
 		"follow":
-			var who := _make_point(str(g.get("target", "")), actors, player)
+			var who := make_point(str(g.get("target", "")), actors, player)
 			if who != Vector3.INF:
 				brain.guard_point = who
 				brain.guard_radius = clampf(float(g.get("radius", 0.0)), MIN_AREA_RADIUS, MAX_AREA_RADIUS)
@@ -96,7 +96,7 @@ static func _steer_patrol(e: Dictionary, g: Dictionary, brain, actors: Dictionar
 	if points.is_empty():
 		return
 	var i := int(e.get("patrol_index", 0)) % points.size()
-	var at := _make_point(str(points[i]), actors, player)
+	var at := make_point(str(points[i]), actors, player)
 	if at == Vector3.INF:
 		e["patrol_index"] = i + 1
 		return
@@ -107,13 +107,13 @@ static func _steer_patrol(e: Dictionary, g: Dictionary, brain, actors: Dictionar
 			return
 		i = (i + 1) % points.size()
 		e["patrol_index"] = i
-		at = _make_point(str(points[i]), actors, player)
+		at = make_point(str(points[i]), actors, player)
 	if at != Vector3.INF:
 		brain.objective = {"point": at, "urgent": false, "radius": ARRIVE_RADIUS, "hold": false}
 
 
 ## The position of the actor `label` ("Player" = the player), Vector3.INF when unknown.
-static func _make_point(label: String, actors: Dictionary, player: Vector3) -> Vector3:
+static func make_point(label: String, actors: Dictionary, player: Vector3) -> Vector3:
 	if label.to_lower() == PLAYER_LABEL:
 		return player
 	var at: Array = actors.get(label, [])

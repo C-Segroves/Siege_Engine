@@ -35,6 +35,8 @@ const TOGGLE_DEBOUNCE_MS := 100
 
 ## No hull is anywhere near this long: a soldier further than this from a vehicle cannot be touching it (skips the full check).
 const TOUCH_PREFILTER_M := 60.0
+## The touchable-vehicle list is rebuilt at least this often (physics frames) even when the table's size did not change.
+const TOUCHABLE_REFRESH_FRAMES := 30
 
 var battle: Battle
 ## Host: func(peer: int, vehicle: Herc) -> String: "" = he may get out, else why not (the extraction raid's safe
@@ -43,6 +45,9 @@ var exit_guard := Callable()
 var _soldier_of_peer := {}       # peer / bot id -> soldier net id
 var _remount_after_ms := {}      # soldier net id -> [vehicle net id, ticks msec]
 var _last_toggle_ms := {}        # peer id -> ticks msec of the last enter / exit request
+var _touchable: Array = []       # the vehicles one boards by touch, as of _touchable_frame
+var _touchable_frame := -TOUCHABLE_REFRESH_FRAMES
+var _touchable_count := -1       # the vehicle table size the list was made for
 
 
 func _init(p_battle: Battle) -> void:
@@ -307,11 +312,16 @@ func _board_by_touch() -> void:
 
 ## The vehicles (not soldiers) one boards by touching them, in the table's order.
 func _make_touchable_vehicles() -> Array:
-	var out := []
+	var ticks := Engine.get_physics_frames()
+	if ticks - _touchable_frame < TOUCHABLE_REFRESH_FRAMES and _touchable_count == battle.vehicles.size():
+		return _touchable   # the list changes when a vehicle comes or goes; a freed one is skipped by the caller's validity test
+	_touchable_frame = ticks
+	_touchable_count = battle.vehicles.size()
+	_touchable = []
 	for h in battle.vehicles.values():   # soldiers are most of the table: the cheap type test first
 		if is_instance_valid(h) and not (h is Infantry) and BoardingRules.is_boarded_by_touch(h.def):
-			out.append(h)
-	return out
+			_touchable.append(h)
+	return _touchable
 
 
 ## True while `soldier` may not board `vehicle` by touch again (he just left it).

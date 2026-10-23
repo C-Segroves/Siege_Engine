@@ -21,8 +21,11 @@ static func apply_controls(s: Infantry, c: Array) -> void:
 
 
 static func make_snapshot(s: Infantry) -> Array:
-	return [s.jetting, s.weapon_slot, s.stowed, PackedInt32Array(s.weapons.map(func(w: Weapon) -> int: return w.ammo)),
-		s.kit.make_state()]
+	var rounds := PackedInt32Array()
+	rounds.resize(s.weapons.size())
+	for i in rounds.size():
+		rounds[i] = s.weapons[i].ammo
+	return [s.jetting, s.weapon_slot, s.stowed, rounds, s.kit.make_state()]
 
 
 ## Applies the host's extra state to a puppet soldier (its own player keeps his weapon choice).

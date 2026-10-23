@@ -285,3 +285,5 @@ func _animate(delta: float) -> void:
 		_dropship = DropshipAnimation.make(self)
 	if _dropship != null:
 		_dropship.update(make_altitude(), delta)
+	if parts:
+		parts.update(delta)

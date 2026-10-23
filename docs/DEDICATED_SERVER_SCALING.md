@@ -843,6 +843,39 @@ a native snapshot builder, or a second process for the sender.
 Tests run: `compile_all` is the integration agent's batch; the files here are `interest_grid`, `snapshot_codec`, `snapshot_share`, `net_profile`,
 `snapshot_net` (plain and `--interest`) and `far_bots_net` checks (pass), plus the five Jolt checks above (pass, Jolt scratch copy).
 
+#### 8.5.5 Re-baseline after the shared systems, byte-level encoder (2026-10-23, sixth round)
+
+**Re-baseline** (Jolt scratch copy, `server_load_bench --stages=s24 --baseline`, other agents running Python and Godot, read to about 3 ms): s24 p50 / p99
+18.9 / 34.8 ms, stream 8.8 ms (encode 2.3, interest 2.7, build 3.4, deliver 0.9); s64 78.9 / 124 ms. `--probe --markers` at s24: the stream
+(under `server_clock.gd`, the `ticked` signal) 8.3 ms, soldiers 2.0, turrets 1.0, net sync 0.9, held weapons 0.7, bounds 0.7, flyers 0.7, bot sleep 0.6,
+occupancy 0.6, projectiles 0.6. The new shared sensors, targeting and damage code does not show at s24 (bot director 0.2 ms; the radar helpers run
+inside the `SensorTowers` cache scope). Outside a scope `is_revealed_by` is 67 us a call (`--radar`), so keep every bulk caller inside one.
+
+**Kept (measured, no gameplay change):**
+* `SnapshotCodec`: groups, records and packets are written into a sized `PackedByteArray` (`encode_u16` ...) instead of a `StreamPeerBuffer` per group
+  (`data_array` copies). Byte-identical to the old encoder on 3000 random states (groups, records with and without the same-cell flag, packets).
+  `encode_groups` at s64 4.3 -> 2.5 ms per snapshot, s24 0.62 -> 0.43.
+* `HercSnapshots.make_damage_block` sizes the array once; `InfantryNet.make_snapshot` fills the rounds in a loop (no closure `map`).
+* `EntityTable._read_row`: one property lookup each for velocity, integrity and team (was two each, for every unit every tick).
+* `InterestGrid.rebuild`: dropped the write-only `_cells` dictionary.
+* `BattleBounds`: a server counts the settle time with the same 4-tick stride as the rules, so the units skipped this tick cost nothing.
+* `OccupancyDirector`: the list of vehicles one boards by touch is kept for up to 30 physics frames while the table keeps its size (was rebuilt per tick).
+
+| Stage | before p50 / p99 (ms) | after p50 / p99 (ms) | stream p50 before -> after |
+|---|---|---|---|
+| s24 Varuna | 18.9 / 34.8 | 18.9 / 30.8 and 18.8 / 27.6 | 8.8 -> 6.7 to 7.4 (encode 2.3 -> 1.8) |
+| s64 Varuna | 78.9 / 124 (6 s run) | 62.6 / 119.5 (14.7 ticks/s) | 20.3 -> 16.8 (encode 9.0 -> 6.7) |
+
+The p50 at s24 does not move beyond the noise: the stream gain (about 1.5 ms) is inside it, and the target (12 / 25) is still not met. What is left at s24
+is simulation, not transport: soldiers' `move_and_slide` under Jolt, 34 turrets, flyers (real flight and collision, 140 us each), projectiles.
+
+**GDExtension for the encoder: not built.** Estimate: encode_groups + records + packets is about 2.4 ms of the 18.8 at s24 (13 %); a native version
+would save perhaps 2 ms (10 %), below the 20 % bar. `make_state` (reading the nodes) stays in GDScript either way.
+
+Tests run: snapshot_codec, snapshot_share, snapshot_net, interest_grid, entity_table, prediction, lag_comp, far_bots, far_bots_net, bot_lod, sensors,
+target_selector, infantry, extraction, varuna, aa_bounds (all pass); the seven trace goldens unchanged, compile_all 968 scripts 0 failed.
+`bounds_maps_check` did not finish inside 500 s on the busy machine (not a failure, not re-run).
+
 ## 9. Conflicts with parallel work
 
 * Do not touch: `engine/mission/*`, `tests/mission_*_check`, `tests/trace_*_check`, `games/tribes_v/*`.

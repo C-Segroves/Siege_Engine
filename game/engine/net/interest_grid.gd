@@ -45,8 +45,7 @@ var occlusion_probe := Callable()
 var radar_batch_probe := Callable()
 
 var _no_rows := PackedInt32Array()
-var _cells := {}                            # packed cell key -> PackedInt32Array of table rows
-var _soldier_cells := CellIndex.new()       # the same cells, soldiers only / everything else only: a client asks each class
+var _soldier_cells := CellIndex.new()       # the populated cells, soldiers only / everything else only: a client asks each class
 var _vehicle_cells := CellIndex.new()       #   within its own view range, so far soldiers are never visited
 var _team_rows := {}                        # team -> PackedInt32Array of table rows (ascending), as of the last rebuild
 var _indexed_rows := -1                     # table size at the last rebuild
@@ -120,7 +119,6 @@ func apply_target(client_id: int, entity_id: int) -> void:
 ## Rebuilds the grid from `table`. Call once per server tick, after EntityTable.update_from_nodes.
 func rebuild(table: EntityTable) -> void:
 	_table = table
-	_cells.clear()
 	_soldier_cells.clear()
 	_vehicle_cells.clear()
 	_team_rows.clear()
@@ -129,9 +127,6 @@ func rebuild(table: EntityTable) -> void:
 		var cx := _cell_of(table.pos_x[row])
 		var cz := _cell_of(table.pos_z[row])
 		var key := _make_key(cx, cz)
-		if not _cells.has(key):
-			_cells[key] = PackedInt32Array()
-		_cells[key].append(row)
 		(_soldier_cells if (table.flags[row] & EntityTable.FLAG_SOLDIER) != 0 else _vehicle_cells).add(key, cx, cz, row)
 		var side := int(table.team[row])
 		if not _team_rows.has(side):

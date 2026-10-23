@@ -80,13 +80,14 @@ static func apply_trigger_bits(h: Herc, bits: int) -> void:
 
 ## Per-component health bytes followed by per-cell state bytes (about 30 bytes for a Herc).
 static func make_damage_block(h: Herc) -> PackedByteArray:
+	var n := h.components.size()
+	var cells := h.shape.cell_count() if h.shape != null else 0
 	var out := PackedByteArray()
-	for c in h.components:
-		var f := DamageLevels.component_health(c)
-		out.append(int(ceilf(f * HEALTH_STEPS)))
-	if h.shape != null:
-		for ci in h.shape.cell_count():
-			out.append(h.shape.get_cell_state(ci))
+	out.resize(n + cells)
+	for i in n:
+		out[i] = int(ceilf(DamageLevels.component_health(h.components[i]) * HEALTH_STEPS))
+	for ci in cells:
+		out[n + ci] = h.shape.get_cell_state(ci)
 	return out
 
 

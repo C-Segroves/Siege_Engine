@@ -66,8 +66,8 @@ func _physics_process(delta: float) -> void:
 			continue
 		if not v.alive:
 			_settle[v.net_id] = SETTLE_SECONDS
-		elif _is_settled(v, delta) and v.is_in_group("vehicles") and (v.net_id + _ticks) % stride == 0:
-			_apply_rules(v, delta * stride)
+		elif (v.net_id + _ticks) % stride == 0 and _is_settled(v, delta * stride) and v.is_in_group("vehicles"):
+			_apply_rules(v, delta * stride)   # the settling time counts down with the same stride: no per-tick bookkeeping for the others
 
 
 ## Counts down `v`'s settling time (SETTLE_SECONDS); true once it is over.

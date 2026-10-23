@@ -20,17 +20,24 @@ Output (all positions metres in the engine frame):
                      export (kind, destination / target / patrol-point names, Priority, movement area); goalName names the goal for
                      removal ("DefaultGuardGoal" is every soldier's guard-the-spawn goal)
 Ops: goal speak wait obj_add obj_status obj_remove exec exit_script if loop exit_loop for var enable disable destroy spawn_on spawn_off
-teleport damage prompt sound next fail countdown noop(class)
+teleport damage prompt sound next fail countdown spawn_vehicle enter_vehicle noop(class)
+  ActionSpawnRook with a Vehicle* SpawnClass  {op spawn_vehicle, class, label (rookLabel), team (teamLabel), at (locationByActor label)}
+  ActionEnterVehicle  {op enter_vehicle, character, vehicle}   vehicle goals (AI_VehiclePatrolGoal ...): kinds vehicle_patrol (points, once,
+                     target, speed), vehicle_move (dest, speed), vehicle_attack (target), vehicle_guard, enter_vehicle (vehicle, seat), expel (occupant)
 """
 import re
 
 import ue2_package as U
 import tv_audio
 
-# The ground-soldier goals the engine acts on (the vehicle, turret, animation and ski goals are not converted).
+# The goals the engine acts on: the ground soldiers' and the crewed vehicles' (the turret, animation and ski goals are not converted).
 GOAL_KINDS = {'AI_MoveToGoal': 'move', 'AI_SquadMoveToGoal': 'move', 'AI_GuardGoal': 'guard', 'AI_SquadGuardGoal': 'guard',
               'AI_WanderGoal': 'wander', 'AI_PatrolGoal': 'patrol', 'AI_AttackGoal': 'attack', 'AI_SquadAttackGoal': 'attack',
-              'AI_FollowGoal': 'follow', 'AI_SquadFollowGoal': 'follow'}
+              'AI_FollowGoal': 'follow', 'AI_SquadFollowGoal': 'follow',
+              'AI_VehiclePatrolGoal': 'vehicle_patrol', 'AI_VehicleMoveToGoal': 'vehicle_move', 'AI_VehicleAttackGoal': 'vehicle_attack',
+              'AI_VehicleGuardGoal': 'vehicle_guard', 'AI_EnterVehicleGoal': 'enter_vehicle',
+              'AI_VehicleExpellOccupantGoal': 'expel'}
+VEHICLE_SPEED_UU = 'DesiredSpeed'          # uu/s of a vehicle goal
 DEFAULT_PRIORITY = 50
 SKIP_CLASSES = ('Script', 'Brush', 'StaticMeshActor', 'StaticMeshInstance', 'TerrainSector', 'Light', 'Polys', 'Model', 'ActorGroup',
                 'Camera', 'SpriteEmitter', 'Projector', 'ZoneInfo', 'DynamicLight')
@@ -77,6 +84,7 @@ class Compiler:
         self.labels = set()
         self.classes = {}
         self.depth = 0
+        self.teams = None
 
     def props(self, e):
         return U.object_properties(self.pkg, e)
@@ -94,6 +102,13 @@ class Compiler:
         if name and name != 'None':
             self.labels.add(str(name))
         return str(name) if name else ''
+
+    def team_name(self, label):
+        """The TeamInfo<Faction><n> export name of the team actor labelled `label` (a script says 'teambeagle'), else `label`."""
+        if self.teams is None:
+            self.teams = {str(self.props(e).get('Label', '')): e['name'] for e in self.pkg.exports
+                          if self.pkg.class_name(e).startswith('TeamInfo')}
+        return self.teams.get(str(label), str(label))
 
     def goal_export(self, name):
         for e in self.pkg.exports:
@@ -115,14 +130,19 @@ class Compiler:
         g = p.get
         kind = GOAL_KINDS[self.pkg.class_name(e)]
         out = {'kind': kind, 'name': str(g('goalName', '')), 'priority': int(g('Priority', DEFAULT_PRIORITY))}
-        for key, field in (('destinationName', 'dest'), ('targetName', 'target'), ('movementAreaCenterName', 'center')):
+        for key, field in (('destinationName', 'dest'), ('targetName', 'target'), ('movementAreaCenterName', 'center'),
+                           ('attackTargetName', 'target'), ('vehicleOrTurretName', 'vehicle'), ('occupantName', 'occupant')):
             if g(key):
                 out[field] = self.label(g(key))
+        if kind == 'enter_vehicle':
+            out['seat'] = int(g('VehiclePosition', 0) or 0)
+        if kind.startswith('vehicle_') and g(VEHICLE_SPEED_UU):
+            out['speed'] = round(float(g(VEHICLE_SPEED_UU)) * self.mpu, 2)
         if kind == 'guard':
             out['radius'] = round(float(g('movementAreaRadius', 0.0)) * self.mpu, 1)
         if kind == 'follow':
             out['radius'] = round(float(g('proximity', 0.0)) * self.mpu, 1)
-        if kind == 'patrol':
+        if kind in ('patrol', 'vehicle_patrol'):
             out['points'] = [self.label(n) for n in self.name_list(g('patrolPointNames'))]
             out['once'] = bool(g('bExecuteOnce', False))
         return out
@@ -205,6 +225,11 @@ class Compiler:
                 return None
             return {'op': 'goal', 'mode': mode, 'target': self.label(g('Target', '')), 'goal': goal,
                     'name': str(g('goalName', '') or g('nameOfGoalToReplace', ''))}
+        if cls == 'ActionSpawnRook' and str(g('SpawnClass', '')).startswith('Vehicle'):
+            return {'op': 'spawn_vehicle', 'class': str(g('SpawnClass', '')), 'label': str(g('rookLabel', '')),
+                    'team': self.team_name(g('teamLabel', '')), 'at': self.label(g('locationByActor', ''))}
+        if cls == 'ActionEnterVehicle':
+            return {'op': 'enter_vehicle', 'character': self.label(g('targetCharacter', '')), 'vehicle': self.label(g('targetVehicle', ''))}
         if cls == 'ActionNextCampaignMission':
             return {'op': 'next'}
         if cls == 'ActionFailCampaignMission':

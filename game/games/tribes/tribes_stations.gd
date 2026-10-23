@@ -38,7 +38,8 @@ const MENU_KINDS := ["inventory", "vehicle", "command"]
 const EXTRACTION_SHOP_METHOD := "open_station_shop"
 
 var battle: Battle
-## [{kind, team, xf}]
+## [{kind, team, xf, object, vehicle, lift}] (`vehicle`: the one vehicle a dedicated pad of the map builds, "" for a station that offers them
+## all; `lift`: metres above the pad's origin the vehicle appears)
 var stations: Array = []
 var _resupply_t := 0.0
 var _on_station := -1          # index of the station the local soldier stands on (-1: none)
@@ -56,7 +57,8 @@ func _init(p_battle: Battle, built_stations: Array) -> void:
 		if kind != "":
 			var obj = s.get("object")
 			stations.append({"kind": kind, "team": int(obj.team) if is_instance_valid(obj) else int(s.get("team", -1)),
-				"xf": s.xf, "object": obj})
+				"xf": s.xf, "object": obj, "vehicle": str((s.get("record", {}) as Dictionary).get("vehicle", "")),
+				"lift": float((s.get("record", {}) as Dictionary).get("lift_m", 0.0))})
 
 
 func _ready() -> void:
@@ -177,15 +179,18 @@ func _open_menu(soldier: Infantry, i: int) -> void:
 			_menu.bought.connect(func(c: Dictionary) -> void:
 				request_inventory(str(c.armor), c.loadout, {"grenade": c.get("grenade", ""), "pack": c.get("pack", "")}))
 		"vehicle":
-			_menu = StationMenu.open_vehicles(battle, make_station_vehicles(soldier))
+			_menu = StationMenu.open_vehicles(battle, make_station_vehicles(soldier, i))
 			_menu.bought.connect(func(c: Dictionary) -> void: request_vehicle(str(c.vehicle), i))
 		"command":
 			if CommandOrders.of(battle) and not is_instance_valid(CommandMap.find_open(battle)):
 				_command_map = CommandMap.open(battle, soldier)
 
 
-## The vehicles a station sells: its game's vehicles (Tribes vehicle family), in catalog order.
-func make_station_vehicles(soldier: Infantry) -> Array:
+## The vehicles station `i` sells: a dedicated pad's own vehicle, else its game's vehicles (Tribes vehicle family), in catalog order.
+func make_station_vehicles(soldier: Infantry, i := -1) -> Array:
+	var own := str(stations[i].get("vehicle", "")) if i >= 0 else ""
+	if own != "":
+		return [Packs.vehicle(own)] if not Packs.vehicle(own).is_empty() else []
 	var pack := str(soldier.armor.get("pack", "tribes"))
 	return Packs.vehicles.values().filter(func(v: Dictionary) -> bool:
 		return str(v.get("pack", "")) == pack and str(v.get("category", "")) == "vehicle")
@@ -263,7 +268,10 @@ func apply_vehicle_purchase(peer: int, vehicle_id: String, station: int) -> void
 	var soldier := battle.occupancy.soldier_of(peer)
 	if find_station(soldier) != station or stations[station].kind != "vehicle" or Packs.vehicle(vehicle_id).is_empty():
 		return
-	var pad := find_clear_pad((stations[station].xf as Transform3D).origin)
+	var own := str(stations[station].get("vehicle", ""))
+	if own != "" and vehicle_id != own:
+		return
+	var pad := find_own_pad(station) if own != "" else find_clear_pad((stations[station].xf as Transform3D).origin)
 	if pad.size() == 0:
 		battle.fx("message", ["Can't create vehicle. The pad is not clear.", 3.0], true)
 		return
@@ -272,6 +280,13 @@ func apply_vehicle_purchase(peer: int, vehicle_id: String, station: int) -> void
 		"owner": VehicleOccupancy.EMPTY, "xf": xf, "loadout": Packs.vehicle(vehicle_id).get("loadout", []),
 		"name": str(Packs.vehicle(vehicle_id).get("name", vehicle_id)), "ai": {}, "parked": true, "protection": 0.0,
 		"cloak_s": make_pad_cloak_s(soldier)})
+
+
+## [pad transform] of a dedicated pad station when no vehicle stands on it ([] otherwise).
+func find_own_pad(station: int) -> Array:
+	var xf: Transform3D = stations[station].xf
+	xf.origin += Vector3.UP * float(stations[station].get("lift", 0.0))
+	return [xf] if _is_pad_clear(xf.origin) else []
 
 
 ## [pad transform] of the nearest vehicle pad within PAD_SEARCH_RADIUS of `near` with no vehicle on it ([] none).

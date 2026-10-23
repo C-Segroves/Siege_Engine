@@ -74,6 +74,8 @@ var alive := true
 var shape: ShapeInstance
 ## Legs (walk / run / turn in place / death), per pack: engine/herc_animator.gd.
 var animator: HercAnimator
+## Wheels, landing gear, wings, treads of a vehicle whose record has "parts" (engine/vehicle_parts.gd); null for the others.
+var parts: VehicleParts
 ## Torso twist / turret yaw and pitch on top of the legs: engine/torso_rig.gd.
 var torso: TorsoRig
 var weapons: Array = []
@@ -144,6 +146,7 @@ func _build_model() -> void:
 	_muzzles = HercModel.build_mounts(def, shape)
 	animator = HercAnimator.new(def, shape, float(def.get("max_speed", max_speed)))
 	animator.footstep.connect(_play_footstep)
+	parts = VehicleParts.make(self)
 	torso = TorsoRig.new(def, shape, _muzzles.values())
 	_last_yaw = rotation.y
 
@@ -479,6 +482,8 @@ func _animate(delta: float) -> void:
 	_last_yaw = rotation.y
 	animator.update(speed, yaw_delta, delta)
 	torso.apply(torso_yaw, pitch, animator.animates)
+	if parts:
+		parts.update(delta)
 
 
 func _play_footstep() -> void:

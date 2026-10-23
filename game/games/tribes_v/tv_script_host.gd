@@ -117,6 +117,10 @@ func _register_ops() -> void:
 	tasks.register_op("enable", _exec_switch)
 	tasks.register_op("disable", _exec_switch)
 	tasks.register_op("destroy", func(_t: MissionTask.Task, a: Dictionary) -> void: game.apply_destroy(str(a.target)))
+	tasks.register_op("spawn_vehicle", func(_t: MissionTask.Task, a: Dictionary) -> void:
+		game.apply_spawn_vehicle(str(a.get("class", "")), str(a.get("label", "")), str(a.get("team", "")), _actors.get(str(a.get("at", "")), [])))
+	tasks.register_op("enter_vehicle", func(_t: MissionTask.Task, a: Dictionary) -> void:
+		game.apply_enter_vehicle(str(a.get("character", "")), str(a.get("vehicle", ""))))
 	tasks.register_op("goal", func(_t: MissionTask.Task, a: Dictionary) -> void:
 		game.apply_goal(str(a.target), str(a.mode), str(a.get("name", "")), a.get("goal") if a.get("goal") is Dictionary else {}))
 	tasks.register_op("spawn_on", _exec_spawn_point)

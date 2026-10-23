@@ -73,7 +73,8 @@ const ID_BYTES := 2
 const RECORD_HEADER_BYTES := 4
 const MAX_COUNT := 255
 
-static var _writer := StreamPeerBuffer.new()
+const POSE_BYTES := 18
+const RESOURCES_BYTES := 10
 
 
 # ------------------------------------------------------------------ encoding (server)
@@ -104,89 +105,89 @@ static func make_cell_of(position: Vector3) -> Vector2i:
 	return Vector2i(floori(position.x / CELL_M), floori(position.z / CELL_M))
 
 
-static func _begin() -> StreamPeerBuffer:
-	_writer.clear()
-	return _writer
-
-
 static func _encode_pose(s: Array) -> PackedByteArray:
-	var w := _begin()
 	var at: Vector3 = s[IDX_POS]
 	var cell := make_cell_of(at)
-	w.put_16(clampi(cell.x, -32768, 32767))
-	w.put_16(clampi(cell.y, -32768, 32767))
-	w.put_u16(clampi(roundi((at.x - float(cell.x) * CELL_M) * CM_PER_M), 0, U16_MAX))
-	w.put_u16(clampi(roundi((at.z - float(cell.y) * CELL_M) * CM_PER_M), 0, U16_MAX))
-	w.put_u16(clampi(roundi((at.y + HEIGHT_OFFSET_M) / HEIGHT_STEP_M), 0, U16_MAX))
-	w.put_u16(make_angle_code(float(s[IDX_YAW])))
-	w.put_u16(make_angle_code(float(s[IDX_TORSO])))
-	w.put_u16(make_angle_code(float(s[IDX_PITCH])))
-	w.put_16(clampi(roundi(float(s[IDX_SPEED]) * SPEED_STEP), -32768, 32767))
-	return w.data_array
+	var out := PackedByteArray()
+	out.resize(POSE_BYTES)
+	out.encode_s16(0, clampi(cell.x, -32768, 32767))
+	out.encode_s16(2, clampi(cell.y, -32768, 32767))
+	out.encode_u16(4, clampi(roundi((at.x - float(cell.x) * CELL_M) * CM_PER_M), 0, U16_MAX))
+	out.encode_u16(6, clampi(roundi((at.z - float(cell.y) * CELL_M) * CM_PER_M), 0, U16_MAX))
+	out.encode_u16(8, clampi(roundi((at.y + HEIGHT_OFFSET_M) / HEIGHT_STEP_M), 0, U16_MAX))
+	out.encode_u16(10, make_angle_code(float(s[IDX_YAW])))
+	out.encode_u16(12, make_angle_code(float(s[IDX_TORSO])))
+	out.encode_u16(14, make_angle_code(float(s[IDX_PITCH])))
+	out.encode_s16(16, clampi(roundi(float(s[IDX_SPEED]) * SPEED_STEP), -32768, 32767))
+	return out
 
 
 static func _encode_status(s: Array) -> PackedByteArray:
-	var w := _begin()
 	var flags := FLAG_ALIVE_BIT if bool(s[IDX_ALIVE]) else 0
 	if s.size() > IDX_CLOAKED and bool(s[IDX_CLOAKED]):
 		flags |= FLAG_CLOAKED_BIT
-	w.put_u8(flags)
-	w.put_u8(clampi(roundi(float(s[IDX_INTEGRITY]) * BYTE_MAX), 0, 255))
-	return w.data_array
+	return PackedByteArray([flags, clampi(roundi(float(s[IDX_INTEGRITY]) * BYTE_MAX), 0, 255)])
 
 
 static func _encode_resources(s: Array) -> PackedByteArray:
-	var w := _begin()
-	w.put_half(float(s[IDX_SHIELD_FRONT]))
-	w.put_half(float(s[IDX_SHIELD_REAR]))
-	w.put_half(float(s[IDX_CAPACITOR]))
-	w.put_u16(clampi(int(s[IDX_KILLS]), 0, U16_MAX))
-	w.put_u16(clampi(int(s[IDX_DEATHS]), 0, U16_MAX))
-	return w.data_array
+	var out := PackedByteArray()
+	out.resize(RESOURCES_BYTES)
+	out.encode_half(0, float(s[IDX_SHIELD_FRONT]))
+	out.encode_half(2, float(s[IDX_SHIELD_REAR]))
+	out.encode_half(4, float(s[IDX_CAPACITOR]))
+	out.encode_u16(6, clampi(int(s[IDX_KILLS]), 0, U16_MAX))
+	out.encode_u16(8, clampi(int(s[IDX_DEATHS]), 0, U16_MAX))
+	return out
 
 
 static func _encode_triggers(s: Array) -> PackedByteArray:
-	var w := _begin()
-	w.put_u32(int(s[IDX_TRIGGERS]) & 0xFFFFFFFF)
-	return w.data_array
+	var out := PackedByteArray()
+	out.resize(4)
+	out.encode_u32(0, int(s[IDX_TRIGGERS]) & 0xFFFFFFFF)
+	return out
 
 
 ## Length-prefixed block; an empty block (nothing to apply) is a two byte group.
 static func _encode_damage(s: Array) -> PackedByteArray:
-	var w := _begin()
 	var block: PackedByteArray = s[IDX_DAMAGE]
-	w.put_u16(block.size())
-	w.put_data(block)
-	return w.data_array
+	var out := PackedByteArray()
+	out.resize(2)
+	out.encode_u16(0, block.size())
+	out.append_array(block)
+	return out
 
 
 static func _encode_steer(s: Array) -> PackedByteArray:
-	var w := _begin()
 	var stick: Vector2 = s[IDX_STEER] if s[IDX_STEER] is Vector2 else Vector2.ZERO
-	w.put_8(clampi(roundi(stick.x * STICK_STEPS), -127, 127))
-	w.put_8(clampi(roundi(stick.y * STICK_STEPS), -127, 127))
-	return w.data_array
+	var out := PackedByteArray()
+	out.resize(2)
+	out.encode_s8(0, clampi(roundi(stick.x * STICK_STEPS), -127, 127))
+	out.encode_s8(1, clampi(roundi(stick.y * STICK_STEPS), -127, 127))
+	return out
 
 
 ## Soldier extra [jetting, weapon slot, stowed, rounds per weapon, kit]: bits, slot, rounds (the kit is its own group).
 static func _encode_extra(extra: Array) -> PackedByteArray:
-	var w := _begin()
-	w.put_u8((1 if bool(extra[0]) else 0) | (2 if bool(extra[2]) else 0))
-	w.put_u8(clampi(int(extra[1]), 0, 255))
 	var rounds: PackedInt32Array = extra[3] if extra.size() > 3 else PackedInt32Array()
-	w.put_u8(mini(rounds.size(), 255))
-	for i in mini(rounds.size(), 255):
-		w.put_u16(clampi(rounds[i], 0, U16_MAX))
-	return w.data_array
+	var count := mini(rounds.size(), 255)
+	var out := PackedByteArray()
+	out.resize(3 + count * 2)
+	out.encode_u8(0, (1 if bool(extra[0]) else 0) | (2 if bool(extra[2]) else 0))
+	out.encode_u8(1, clampi(int(extra[1]), 0, 255))
+	out.encode_u8(2, count)
+	for i in count:
+		out.encode_u16(3 + i * 2, clampi(rounds[i], 0, U16_MAX))
+	return out
 
 
 static func _encode_kit(extra: Array) -> PackedByteArray:
-	var w := _begin()
 	var kit: Array = extra[4] if extra.size() > 4 and extra[4] is Array else []
 	var blob := var_to_bytes(kit)
-	w.put_u16(blob.size())
-	w.put_data(blob)
-	return w.data_array
+	var out := PackedByteArray()
+	out.resize(2)
+	out.encode_u16(0, blob.size())
+	out.append_array(blob)
+	return out
 
 
 static func make_angle_code(radians: float) -> int:
@@ -202,17 +203,18 @@ static func make_angle(code: int) -> float:
 ## One record: `id`, then the groups of `mask` taken from `groups`. With FLAG_SAME_CELL set the pose group's cell
 ## bytes are left out.
 static func make_record(id: int, mask: int, groups: Dictionary) -> PackedByteArray:
-	var w := StreamPeerBuffer.new()
-	w.put_u16(id)
-	w.put_u16(mask)
+	var out := PackedByteArray()
+	out.resize(RECORD_HEADER_BYTES)
+	out.encode_u16(0, id)
+	out.encode_u16(2, mask)
 	for bit in GROUP_BITS:
 		if mask & bit == 0:
 			continue
 		var bytes: PackedByteArray = groups[bit]
 		if bit == GROUP_POSE and mask & FLAG_SAME_CELL != 0:
 			bytes = bytes.slice(CELL_BYTES)
-		w.put_data(bytes)
-	return w.data_array
+		out.append_array(bytes)
+	return out
 
 
 ## Splits `forgets` (entity ids) and `records` (make_record bytes) into packets of at most MAX_PAYLOAD_BYTES:
@@ -242,18 +244,21 @@ static func _part_with_room(parts: Array[Dictionary], bytes: int, list_key: Stri
 
 
 static func _write_part(tick: int, tick_hz: int, index: int, count: int, part: Dictionary) -> PackedByteArray:
-	var w := StreamPeerBuffer.new()
-	w.put_u32(tick)
-	w.put_u8(tick_hz)
-	w.put_u8(index)
-	w.put_u8(count)
-	w.put_u8(part.forgets.size())
-	w.put_u8(part.records.size())
+	var out := PackedByteArray()
+	out.resize(HEADER_BYTES + part.forgets.size() * ID_BYTES)
+	out.encode_u32(0, tick)
+	out.encode_u8(4, tick_hz)
+	out.encode_u8(5, index)
+	out.encode_u8(6, count)
+	out.encode_u8(7, part.forgets.size())
+	out.encode_u8(8, part.records.size())
+	var at := HEADER_BYTES
 	for id in part.forgets:
-		w.put_u16(id)
+		out.encode_u16(at, id)
+		at += ID_BYTES
 	for record: PackedByteArray in part.records:
-		w.put_data(record)
-	return w.data_array
+		out.append_array(record)
+	return out
 
 
 # ------------------------------------------------------------------ decoding (client)
