@@ -112,14 +112,14 @@ func _refresh_servers() -> void:
 	for k in Net.servers:
 		var s: Dictionary = Net.servers[k]
 		var port := int(s.get("port", Net.GAME_PORT))
-		var origin := "http://%s:%d" % [s.ip, ServerAddress.DEFAULT_LIST_PORT]
+		var origin := "http://%s:%d" % [s.ip, int(s.get("list_port", ServerAddress.DEFAULT_LIST_PORT))]
 		_add_server_row(_servers, s, "%s:%d" % [s.ip, port], origin, false)
 
 
 ## One joinable server: a button with its details and ping. `origin` is where its match list answers ("" = unknown).
 ## `show_missing_ping`: write "-- ms" while no answer is known (online rows, which should have a list port).
 func _add_server_row(box: VBoxContainer, s: Dictionary, address: String, origin: String, show_missing_ping := true) -> void:
-	var base := _make_server_text(s)
+	var base := ServerPicker.make_server_text(s)
 	var cached: Dictionary = _pings.get(origin, {})
 	var text := base + "   " + (NO_PING if show_missing_ping else "")
 	if cached.has("ms") and int(cached.ms) >= 0:
@@ -136,10 +136,6 @@ func _add_server_row(box: VBoxContainer, s: Dictionary, address: String, origin:
 		if is_instance_valid(b) and ok:
 			b.text = "%s   %d ms" % [base, ping_ms])
 
-
-static func _make_server_text(s: Dictionary) -> String:
-	return "%s   [%s]  %s   %d/%d%s%s" % [s.name, s.get("game", "") if str(s.get("game", "")) != "" else s.get("mode", ""), s.get("map", ""), int(s.players), int(s.max),
-		"   (in progress)" if s.get("in_game", false) else "", "   (password)" if s.get("password", false) else ""]
 
 
 # ------------------------------------------------------------------ server matches (a server's page)
@@ -161,7 +157,7 @@ func _show_matches(matches: Array) -> void:
 		_show_note("no matches on this server")
 	for m: Dictionary in matches:
 		var url := Net.make_ws_url(_list_origin)
-		var b := Widgets.button(_make_server_text(m), func() -> void: _join(url))
+		var b := Widgets.button(ServerPicker.make_server_text(m), func() -> void: _join(url))
 		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		_matches.add_child(b)
 
@@ -212,7 +208,7 @@ func _check_address() -> void:
 	_probe.probe(origin, func(ok: bool, info: Dictionary, ping_ms: int) -> void:
 		if not is_instance_valid(_info):
 			return
-		_info.text = "%s   %d ms" % [_make_server_text(info), ping_ms] if ok \
+		_info.text = "%s   %d ms" % [ServerPicker.make_server_text(info), ping_ms] if ok \
 			else "No server info from %s (no match list there). You can still try Join address." % address.host)
 
 

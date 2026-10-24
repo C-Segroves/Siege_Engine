@@ -22,6 +22,10 @@ WRAPPER="/usr/local/bin/siege-update"
 PACKAGES=(git openssh-client ca-certificates curl unzip python3 python3-venv python3-pip python3-dev build-essential
 	ffmpeg nginx openssl gzip fontconfig util-linux)
 OPTIONAL_PACKAGES=(brotli libnginx-mod-http-brotli-static)
+# What a game or master server needs: git for the checkout and the libraries the headless Godot binary links against.
+SERVER_PACKAGES=(git openssh-client ca-certificates curl unzip fontconfig util-linux libfontconfig1 libx11-6 libxcursor1 libxi6
+	libxinerama1 libxrandr2 libgl1 libasound2)
+SERVERS_WRAPPER="/usr/local/bin/siege-servers-update"
 
 parse_args() {
 	local arg
@@ -58,11 +62,16 @@ install_packages() {
 	log "installing packages"
 	export DEBIAN_FRONTEND=noninteractive
 	apt-get update -q
+	if [[ "$SERVERS_ONLY" == yes ]]; then
+		apt-get install -y -q "${SERVER_PACKAGES[@]}"
+		return 0
+	fi
 	apt-get install -y -q "${PACKAGES[@]}"
 	local pkg
 	for pkg in "${OPTIONAL_PACKAGES[@]}"; do
 		apt-get install -y -q "$pkg" >/dev/null 2>&1 || log "optional package $pkg is not available - skipped"
 	done
+	apt-get install -y -q "${SERVER_PACKAGES[@]}" >/dev/null 2>&1 || log "some Godot runtime libraries could not be installed - a server may not start"
 }
 
 create_user() {
@@ -173,7 +182,7 @@ install_godot() {
 		chmod 755 "$GODOT_DIR/Godot_v${GODOT_VERSION}-stable_${platform}"
 		ln -sfn "$GODOT_DIR/Godot_v${GODOT_VERSION}-stable_${platform}" "$GODOT_BIN"
 	fi
-	if [[ ! -f "$TEMPLATES_DIR/web_nothreads_release.zip" ]]; then
+	if [[ "$SERVERS_ONLY" != yes && ! -f "$TEMPLATES_DIR/web_nothreads_release.zip" ]]; then
 		log "installing the Godot web export templates"
 		fetch_verified "$templates" "$TEMPLATES_SHA512"
 		install -d -o "$SERVICE_USER" -g "$SERVICE_USER" -m 755 "$TEMPLATES_DIR"
@@ -228,7 +237,7 @@ write_brotli_snippet() {
 render() {
 	sed -e "s|@HTTP_PORT@|$HTTP_PORT|g" -e "s|@SITE_DIR@|$SITE_DIR|g" -e "s|@SNIPPET_DIR@|$NGINX_SNIPPETS|g" \
 		-e "s|@SERVICE_USER@|$SERVICE_USER|g" -e "s|@SIEGE_CONF@|$SIEGE_CONF|g" -e "s|@REPO_DIR@|$REPO_DIR|g" \
-		-e "s|@UPDATE_INTERVAL@|$UPDATE_INTERVAL|g" -e "s|@GODOT_BIN@|$GODOT_BIN|g" -e "s|@INSTALL_DIR@|$INSTALL_DIR|g" 		-e "s|@DATA_DIR@|$DATA_DIR|g" -e "s|@GAME_SERVER_CONFIG@|$GAME_SERVER_CONFIG|g" 		-e "s|@GAME_SERVER_PORT@|$GAME_SERVER_PORT|g" -e "s|@GAME_SERVER_LIST_PORT@|$GAME_SERVER_LIST_PORT|g" 		-e "s|@MASTER_CONFIG@|$MASTER_CONFIG|g" "$1" > "$2"
+		-e "s|@UPDATE_INTERVAL@|$UPDATE_INTERVAL|g" -e "s|@GODOT_BIN@|$GODOT_BIN|g" -e "s|@INSTALL_DIR@|$INSTALL_DIR|g" -e "s|@SERVERS_DIR@|$SERVERS_DIR|g" 		-e "s|@DATA_DIR@|$DATA_DIR|g" -e "s|@GAME_SERVER_CONFIG@|$GAME_SERVER_CONFIG|g" 		-e "s|@GAME_SERVER_PORT@|$GAME_SERVER_PORT|g" -e "s|@GAME_SERVER_LIST_PORT@|$GAME_SERVER_LIST_PORT|g" 		-e "s|@MASTER_CONFIG@|$MASTER_CONFIG|g" "$1" > "$2"
 }
 
 setup_nginx() {
@@ -273,6 +282,74 @@ setup_game_server() {
 	systemctl reload nginx
 }
 
+# ------------------------------------------------------------------ extraction servers (optional)
+
+# "name" or "name:Map" -> the name; the map is the part after the colon, else the name with a capital letter.
+instance_name() { printf '%s\n' "${1%%:*}"; }
+instance_map() {
+	if [[ "$1" == *:* ]]; then
+		printf '%s\n' "${1#*:}"
+	else
+		printf '%s\n' "${1^}"
+	fi
+}
+
+# Writes SERVERS_DIR/<name>.json from the extraction example with this instance's name, map and ports (kept when it exists).
+write_instance_config() {
+	local name="$1" map="$2" index="$3"
+	local file="$SERVERS_DIR/$name.json"
+	local port=$(( SERVER_BASE_PORT + SERVER_PORT_STEP * index ))
+	if [[ -f "$file" ]]; then
+		return 0
+	fi
+	install -d -m 755 "$SERVERS_DIR"
+	sed -e "s|\"name\": \"[^\"]*\"|\"name\": \"$map raid\"|" -e "s|\"map\": \"[^\"]*\"|\"map\": \"$map\"|" \
+		-e "s|\"port\": 47700|\"port\": $port|" -e "s|\"list_port\": 47702|\"list_port\": $(( port + 2 ))|" \
+		"$REPO_DIR/deploy/server-extraction.json.example" > "$file"
+	if [[ "$MASTER_SERVER" != yes ]]; then
+		sed -i 's|"master": "[^"]*"|"master": ""|' "$file"
+	fi
+	chgrp "$SERVICE_USER" "$file"
+	chmod 640 "$file"
+	log "created $file ($map on udp $port, match list tcp $(( port + 2 ))) - edit it, then: systemctl restart siege-server@$name"
+}
+
+# SERVER_INSTANCES="katabatic varuna:Varuna": one siege-server@<name> service each.
+setup_game_instances() {
+	if [[ -z "$SERVER_INSTANCES" ]]; then
+		return 0
+	fi
+	render "$REPO_DIR/deploy/systemd/siege-server@.service.template" /etc/systemd/system/siege-server@.service
+	install -m 644 "$REPO_DIR/deploy/server_override.cfg" "$REPO_DIR/game/override.cfg"   # Jolt physics for the servers only
+	systemctl daemon-reload
+	local index=0 entry name
+	for entry in $SERVER_INSTANCES; do
+		name="$(instance_name "$entry")"
+		write_instance_config "$name" "$(instance_map "$entry")" "$index"
+		systemctl enable "siege-server@$name.service" >/dev/null
+		systemctl restart "siege-server@$name.service"
+		index=$(( index + 1 ))
+	done
+}
+
+# Without the update timer (SERVERS_ONLY): one command that pulls the code and restarts the servers.
+setup_servers_wrapper() {
+	if [[ "$SERVERS_ONLY" != yes ]]; then
+		rm -f "$SERVERS_WRAPPER"
+		return 0
+	fi
+	cat > "$SERVERS_WRAPPER" <<-EOF
+		#!/bin/sh
+		# Pulls the Siege Engine code of $BRANCH and restarts the game servers and the master. Installed by deploy/install.sh.
+		set -e
+		runuser -u $SERVICE_USER -- env HOME=$INSTALL_DIR git -C $REPO_DIR fetch --quiet origin $BRANCH
+		runuser -u $SERVICE_USER -- env HOME=$INSTALL_DIR git -C $REPO_DIR reset --hard FETCH_HEAD
+		runuser -u $SERVICE_USER -- env HOME=$INSTALL_DIR $GODOT_BIN --headless --path $REPO_DIR/game --import >/dev/null 2>&1 || true
+		systemctl restart 'siege-server@*' siege-master 2>/dev/null || true
+	EOF
+	chmod 755 "$SERVERS_WRAPPER"
+}
+
 # ------------------------------------------------------------------ master server (optional)
 
 # MASTER_SERVER=yes: the master server (server/master_server.tscn) as a systemd service. It listens on MASTER_PORT (in the config).
@@ -303,6 +380,10 @@ setup_master_server() {
 # ------------------------------------------------------------------ updates
 
 setup_systemd() {
+	if [[ "$SERVERS_ONLY" == yes ]]; then
+		systemctl disable --now siege-update.timer >/dev/null 2>&1 || true
+		return 0
+	fi
 	log "installing the update timer (every $UPDATE_INTERVAL)"
 	render "$REPO_DIR/deploy/systemd/siege-update.service.template" /etc/systemd/system/siege-update.service
 	render "$REPO_DIR/deploy/systemd/siege-update.timer.template" /etc/systemd/system/siege-update.timer
@@ -324,6 +405,8 @@ print_summary() {
 	log "  build now:    sudo siege-update --force      (log: $LOG_DIR/update.log)"
 	log "  then open:    http://${ip:-<this machine>}:$HTTP_PORT/"
 	[[ "$MASTER_SERVER" == yes ]] && log "  master server: http://${ip:-<this machine>}:$MASTER_PORT/servers   (open $MASTER_PORT/tcp; settings: $MASTER_CONFIG)"
+	[[ -n "$SERVER_INSTANCES" ]] && log "  game servers: $SERVER_INSTANCES   (settings: $SERVERS_DIR/<name>.json; logs: journalctl -u 'siege-server@*' -f)"
+	[[ "$SERVERS_ONLY" == yes ]] && log "  update:       sudo siege-servers-update      (game data: $DATA_DIR, your own copy)"
 	[[ "$GAME_SERVER" == yes ]] && log "  game server:  ws://${ip:-<this machine>}:$HTTP_PORT/ws   (list: /matches; settings: $GAME_SERVER_CONFIG)"
 	return 0
 }
@@ -338,14 +421,16 @@ main() {
 	make_dirs
 	setup_git_access
 	clone_repo
-	setup_venv
+	[[ "$SERVERS_ONLY" == yes ]] || setup_venv
 	install_godot
-	setup_nginx
-	setup_game_server
+	[[ "$SERVERS_ONLY" == yes ]] || setup_nginx
+	[[ "$SERVERS_ONLY" == yes ]] || setup_game_server
 	setup_master_server
+	setup_game_instances
+	setup_servers_wrapper
 	setup_systemd
 	print_summary
-	if (( BUILD_NOW )); then
+	if (( BUILD_NOW )) && [[ "$SERVERS_ONLY" != yes ]]; then
 		"$WRAPPER" --force
 	fi
 }

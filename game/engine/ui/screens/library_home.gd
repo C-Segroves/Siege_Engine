@@ -19,6 +19,7 @@ const TAB_TOOLS := "tools"
 const HOST_TEXT := "Host LAN game"
 const JOIN_TEXT := "Join LAN game"
 const HOST_ONLINE_TEXT := "Host online game"
+const PARTY_TEXT := "Party"
 const NO_MASTER_TEXT := "Set the master server address first: Options & tools > Options > Online."
 
 static var _last_tab := ""
@@ -226,6 +227,10 @@ func _add_play_section(page: VBoxContainer, can_play: bool) -> void:
 	var join := Widgets.button("Join online game" if WebPlatform.is_active() else JOIN_TEXT, func() -> void: _library().open_launcher(Launcher.JOIN_START_MODE))
 	join.disabled = not can_play
 	page.add_child(join)
+	var party := Widgets.button(make_party_text(), func() -> void: _library().open_launcher(Launcher.PARTY_START_MODE))
+	party.disabled = not can_play or WebPlatform.is_active()
+	party.tooltip_text = "Team up with friends: ready up together, then the leader sends you all to one server."
+	page.add_child(party)
 	if WebPlatform.is_active():
 		_disable_lan_buttons(page, [host, host_online])
 
@@ -238,12 +243,20 @@ func _add_tools_section(page: VBoxContainer) -> void:
 	var viewer := Widgets.button("Shape viewer", func() -> void: get_tree().change_scene_to_file(SHAPE_VIEWER))
 	viewer.disabled = Packs.packs.is_empty()
 	page.add_child(viewer)
+	page.add_child(Widgets.button("Music", func() -> void: router.go("jukebox", {})))
 	var server := Widgets.button("Run dedicated server...", func() -> void: ServerSheet.open(self))
 	server.disabled = Packs.pilotable().is_empty() or WebPlatform.is_active()
 	server.tooltip_text = "Starts a headless server on this PC that others can join by IP; stop it from the same sheet."
 	page.add_child(server)
 	page.add_child(Widgets.button("Options", func() -> void: router.go("options", {"home": "home"})))
 	page.add_child(Widgets.button("Tested game versions", func() -> void: router.go("versions")))
+
+
+## "Party", or "Party K7QWM" while the pilot is in one.
+static func make_party_text() -> String:
+	var tree := Engine.get_main_loop() as SceneTree
+	var session := tree.root.get_node_or_null(PartySession.NODE_NAME) as PartySession if tree != null else null
+	return "%s %s" % [PARTY_TEXT, session.client.code] if session != null and session.client.is_in_party() else PARTY_TEXT
 
 
 ## Browser build: no LAN play (WebPlatform); says why next to the buttons.

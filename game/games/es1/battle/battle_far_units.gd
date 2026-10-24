@@ -50,9 +50,10 @@ func is_parked(id: int) -> bool:
 	return _parked.has(id)
 
 
-## Whether the node of `h` may go: a bot that is neither the local player nor his target.
+## Whether the node of `h` may go: a bot that is neither the local player nor his target, and carries no player (a transport
+## with pilots aboard keeps its node: their seats refer to it).
 func can_park(h: Herc) -> bool:
-	if not _specs.has(h.net_id) or h.is_local_player():
+	if not _specs.has(h.net_id) or h.is_local_player() or (not (h is Infantry) and not VehicleOccupancy.of(h).make_riders().is_empty()):
 		return false
 	return not (is_instance_valid(battle.player) and battle.player.target == h)
 

@@ -13,6 +13,7 @@ const BANNER := "Dying loses the kit, the worn paid armour, body and skin, and a
 
 var _state: OperatorState
 var _rows: VBoxContainer
+var _scroll: ScrollContainer
 var _shown := PAGE_SIZE
 
 
@@ -20,13 +21,13 @@ func _init(state: OperatorState) -> void:
 	_state = state
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
 	add_child(Widgets.section("STASH"))
-	var scroll := ScrollContainer.new()
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	add_child(scroll)
+	_scroll = ScrollContainer.new()
+	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	add_child(_scroll)
 	_rows = VBoxContainer.new()
 	_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(_rows)
+	_scroll.add_child(_rows)
 
 
 ## The focusable controls (only "Show more" when the list is long).
@@ -36,6 +37,7 @@ func make_controls() -> Array[Control]:
 
 ## Rebuilds the view from the extraction profile.
 func refresh() -> void:
+	var keep := _remember_place()
 	for c in _rows.get_children():
 		_rows.remove_child(c)
 		c.queue_free()
@@ -46,7 +48,39 @@ func refresh() -> void:
 	_rows.add_child(Widgets.paragraph(ExtractionScreenText.make_insured_text(profile), "DimLabel"))
 	_rows.add_child(Widgets.paragraph("Kit: " + ExtractionScreenText.make_kit_summary(profile), "DimLabel"))
 	_add_groups(ExtractionKitEditor.make_overview(profile))
+	_restore_place.call_deferred(keep)
 	rebuilt.emit()
+
+
+## Where the view was before a rebuild (a sale rebuilds it): the scroll position and the focused row (its stack and place).
+func _remember_place() -> Dictionary:
+	var place := {"scroll": _scroll.scroll_vertical, "id": "", "index": -1}
+	var focused := get_viewport().gui_get_focus_owner() if is_inside_tree() else null
+	if focused is StashRow and _rows.is_ancestor_of(focused):
+		place.id = (focused as StashRow).stack_id()
+		place.index = _stash_rows().find(focused)
+	return place
+
+
+## Back to the scroll position, and the focus on the same stack, else on the row that took its place (a sold-out stack leaves).
+func _restore_place(place: Dictionary) -> void:
+	if not is_inside_tree():
+		return
+	_scroll.scroll_vertical = int(place.scroll)
+	if int(place.index) < 0:
+		return
+	var rows := _stash_rows()
+	if rows.is_empty():
+		return
+	var target: StashRow = rows[clampi(int(place.index), 0, rows.size() - 1)]
+	for r in rows:
+		if r.stack_id() == str(place.id):
+			target = r
+	target.grab_focus()
+
+
+func _stash_rows() -> Array:
+	return _rows.get_children().filter(func(c: Node) -> bool: return c is StashRow and not c.is_queued_for_deletion())
 
 
 func _add_groups(groups: Array) -> void:

@@ -126,7 +126,7 @@ func _on_tick(tick: int) -> void:
 	if tick % snapshot_interval != 0:
 		return
 	if stream:
-		stream.send_snapshot(tick, clock.tick_hz, clock.make_time_ms(tick), Array(multiplayer.get_peers()))
+		stream.send_snapshot(tick, clock.tick_hz, clock.make_time_ms(tick), battle.make_snapshot_peers())
 	else:
 		_send_snapshot(clock.make_time_ms(tick))
 

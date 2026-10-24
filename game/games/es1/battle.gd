@@ -51,6 +51,11 @@ var stats := BattleStats.new(self)
 var far_units: BattleFarUnits
 ## The extraction raid (config mode "extraction"; null in other modes).
 var extraction: ExtractionDirector
+## Host: every spawn spec sent, by net id, until its unit is removed: what a pilot who joins the running battle is sent
+## (RaidReplay; persistent raids only).
+var spawn_log := {}
+## Host: the pilots a persistent raid sends snapshots to (admitted and loaded; RaidServer).
+var admitted_peers := {}
 ## The game mode's rules, objects and HUD (config "game_mode" played by GameModeDirector; null otherwise).
 var game_mode: GameModeDirector
 var hud: HUD
@@ -146,6 +151,8 @@ func _ready() -> void:
 	_music.start(config, mdef)
 	_start_screenshot_flag()
 	set_process(true)
+	if bool(config.get("late_join", false)):
+		Net.report_loaded()   # the server sends the world as it is and drops this pilot in (RaidServer)
 
 
 ## The playable area and the world floor (BattleBounds); a Tribes mission's scripts own its mission area.
@@ -235,6 +242,10 @@ func make_pilot_name(peer: int) -> String:
 
 @rpc("authority", "reliable", "call_local")
 func _spawn(spec: Dictionary) -> void:
+	if vehicles.has(int(spec.net_id)):
+		return   # a pilot who joined a running raid is sent the spawns it may also have received live
+	if multiplayer.is_server():
+		spawn_log[int(spec.net_id)] = spec
 	if far_units:
 		far_units.note_spawn(spec)
 	build_unit(spec)
@@ -458,6 +469,22 @@ func _finish(p_result: Dictionary, summary: Dictionary) -> void:
 	MatchResults.open_in_place_of(self, summary)
 
 
+## Host of a persistent raid: the pilots the snapshots go to (all connected ones in any other battle).
+func make_snapshot_peers() -> Array:
+	var peers := Array(multiplayer.get_peers())
+	if not bool(config.get("persistent", false)):
+		return peers
+	return peers.filter(func(p: int) -> bool: return admitted_peers.has(p))
+
+
+## Host of a persistent raid: the world is closed (a reset, or nobody is left); the waiting pilots stay connected.
+func end_persistent_world() -> void:
+	_finished = true
+	_over = true
+	Net.end_persistent_world()
+	queue_free()
+
+
 ## Leaves without results (LAN: this pilot left, or the host closed the session): back to the front
 ## end, whose status line shows `status`.
 func leave_to_front_end(status: String) -> void:
@@ -485,6 +512,7 @@ func remove_vehicle(net_id: int) -> void:
 func _remove_vehicle(net_id: int) -> void:
 	var h: Herc = vehicles.get(net_id)
 	vehicles.erase(net_id)
+	spawn_log.erase(net_id)
 	entities.unregister(net_id)
 	if far_units:
 		far_units.apply_removed(net_id)

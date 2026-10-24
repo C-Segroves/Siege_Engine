@@ -10,7 +10,11 @@ const POLL_SECONDS := 0.25
 const MIN_PLAYERS := 2
 const MAX_BOTS_LIMIT := 200
 const EXCLUDED_MODES := ["extraction"]
-const MODES := ["vs", "coop"]
+const MODES := ["vs", "coop", "extraction"]
+const MODE_NAMES := ["versus", "co-op", "extraction raid (a persistent raid on the map)"]
+## An extraction raid on this PC starts with some faction soldiers and vehicles (ServerConfig's own defaults are none).
+const RAID_SOLDIERS := 16
+const RAID_VEHICLES := 4
 const DEFAULT_MAP := "(first map)"
 
 var _sheet: ModalSheet
@@ -48,7 +52,7 @@ func _ready() -> void:
 	_map = _add_field("Map", Widgets.option_button([DEFAULT_MAP] + _maps.map(func(e: Dictionary) -> String: return str(e.name)), _find_map(str(saved.get("map", "")))))
 	_game_mode = _add_field("Game mode", Widgets.option_button(_modes.map(func(id: String) -> String: return GameModes.label_for(id)),
 		maxi(0, _modes.find(str(saved.get("game_mode", ServerConfig.DEFAULTS.game_mode))))))
-	_mode = _add_field("Players", Widgets.option_button(["versus", "co-op"], maxi(0, MODES.find(str(saved.get("mode", ServerConfig.DEFAULTS.mode))))))
+	_mode = _add_field("Players", Widgets.option_button(MODE_NAMES, maxi(0, MODES.find(str(saved.get("mode", ServerConfig.DEFAULTS.mode))))))
 	_port = _add_field("Port", Widgets.line_edit(str(saved.get("port", ServerConfig.DEFAULTS.port)), str(Net.GAME_PORT)))
 	_players = _add_slider("Max players", MIN_PLAYERS, Net.MAX_PLAYERS, int(saved.get("max_players", ServerConfig.DEFAULTS.max_players)))
 	_password = _add_field("Password", Widgets.line_edit("", "empty = open"))
@@ -100,9 +104,12 @@ func _find_map(wanted: String) -> int:
 func make_values() -> Dictionary:
 	var map_entry: Dictionary = _maps[_map.selected - 1] if _map.selected > 0 else {}
 	var map_id := str((map_entry.get("config", {}) as Dictionary).get("map", map_entry.get("name", "")))
-	return {"name": _name.text.strip_edges(), "map": map_id, "game_mode": str(_modes[_game_mode.selected]), "mode": MODES[_mode.selected],
+	var values := {"name": _name.text.strip_edges(), "map": map_id, "game_mode": str(_modes[_game_mode.selected]), "mode": MODES[_mode.selected],
 		"port": clampi(int(_port.text), 1, 65535), "max_players": int(_players.value), "password": _password.text,
 		"max_bots": int(_bots.value), "master": _master.text.strip_edges()}
+	if values.mode == ExtractionRules.MODE:
+		values.merge({"bots": RAID_SOLDIERS, "ai": RAID_VEHICLES})
+	return values
 
 
 func _toggle() -> void:

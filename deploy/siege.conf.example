@@ -77,6 +77,20 @@ GAME_SERVER_CONFIG="/etc/siege-engine/server.json"
 GAME_SERVER_PORT="47700"
 GAME_SERVER_LIST_PORT="47702"
 
+# ------------------------------------------------------------------ extraction servers (optional)
+# Game servers that run on this machine, one systemd instance of siege-server@.service each (settings in
+# SERVERS_DIR/<name>.json, created from deploy/server-extraction.json.example): "katabatic varuna:Varuna" runs two raids,
+# one on Katabatic and one on Varuna's Fall. "name" alone plays the map of that name; "name:Map" names the map (part of its
+# name as the host screen shows it). Each instance gets its own ports: the first SERVER_BASE_PORT (game, udp) and
+# SERVER_BASE_PORT + 2 (match list, tcp), the next ones SERVER_PORT_STEP higher. Guide: docs/SERVER_DEPLOY.md "Ubuntu container on Proxmox".
+SERVER_INSTANCES=""
+SERVERS_DIR="/etc/siege"
+SERVER_BASE_PORT="47700"
+SERVER_PORT_STEP="20"
+# "yes": this machine only runs game servers and the master (a container for the LAN): no web build, no nginx, no importer
+# environment, no update timer. Bring the game data yourself (DATA_DIR) and update with "siege-servers-update".
+SERVERS_ONLY="no"
+
 # ------------------------------------------------------------------ master server (optional)
 # "yes" runs a master server on this machine (systemd service siege-master): game servers register with it and players
 # list them (docs/SERVER_DEPLOY.md "Run a master server"). It lists games only, never relays game traffic. Open

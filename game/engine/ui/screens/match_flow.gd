@@ -275,11 +275,18 @@ static func make_ai_roster(s: Dictionary, vehicles: Array) -> Array:
 	return out
 
 
-## Free-for-all versus: every pilot on an own team.
+## Free-for-all versus: every pilot on an own team, the pilots of one party (PartyRoster) on theirs together.
 static func apply_free_for_all_teams() -> void:
 	var k := 0
+	var party_team := {}
 	for id in Net.roster:
+		var party_id := PartyRoster.make_party_id(Net.roster[id])
+		if party_id != "" and party_team.has(party_id):
+			Net.roster[id].team = party_team[party_id]
+			continue
 		Net.roster[id].team = FREE_FOR_ALL_TEAM_BASE + k
+		if party_id != "":
+			party_team[party_id] = Net.roster[id].team
 		k += 1
 
 

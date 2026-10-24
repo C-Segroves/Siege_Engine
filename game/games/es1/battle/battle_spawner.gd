@@ -194,6 +194,13 @@ func spawn_roster() -> void:
 		battle.send_spawn(_make_ai_spec(a, placement))
 
 
+## Host of a running battle: spawns the soldier of `peer`, who joined late, from his roster `entry` (it is also kept in the
+## battle's roster). He stands at a map start until a transport takes him in (ExtractionTransports.start_drop_in).
+func spawn_player(peer: int, entry: Dictionary) -> void:
+	battle.config.roster[peer] = entry
+	battle.send_spawn(_make_player_spec(peer, entry, {"k": 0, "team_counts": {}, "placed": []}))
+
+
 ## Next start transform for a `vehicle_id` of `team`; advances the placement counters.
 ## Flying vehicles start on the map's vehicle pads when it has any.
 func _place(team: int, vehicle_id: String, placement: Dictionary) -> Transform3D:

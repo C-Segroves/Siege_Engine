@@ -130,7 +130,7 @@ static func _is_number(v: Variant) -> bool:
 	return v is int or v is float
 
 
-static func _clean_text(v: Variant, max_len: int) -> String:
+static func make_clean_text(v: Variant, max_len: int) -> String:
 	if not v is String:
 		return ""
 	var out := ""
@@ -147,7 +147,7 @@ static func make_clean_entry(body: Variant) -> Dictionary:
 		return {"error": "body must be a JSON object"}
 	if not _is_port(body.get("port")):
 		return {"error": "port must be 1-65535"}
-	var name := _clean_text(body.get("name", ""), MAX_NAME)
+	var name := make_clean_text(body.get("name", ""), MAX_NAME)
 	if name == "":
 		return {"error": "name is required"}
 	var max_players: Variant = body.get("max", 0)
@@ -162,8 +162,8 @@ static func make_clean_entry(body: Variant) -> Dictionary:
 	var list_port: Variant = body.get("list_port", 0)
 	if not _is_number(list_port) or int(list_port) < 0 or int(list_port) > 65535:
 		return {"error": "list_port must be 0-65535"}
-	return {"name": name, "game": _clean_text(body.get("game", ""), MAX_FIELD), "mode": _clean_text(body.get("mode", ""), MAX_FIELD),
-		"map": _clean_text(body.get("map", ""), MAX_NAME), "players": int(players), "max": int(max_players),
+	return {"name": name, "game": make_clean_text(body.get("game", ""), MAX_FIELD), "mode": make_clean_text(body.get("mode", ""), MAX_FIELD),
+		"map": make_clean_text(body.get("map", ""), MAX_NAME), "players": int(players), "max": int(max_players),
 		"password": body.get("password", false) == true, "in_game": body.get("in_game", false) == true,
-		"version": _clean_text(body.get("version", ""), MAX_FIELD), "transport": transport,
+		"version": make_clean_text(body.get("version", ""), MAX_FIELD), "transport": transport,
 		"port": int(body.port), "list_port": int(list_port)}

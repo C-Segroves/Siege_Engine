@@ -12,7 +12,8 @@ const MAX_LINES := 200
 const READY_MARK := "SERVER READY"
 const FAILED_MARK := "SERVER FAILED"
 ## The sheet's keys that go to the server (the rest of ServerConfig keeps its defaults).
-const SHEET_KEYS := ["name", "map", "mode", "game_mode", "port", "max_players", "password", "max_bots", "master", "list_port", "bots", "ai", "lobby_seconds", "results_seconds"]
+const SHEET_KEYS := ["name", "map", "mode", "game_mode", "port", "max_players", "password", "max_bots", "master", "list_port", "bots", "ai", "lobby_seconds", "results_seconds",
+	"relations", "raid_fast", "raid_empty_seconds", "raid_reset_minutes", "party_wait_seconds", "results_hold_seconds"]
 
 static var _pid := -1
 static var _stdio: FileAccess

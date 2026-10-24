@@ -91,14 +91,20 @@ func start_host(faction_areas: Dictionary) -> void:
 	if base:
 		base.object_destroyed.connect(_on_base_object_destroyed)
 	for peer in director.battle.config.get("roster", {}):
-		var kit: Dictionary = director.battle.config.roster[peer].get("kit", {}) if director.battle.config.roster[peer].get("kit") is Dictionary else {}
-		var states := []
-		for t in kit.get("tasks", []).slice(0, RaidTaskBoard.make_max_picked()):
-			if t is Dictionary:
-				states.append(_bind(t.duplicate(), faction_areas))
-				_add_objective(int(peer), states.back())
-		by_peer[int(peer)] = states
-		_send_state(int(peer))
+		start_player(int(peer), faction_areas)
+
+
+## Host: takes up the tasks `peer` brought in his kit (also a pilot who joined the running raid).
+func start_player(peer: int, faction_areas: Dictionary) -> void:
+	var entry: Dictionary = director.battle.config.roster[peer]
+	var kit: Dictionary = entry.get("kit", {}) if entry.get("kit") is Dictionary else {}
+	var states := []
+	for t in kit.get("tasks", []).slice(0, RaidTaskBoard.make_max_picked()):
+		if t is Dictionary:
+			states.append(_bind(t.duplicate(), faction_areas))
+			_add_objective(peer, states.back())
+	by_peer[peer] = states
+	_send_state(peer)
 
 
 func _process(delta: float) -> void:

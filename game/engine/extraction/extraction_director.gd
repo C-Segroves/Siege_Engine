@@ -342,6 +342,32 @@ func _start_player(peer: int) -> void:
 	send_inventory(peer)
 
 
+## Host, a persistent raid: the pilots in `peers` joined the running raid. Their soldiers exist (BattleSpawner.spawn_player);
+## each starts with the kit he brought, his tasks and his raid points. The caller then drops them in together.
+func start_late_players(peers: Array) -> void:
+	for peer in peers:
+		var p := int(peer)
+		tasks.start_player(p, squads.placed_areas)
+		_start_player(p)
+		watch(battle.occupancy.soldier_of(p))
+		callins.send_to(p, callins.points, "_send_report", [])
+
+
+## Host, a persistent raid: sends `peer` (who just built the battle) the raid as it is now.
+func replay_to(peer: int) -> void:
+	var records := containers.values().map(func(c: LootContainer) -> Dictionary: return c.make_record())
+	send_to(peer, self, "_setup_raid", [{"containers": records, "zones": zones, "areas": [], "teams": faction_teams,
+		"relations": TeamRelations.make_state(), "owners": make_base_owners()}])
+	for p in status:
+		var soldier := battle.occupancy.soldier_of(int(p))
+		if soldier == null:
+			continue
+		send_to(peer, self, "_apply_equip", [soldier.net_id, soldier.make_loadout()])
+		if str(status[p]) == STATUS_EXTRACTED:
+			send_to(peer, self, "_retire_soldier", [soldier.net_id])
+	send_to(peer, self, "_exfil_update", [transports.make_states()])
+
+
 ## Host: `h` is watched for its death (bags and salvage, raid points) and for the hits it takes (assists).
 func watch(h: Herc) -> void:
 	if is_instance_valid(h) and not h.destroyed.is_connected(_on_destroyed):
@@ -668,6 +694,8 @@ func _raid_result(result: String, stacks: Array, money: int) -> void:
 		my_lost = RaidOperator.apply_died(Net.player_name, [insured_id] if insured_id != "" else [])
 	profile.save()
 	InventoryPanel.close_open(self)
+	if bool(battle.config.get("persistent", false)) and not multiplayer.is_server():
+		RaidResultExit.begin(self, result, stacks, money)
 
 
 func _on_player_left(peer: int) -> void:
@@ -730,6 +758,8 @@ func _setup_raid(setup: Dictionary) -> void:
 
 @rpc("authority", "reliable", "call_local")
 func _add_container(record: Dictionary) -> void:
+	if containers.has(int(record.id)):
+		return   # a pilot who joined the running raid is sent the containers it may also have received live
 	var c := LootContainer.make(record)
 	containers[c.container_id] = c
 	battle.add_child(c)
@@ -791,8 +821,8 @@ func _exfil_update(states: Array) -> void:
 
 ## The raid ends end_delay_s after the last player left it.
 func _check_end(delta: float) -> void:
-	if status.is_empty() or not make_raid_peers().is_empty():
-		return
+	if bool(battle.config.get("persistent", false)) or status.is_empty() or not make_raid_peers().is_empty():
+		return   # a persistent raid is closed by its server (RaidServer), never by the last pilot leaving it
 	if not _ender.has_verdict():
 		_ender.apply_verdict(MissionVerdict.make_win(0, "", ExtractionRules.timer(battle.config, "end_delay_s")))
 	_ender.apply_tick(delta)

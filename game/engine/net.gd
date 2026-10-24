@@ -9,8 +9,13 @@ signal connection_failed
 signal session_ended(reason: String)
 signal game_starting(config: Dictionary)
 signal game_ended
+## Host: a pilot admitted into the running world (join in progress) has built his battle and can be sent its state.
+signal pilot_loaded(peer: int)
+## A party announced itself on the LAN (PartyLanHost); the party screen lists them.
+signal parties_changed
 
 ## ENet peer timeouts (ms; limit = unanswered resend rounds): well above ENet's 5 s / 30 s so map loading survives.
+const DISCOVERY_EXPIRE_MS := 4000
 const PEER_TIMEOUT_LIMIT := 64
 const PEER_TIMEOUT_MIN_MS := 15000
 const PEER_TIMEOUT_MAX_MS := 60000
@@ -32,10 +37,12 @@ const WS_PATH := "/ws"
 const NO_TEAM := -1
 ## Roster entry keys a pilot may set (set_my_info): the PlayerProfile keys carry his soldier's armour, body and
 ## skins.
+## "party" is {id, size}: the party code the pilot came with and how many members joined together (PartyFlow); a dedicated
+## server keeps one party on one team and one transport.
 ## "slot" is the compact character slot snapshot (CharacterSlot.make_roster_snapshot), "goals" / "team_goals" the picked
 ## lobby goals, "wingmen" the campaign wingmen's specs (docs/design/lobby_loadout_economy.md section 7.1).
 const ROSTER_KEYS := ["vehicle", "team", "ready", "loadout", "name", "kit", "infantry_armor", "infantry_body",
-	"infantry_skin", "herc_skin", "mounts", "slot", "goals", "team_goals", "wingmen"]
+	"infantry_skin", "herc_skin", "mounts", "slot", "goals", "team_goals", "wingmen", "party"]
 ## Roster pushes closer together than this are merged into one (the first goes out at once, the rest as one later).
 const ROSTER_PUSH_INTERVAL_S := 0.2
 
@@ -66,6 +73,14 @@ var _pending_info := {}
 var _push_wait_s := 0.0
 var _push_pending := false
 var game_port := GAME_PORT
+## Where this host answers its match list (MatchListServer; 0 = none): announced with the LAN broadcast so a browser can ping it.
+var list_port := MatchListServer.DEFAULT_PORT
+## A persistent world (dedicated extraction server): pilots may join while it runs, and it is listed as open.
+var join_in_progress := false
+## LAN parties seen: "ip:port" -> {code, name, members, max, ip, port, seen} (PartyLanHost broadcasts them).
+var parties := {}
+## False: this process does not listen for LAN broadcasts (tests that run several clients on one machine: one port, one listener).
+var discovery_enabled := true
 ## "Host online": the hosted game is listed on a master server (MasterPresence) and answers the match list (MatchListServer).
 var _presence: MasterPresence
 var _list: MatchListServer
@@ -197,8 +212,8 @@ static func make_ws_url(origin: String) -> String:
 func make_match_info() -> Dictionary:
 	var shown := server_name if server_name != "" else "%s's game" % player_name
 	return {"proto": PROTOCOL, "name": shown, "mode": settings.get("mode", ""), "map": settings.get("map", ""),
-		"players": roster.size(), "max": max_players, "port": game_port, "in_game": _in_game,
-		"password": password != "", "transport": transport}
+		"players": roster.size(), "max": max_players, "port": game_port, "list_port": list_port,
+		"in_game": _in_game and not join_in_progress, "password": password != "", "transport": transport}
 
 
 func leave() -> void:
@@ -207,7 +222,14 @@ func leave() -> void:
 	session_ended.emit("Left session")
 
 
+## Leaves the session without telling the screens (session_ended): a pilot of a persistent raid goes to his results screen.
+func leave_quiet() -> void:
+	NetLog.write("leave", "local player left the session quietly")
+	_reset()
+
+
 func _reset() -> void:
+	join_in_progress = false
 	stop_online_listing()
 	_push_wait_s = 0.0
 	_push_pending = false
@@ -259,7 +281,7 @@ func is_listed_online() -> bool:
 # ------------------------------------------------------------------ discovery
 
 func start_discovery() -> void:
-	if _udp_listen or WebPlatform.is_active():
+	if _udp_listen or WebPlatform.is_active() or not discovery_enabled:
 		return
 	_udp_listen = PacketPeerUDP.new()
 	if _udp_listen.bind(DISCOVERY_PORT) != OK:
@@ -279,28 +301,42 @@ func _process(delta: float) -> void:
 		_bcast_t -= delta
 		if _bcast_t <= 0.0:
 			_bcast_t = 1.0
-			var info := {"proto": PROTOCOL, "name": "%s's game" % player_name, "mode": settings.mode,
-				"map": settings.map, "players": roster.size(), "max": max_players, "port": GAME_PORT,
-				"in_game": _in_game}
-			_udp_broadcast.put_packet(JSON.stringify(info).to_utf8_buffer())
+			_udp_broadcast.put_packet(JSON.stringify(make_match_info()).to_utf8_buffer())
 	if _udp_listen:
-		var changed := false
-		while _udp_listen.get_available_packet_count() > 0:
-			var pkt := _udp_listen.get_packet()
-			var ip := _udp_listen.get_packet_ip()
-			var info = JSON.parse_string(pkt.get_string_from_utf8())
-			if info is Dictionary and info.get("proto") == PROTOCOL:
-				info["ip"] = ip
-				info["seen"] = Time.get_ticks_msec()
-				servers["%s:%d" % [ip, int(info.port)]] = info
-				changed = true
-		var now := Time.get_ticks_msec()
-		for k in servers.keys():
-			if now - int(servers[k].seen) > 4000:
-				servers.erase(k)
-				changed = true
-		if changed:
-			servers_changed.emit()
+		_read_discovery()
+
+
+## Reads the LAN broadcasts: games and dedicated servers (PROTOCOL), parties (PartyLanHost.PROTOCOL).
+func _read_discovery() -> void:
+	var changed := false
+	var parties_moved := false
+	while _udp_listen.get_available_packet_count() > 0:
+		var pkt := _udp_listen.get_packet()
+		var ip := _udp_listen.get_packet_ip()
+		var info = JSON.parse_string(pkt.get_string_from_utf8())
+		if not info is Dictionary or not info.has("port"):
+			continue
+		info["ip"] = ip
+		info["seen"] = Time.get_ticks_msec()
+		if info.get("proto") == PROTOCOL:
+			servers["%s:%d" % [ip, int(info.port)]] = info
+			changed = true
+		elif info.get("proto") == PartyLanHost.PROTOCOL:
+			parties["%s:%d" % [ip, int(info.port)]] = info
+			parties_moved = true
+	var now := Time.get_ticks_msec()
+	for k in servers.keys():
+		if now - int(servers[k].seen) > DISCOVERY_EXPIRE_MS:
+			servers.erase(k)
+			changed = true
+	for k in parties.keys():
+		if now - int(parties[k].seen) > DISCOVERY_EXPIRE_MS:
+			parties.erase(k)
+			parties_moved = true
+	if changed:
+		servers_changed.emit()
+	if parties_moved:
+		parties_changed.emit()
 
 
 # ------------------------------------------------------------------ roster
@@ -310,9 +346,10 @@ func _register(n: String, proto: String, pw: String) -> void:
 	if not is_host():
 		return
 	var id := multiplayer.get_remote_sender_id()
-	if proto != PROTOCOL or _in_game or roster.size() >= max_players or pw != password:
+	var locked := _in_game and not join_in_progress
+	if proto != PROTOCOL or locked or roster.size() >= max_players or pw != password:
 		var reason := "Version mismatch" if proto != PROTOCOL else ("Wrong password" if pw != password
-			else ("Game already in progress" if _in_game else "Server full"))
+			else ("Game already in progress" if locked else "Server full"))
 		NetLog.write("refuse", "peer %d '%s': %s (client protocol %s, host %s; in_game %s, players %d/%d)" % [
 			id, n, reason, proto, PROTOCOL, _in_game, roster.size(), max_players])
 		_kick.rpc_id(id, reason)
@@ -343,6 +380,12 @@ func make_unready_names() -> PackedStringArray:
 		if int(id) != 1 and not bool(roster[id].get("ready", false)):
 			out.append(str(roster[id].get("name", "?")))
 	return out
+
+
+## Host: sends `peer` away with `reason` (its session_ended text).
+func kick(peer: int, reason: String) -> void:
+	if is_host() and is_online() and multiplayer.get_peers().has(peer):
+		_kick.rpc_id(peer, reason)
 
 
 @rpc("authority", "reliable")
@@ -508,6 +551,51 @@ func start_game(config: Dictionary) -> void:
 func _begin(config: Dictionary) -> void:
 	_in_game = true
 	game_starting.emit(config)
+
+
+## Host of a persistent world (dedicated extraction server): the world exists for the host only; pilots are admitted into it
+## one by one (begin_for), so `config` carries no roster.
+func start_persistent_world(config: Dictionary) -> void:
+	if not is_host():
+		return
+	_in_game = true
+	join_in_progress = true
+	config["roster"] = {}
+	config["persistent"] = true
+	NetLog.write("start_world", "persistent world, mode %s" % settings.get("mode", "?"))
+	game_starting.emit(config)
+
+
+## Host: the persistent world is gone; waiting pilots keep their place (no ready flags are cleared).
+func end_persistent_world() -> void:
+	NetLog.write("end_world", "persistent world closed")
+	_in_game = false
+	game_ended.emit()
+
+
+## Host: sends the battle `config` (with the pilot's own roster entry) to `peer`, who builds it and reports back.
+func begin_for(peer: int, config: Dictionary) -> void:
+	if is_host() and is_online():
+		_begin_late.rpc_id(peer, config)
+
+
+@rpc("authority", "reliable")
+func _begin_late(config: Dictionary) -> void:
+	config["late_join"] = true
+	_in_game = true
+	game_starting.emit(config)
+
+
+## Client, once the battle of a late join is built.
+func report_loaded() -> void:
+	if not is_host() and is_online():
+		_loaded.rpc_id(1)
+
+
+@rpc("any_peer", "reliable")
+func _loaded() -> void:
+	if is_host():
+		pilot_loaded.emit(multiplayer.get_remote_sender_id())
 
 
 func end_game() -> void:

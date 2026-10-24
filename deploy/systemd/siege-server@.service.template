@@ -1,0 +1,21 @@
+# Rendered by deploy/install.sh into /etc/systemd/system/siege-server@.service (SERVER_INSTANCES in siege.conf).
+# One instance per game server on this machine: siege-server@<name> reads @SERVERS_DIR@/<name>.json and runs the map set there
+# (docs/SERVER_DEPLOY.md "Ubuntu container on Proxmox"). Instances differ in their ports ("port", "list_port" in the json).
+#   systemctl enable --now siege-server@katabatic      journalctl -u siege-server@katabatic -f
+[Unit]
+Description=Siege Engine game server (%i)
+After=network-online.target siege-master.service
+Wants=network-online.target
+
+[Service]
+User=@SERVICE_USER@
+Environment=HOME=@INSTALL_DIR@
+ExecStart=@GODOT_BIN@ --headless --audio-driver Dummy --path @REPO_DIR@/game res://server/dedicated_server.tscn -- --server --config=@SERVERS_DIR@/%i.json --data_dir=@DATA_DIR@
+Restart=always
+RestartSec=5
+LimitNOFILE=4096
+NoNewPrivileges=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

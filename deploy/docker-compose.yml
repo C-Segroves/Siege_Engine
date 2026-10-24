@@ -2,6 +2,7 @@
 #   LAN:    docker compose --profile lan    up -d --build    web build + game data + game server on one port
 #   Public: docker compose --profile public up -d --build    DEDICATED SERVER ONLY behind TLS (Caddy)
 # Settings: copy server.json.example to server.json and edit it; copy env.example to .env (ports, host name).
+# Extraction servers (several raids on one host, a master with parties): docker compose --profile extraction --profile master up -d --build
 # Guide: docs/SERVER_DEPLOY.md.
 name: siege
 
@@ -56,6 +57,29 @@ services:
     volumes:
       - ./Caddyfile.public:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
+
+  # ---------------------------------------------------------------- extraction servers
+  # Two persistent raids, one map each, on one host. They use the host network (UDP: the game port is announced as it is
+  # configured, and the LAN broadcast reaches the LAN), so each instance has its own ports in its own json: copy
+  # server-extraction.json.example to servers/katabatic.json (port 47700, list_port 47702) and servers/varuna.json (port 47720,
+  # list_port 47722, "map": "Varuna"); set "master" to the master's address (127.0.0.1:47710 on this host). Linux only.
+  raid-katabatic:
+    <<: *game-server
+    profiles: [extraction]
+    network_mode: host
+    volumes:
+      - ./servers/katabatic.json:/config/server.json:ro
+      - ${SIEGE_GAMEDATA:-../gamedata}:/app/gamedata:ro
+    command: ["--server", "--config=/config/server.json"]
+
+  raid-varuna:
+    <<: *game-server
+    profiles: [extraction]
+    network_mode: host
+    volumes:
+      - ./servers/varuna.json:/config/server.json:ro
+      - ${SIEGE_GAMEDATA:-../gamedata}:/app/gamedata:ro
+    command: ["--server", "--config=/config/server.json"]
 
   # ---------------------------------------------------------------- master server
   # Lists game servers (they register and send heartbeats; players ask for the list). No game data, no game traffic.

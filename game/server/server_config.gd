@@ -29,7 +29,18 @@ const DEFAULTS := {
 	"stats_seconds": 60.0,
 	"master": "",         # a master server to list this server on (http://host:47710); empty = not listed
 	"master_token": "",   # the master's auth_token, when it requires one
+	# --- mode "extraction": one persistent raid on `map` (docs/SERVER_DEPLOY.md "Extraction servers")
+	"relations": ExtractionFactions.DEFAULT_PRESET,   # the factions' relation preset (story, all_hostile, humans_allied)
+	"raid_fast": 0,                 # 1: the short test timers of ExtractionRules (fast_timers)
+	"raid_seed": 0,                 # the loot / squad seed of every world; 0 = a new one each time
+	"raid_reset_minutes": 0,        # the world resets this long after it opened (new drop-ins pause until the last raider is out); 0 = never
+	"raid_reset_grace_seconds": 300.0,   # raiders still in at the reset time get this long to extract before the world closes
+	"raid_empty_seconds": 120.0,    # the world closes this long after the last raider left and nobody waits to drop in; 0 = it stays up
+	"party_wait_seconds": 60.0,     # a party drops in together: its first built member waits this long for the rest to connect (those connected are always waited for)
+	"results_hold_seconds": 5.0,    # an extracted / killed pilot sees his result this long before he leaves the raid
 }
+## The modes a dedicated server plays.
+const MODES := ["vs", "coop", ExtractionRules.MODE]
 
 
 ## Defaults + the JSON file named by `--config=` + the other arguments.
@@ -79,8 +90,11 @@ static func make_settings(cfg: Dictionary) -> Dictionary:
 	var s := LobbySettings.make({"mode": mode, "ai": int(cfg.ai), InfantryBots.CONFIG_KEY: int(cfg.bots),
 		"game_mode": {"id": game_mode, "team_based": GameModes.is_team_based(game_mode)},
 		"frag_limit": int(cfg.frag_limit), "world_idx": find_map_index(str(cfg.map)),
-		"limits": {GameModes.TIME_LIMIT_KEY: int(cfg.time_limit_s)}})
+		"limits": {GameModes.TIME_LIMIT_KEY: int(cfg.time_limit_s)}, "relations": str(cfg.relations)})
 	s["map"] = str(cfg.map)
+	var entries := MapPicker.make_entries() if mode == ExtractionRules.MODE else []
+	if int(s.world_idx) < entries.size():
+		s["map"] = str(entries[int(s.world_idx)].name)   # the lobby and the lists name the map the way the host screen does
 	s[BotBudget.CONFIG_KEY] = int(cfg.max_bots)
 	return s
 

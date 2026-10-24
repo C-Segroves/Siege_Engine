@@ -201,7 +201,7 @@ func _check_launcher_routes() -> void:
 	await _frames(4)
 	_expect(launcher.current_name == "browser", "launcher opens on the page the library asked for")
 	_expect(_focus() != null and launcher.is_ancestor_of(_focus()), "launcher page has focus (%s)" % _focus_name())
-	for page in ["options", "new_campaign", "saves"]:
+	for page in ["options", "new_campaign", "saves", "party"]:
 		launcher.go(page)
 		await _frames(3)
 		_expect(_focus() != null and launcher.current.is_ancestor_of(_focus()), "%s: first control focused (%s)" % [page, _focus_name()])

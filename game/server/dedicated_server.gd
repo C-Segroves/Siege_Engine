@@ -13,16 +13,25 @@ const LOBBY := 0
 const MATCH := 1
 
 var cfg := {}
+## False: a check sets `cfg` and calls start() itself.
+var autostart := true
 var _battle: Node
 var _state := LOBBY
 var _waited := 0.0
 var _idle := 0.0
 var _list: MatchListServer
 var _presence: MasterPresence
+## Mode "extraction": one persistent raid instead of lobby -> match -> results (null in the other modes).
+var _raid: RaidServer
 
 
 func _ready() -> void:
+	if not autostart:
+		return
 	cfg = ServerConfig.load_from_args(OS.get_cmdline_user_args())
+	if not ServerConfig.MODES.has(str(cfg.mode)):
+		push_error("server: mode '%s' is not one of %s; playing vs" % [cfg.mode, ServerConfig.MODES])
+		cfg.mode = "vs"
 	start.call_deferred()
 
 
@@ -46,6 +55,10 @@ func start() -> void:
 		return
 	Net.set_settings(ServerConfig.make_settings(cfg))
 	LobbyChatHub.ensure(get_tree())   # relays the lobby chat between the pilots
+	Net.list_port = int(cfg.list_port)
+	if str(cfg.mode) == ExtractionRules.MODE:
+		_raid = RaidServer.new(cfg)
+		add_child(_raid)
 	_list = MatchListServer.new()
 	add_child(_list)
 	if int(cfg.list_port) > 0 and _list.start(int(cfg.list_port), str(cfg.bind)) != OK:
@@ -59,7 +72,9 @@ func start() -> void:
 
 
 func _process(delta: float) -> void:
-	if _state == LOBBY:
+	if _raid != null:
+		_raid.update(delta)
+	elif _state == LOBBY:
 		_tick_lobby(delta)
 	elif Net.roster.is_empty():
 		_idle += delta
@@ -98,6 +113,8 @@ func _on_game_starting(config: Dictionary) -> void:
 	_battle.set("config", config)
 	get_tree().root.add_child(_battle)
 	_add_metrics(_battle as Battle)
+	if _raid != null:
+		_raid.attach_battle(_battle as Battle)
 
 
 ## Times the battle's ticks and prints "SERVER STATS ..." every `stats_seconds` (0 = never).
@@ -109,6 +126,9 @@ func _add_metrics(battle: Battle) -> void:
 
 ## The battle freed itself (Battle._finish): the pilots see their results for a while, then the next match.
 func _on_game_ended() -> void:
+	if _raid != null:
+		_battle = null   # the raid server decides when the next world opens
+		return
 	_state = LOBBY
 	_battle = null
 	_waited = -float(cfg.results_seconds) + float(cfg.lobby_seconds)   # the next match starts after results_seconds

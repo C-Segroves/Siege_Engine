@@ -23,5 +23,13 @@
   "max_catchup_steps": 2,
   "stats_seconds": 60,
   "master": "",
-  "master_token": ""
+  "master_token": "",
+  "relations": "story",
+  "raid_fast": 0,
+  "raid_seed": 0,
+  "raid_reset_minutes": 0,
+  "raid_reset_grace_seconds": 300,
+  "raid_empty_seconds": 120,
+  "party_wait_seconds": 60,
+  "results_hold_seconds": 5
 }

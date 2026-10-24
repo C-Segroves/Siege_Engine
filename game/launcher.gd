@@ -12,7 +12,7 @@ const SCREEN_FILES := {
 	"debrief": "debrief_screen.gd", "end": "end_screen.gd", "saga_choice": "saga_choice_screen.gd",
 	"options": "options_screen.gd", "hangar": "hangar_screen.gd", "training": "training_screen.gd",
 	"new_campaign": "new_campaign_screen.gd", "saves": "saves_screen.gd", "killed": "killed_screen.gd",
-	"versions": "versions_screen.gd",
+	"versions": "versions_screen.gd", "party": "party_screen.gd",
 }
 ## Library entries that open a campaign page directly (meta "start_mode").
 const CAMPAIGN_START_MODES := ["continue", "new_campaign", "load"]
@@ -24,6 +24,8 @@ const LOBBY_START_KINDS := {
 }
 ## Library entry that opens the LAN browser (meta "start_mode").
 const JOIN_START_MODE := "join"
+## Library entry that opens the party screen (meta "start_mode"); a party that came back from a raid opens it too.
+const PARTY_START_MODE := "party"
 const BATTLE_SCENE := "res://games/es1/battle.tscn"
 const SELF_SCENE := "res://launcher.tscn"
 const MULTIPLAYER_TITLE := "MULTIPLAYER"
@@ -40,7 +42,9 @@ func _ready() -> void:
 	_remember_home()
 	Net.game_starting.connect(start_battle)
 	Net.session_ended.connect(_on_session_ended)
-	Net.connection_failed.connect(func() -> void: back_with_status("Could not connect."))
+	Net.connection_failed.connect(func() -> void:
+		if not PartySession.is_joining(get_tree()):   # a party's Go reports its own failure on the party screen
+			back_with_status("Could not connect."))
 	Net.connected_to_server.connect(_on_joined)
 	_open_first_screen()
 	_show_front_end_status()
@@ -181,6 +185,8 @@ func _remember_home() -> void:
 
 ## A co-op client plays the host's campaign: its own (single player) campaign is set aside.
 func _on_joined() -> void:
+	if PartySession.is_joining(get_tree()):
+		return   # a party's Go goes straight to the game (PartyFlow); nobody sees the lobby
 	Session.clear_campaign()
 	Session.last_result = {}
 	go("lobby")
@@ -201,7 +207,9 @@ func _open_first_screen() -> void:
 
 func _open_page_after_battle() -> void:
 	var start_mode := str(get_meta("start_mode")) if has_meta("start_mode") else ""
-	if not Session.last_result.is_empty() and Session.has_campaign():
+	if start_mode == PARTY_START_MODE or PartySession.is_on_trip(get_tree()):
+		_open_party_page()
+	elif not Session.last_result.is_empty() and Session.has_campaign():
 		go("killed" if Session.must_replay() else "debrief")
 	elif start_mode == "" and not Net.roster.is_empty():
 		go("lobby")   # the session a game was played in (LAN or offline) goes on in its lobby
@@ -215,6 +223,13 @@ func _open_page_after_battle() -> void:
 		go("browser")
 	elif not LauncherAutomation.is_pending():
 		_leave_when_current.call_deferred()
+
+
+## The party screen. A party's trip that just ended returns here, not to the lobby of the server it went to.
+func _open_party_page() -> void:
+	if PartySession.is_on_trip(get_tree()) and Net.is_online():
+		Net.leave_quiet()
+	go("party")
 
 
 ## A match was left and no session is open: the front end's home (the library home), once this launcher is the app's

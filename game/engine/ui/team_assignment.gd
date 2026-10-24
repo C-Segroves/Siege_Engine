@@ -10,12 +10,27 @@ const UNASSIGNED := -1
 ## {peer: team} for every unassigned pilot of `roster`, smallest team first (bots counted), in peer order.
 static func make_assign_all(roster: Dictionary, settings: Dictionary) -> Dictionary:
 	var sizes := make_team_sizes(roster, settings)
+	var party_team := make_party_teams(roster)
 	var out := {}
 	for peer in _sorted_peers(roster):
 		if int(roster[peer].get("team", UNASSIGNED)) == UNASSIGNED:
-			var team := sizes.find(sizes.min())
+			var party_id := PartyRoster.make_party_id(roster[peer])
+			var team: int = party_team.get(party_id, sizes.find(sizes.min())) if party_id != "" else sizes.find(sizes.min())
 			out[peer] = team
 			sizes[team] += 1
+			if party_id != "":
+				party_team[party_id] = team
+	return out
+
+
+## {party code: team} of the parties that already have a pilot on a team (the rest of the party joins him).
+static func make_party_teams(roster: Dictionary) -> Dictionary:
+	var out := {}
+	for peer in _sorted_peers(roster):
+		var party_id := PartyRoster.make_party_id(roster[peer])
+		var team := int(roster[peer].get("team", UNASSIGNED))
+		if party_id != "" and team != UNASSIGNED and not out.has(party_id):
+			out[party_id] = team
 	return out
 
 

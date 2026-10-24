@@ -543,7 +543,9 @@ Dedicated servers: same flow, the server is the host; it never stores profiles.
 | skirmish | Skirmish -> offline lobby `{vs, bots}` | Option A hidden (no goals), carousel = bots | owned | Start | back to lobby; credits `solo` = 0 |
 | extraction, solo | Extraction -> offline lobby `{extraction}` | Option A: raid tasks + team goals hidden | stash | Start raid | stash/KIA via Results; lobby |
 | extraction, LAN host/client | host/join | Option A (tasks), squads optional | stash | Start raid | same |
-| dedicated server (any mode) | server config creates settings; clients Join | options read-only for everyone; server auto-starts (`_tick_lobby`) and auto-assigns teams | as per mode | timer or all ready | server loops lobby -> match -> results |
+| dedicated server (vs, co-op) | server config creates settings; clients Join | options read-only for everyone; server auto-starts (`_tick_lobby`) and auto-assigns teams | as per mode | timer or all ready | server loops lobby -> match -> results |
+| dedicated server (extraction) | server config creates settings; clients Join, or come with a party Go (no lobby screen: `PartyFlow`) | options read-only; Ready = "drop me in" | stash | the server admits each Ready pilot into its persistent raid (`RaidServer`), a party on one team and one transport | each pilot's results screen when he extracts or dies, then the party screen (or the menu); the world goes on |
+| party Go | Play > Party; the leader picks the server | the party screen replaces the lobby (members, ready, chat, destination) | stash | every member connects and announces build, kit, `party` and Ready | the party screen (docs/design/party.md) |
 
 ## 8. Missing packs and per-name profiles
 

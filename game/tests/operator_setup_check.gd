@@ -35,6 +35,7 @@ func _ready() -> void:
 	await _check_slot_tabs()
 	await _check_raid()
 	await _check_garage_and_bot()
+	await _check_stash_selling()
 	await _check_vehicle_store()
 	await _check_component_slots()
 	await _check_narrow()
@@ -486,6 +487,116 @@ func _check_stash_side() -> void:
 		_expect(_setup.state.profile.credits == before - int(entry.price) and _setup.state.extraction.stash.count(str(entry.id)) > stash_before, "the lot goes to the stash and its price comes off the credits")
 	await _send_action("menu_switch_kind")
 	_expect(_setup.state.side == "infantry", "the switch wraps to the infantry")
+
+
+# ------------------------------------------------------------------ stash selling
+
+func _send_mouse(pos: Vector2, button: MouseButton, pressed: bool) -> void:
+	var ev := InputEventMouseButton.new()
+	ev.position = pos
+	ev.global_position = pos
+	ev.button_index = button
+	ev.pressed = pressed
+	ev.button_mask = button if pressed else 0
+	Input.parse_input_event(ev)
+	Input.flush_buffered_events()
+	await _frames(1)
+
+
+func _click(pos: Vector2, button: MouseButton = MOUSE_BUTTON_LEFT) -> void:
+	var motion := InputEventMouseMotion.new()
+	motion.position = pos
+	motion.global_position = pos
+	Input.parse_input_event(motion)
+	Input.flush_buffered_events()
+	await _frames(1)
+	await _send_mouse(pos, button, true)
+	await _send_mouse(pos, button, false)
+	await _frames()
+
+
+func _stash_rows() -> Array:
+	return _setup.stash.find_children("*", "StashRow", true, false).filter(func(r: StashRow) -> bool: return not r.is_queued_for_deletion() and r.is_visible_in_tree())
+
+
+func _open_menu_nodes() -> Array:
+	return _setup.stash.find_children("*", "PopupMenu", true, false).filter(func(m: PopupMenu) -> bool: return m.visible)
+
+
+## Opens the sell menu of `row` by right click ("mouse") or by the pad X button ("pad"), picks option `index` with real
+## clicks / pad buttons and confirms. Returns true when the stash lost units.
+func _sell_via(row: StashRow, how: String, index: int) -> bool:
+	var id: String = row.stack_id()
+	var held: int = _setup.state.extraction.stash.count(id)
+	if how == "mouse":
+		var scroll := row.get_parent().get_parent() as ScrollContainer
+		scroll.ensure_control_visible(row)
+		await _frames(2)
+		await _click(row.get_global_rect().get_center(), MOUSE_BUTTON_RIGHT)
+	else:
+		if _focus() != row:
+			row.grab_focus()
+			await _frames(1)
+		await _send_pad_button(JOY_BUTTON_X)
+	var menus := _open_menu_nodes()
+	if menus.is_empty():
+		return false
+	var menu: PopupMenu = menus[0]
+	if how == "mouse":
+		var pos := Vector2(menu.position) + Vector2(20, 12 + index * 26)
+		await _click(pos)
+	else:
+		for i in index + 1:
+			await _send_pad_button(JOY_BUTTON_DPAD_DOWN)
+		await _send_pad_button(JOY_BUTTON_A)
+	var dialog := _find_dialog()
+	if dialog == null:
+		return false
+	if how == "mouse":
+		await _click(dialog.confirm_button.get_global_rect().get_center())
+	else:
+		await _frames(2)
+		await _send_pad_button(JOY_BUTTON_A)
+	await _frames(SETTLE_FRAMES)
+	return _find_dialog() == null and _setup.state.extraction.stash.count(id) < held
+
+
+## Six or more sells in a row, by right click and by pad X: the menu must open every time and every sale must go through.
+func _check_stash_selling() -> void:
+	print("-- stash selling (real input):")
+	if not _tribes_installed():
+		return
+	await _open({"mode": "extraction"}, "sell", 50000)
+	var profile: ExtractionProfile = _setup.state.extraction
+	_setup.state.apply_side("stash")
+	for how in ["mouse", "pad"]:
+		var added := 0
+		for kind in ["loot", "salvage", "supply", "ammo", "gear", "pack"]:
+			for r in ExtractionItems.items_of_kind(kind):
+				if added < 10 and ExtractionItems.make_sell_price(str(r.id), 3) > 0:
+					profile.stash.apply_add_unchecked(str(r.id), 3)
+					added += 1
+		_setup.state.apply_changed()
+		await _frames(SETTLE_FRAMES)
+		var sold := 0
+		var tries := 0
+		var kept_focus := true
+		for n in 8:
+			var rows := _stash_rows().filter(func(r: StashRow) -> bool: return _setup.state.can_sell(r.stack_id()))
+			if rows.is_empty():
+				break
+			tries += 1
+			var row: StashRow = rows[0]
+			if how == "pad":
+				kept_focus = kept_focus and _focus() is StashRow
+				if _focus() is StashRow and _setup.state.can_sell((_focus() as StashRow).stack_id()):
+					row = _focus()   # the pad acts on the focused row: a sale must leave the focus on a row
+			if await _sell_via(row, how, 0 if n % 2 == 0 else 1):
+				sold += 1
+		_expect(tries >= 6 and sold == tries, "%s: %d of %d consecutive stash sells went through" % [how, sold, tries])
+		_expect(kept_focus, "%s: the focus stays on a stash row after each sale" % how)
+	await _shut()
+
 
 
 ## The vehicle side: the store lists only weapons that fit the hardpoints, filters by the selected hardpoint, equips to

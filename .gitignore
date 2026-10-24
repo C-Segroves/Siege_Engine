@@ -286,6 +286,7 @@ user_data/
 
 # server settings of a deployment (deploy/server.json.example is the template)
 deploy/server.json
+deploy/servers/
 
 # innoextract is downloaded at import time (tools/tv_unpack.py), never committed
 tools/innoextract/

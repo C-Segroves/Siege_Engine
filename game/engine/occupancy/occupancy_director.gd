@@ -362,6 +362,17 @@ func apply_crew_controls(sender: int, controls: Dictionary) -> bool:
 	return false
 
 
+## Host: sends `peer` (who joined the running battle) the seat of everybody who sits in a vehicle now.
+func replay_to(peer: int) -> void:
+	for p in _soldier_of_peer:
+		var soldier := soldier_of(int(p))
+		if soldier == null or not soldier.stowed or soldier.seat == null or not is_instance_valid(soldier.seat.vehicle):
+			continue
+		var vehicle: Herc = soldier.seat.vehicle
+		_apply_state.rpc_id(peer, vehicle.net_id, VehicleOccupancy.of(vehicle).seats.duplicate(), soldier.net_id, true,
+			soldier.global_transform, int(p))
+
+
 # ------------------------------------------------------------------ every peer: the state message
 
 func _send_state(vehicle: Herc, soldier: Infantry, stowed: bool, xf: Transform3D, peer: int) -> void:
@@ -375,6 +386,8 @@ func _send_state(vehicle: Herc, soldier: Infantry, stowed: bool, xf: Transform3D
 @rpc("authority", "reliable", "call_local")
 func _apply_state(vehicle_id: int, seats: Array, soldier_id: int, stowed: bool, xf: Transform3D, peer: int) -> void:
 	var vehicle: Herc = battle.vehicles.get(vehicle_id)
+	if not is_instance_valid(vehicle) and battle.far_units != null and battle.far_units.is_parked(vehicle_id):
+		vehicle = battle.far_units.promote(vehicle_id)   # a far vehicle somebody boards gets its node back first
 	var soldier := battle.vehicles.get(soldier_id) as Infantry
 	if not is_instance_valid(vehicle) or soldier == null:
 		push_error("OccupancyDirector: state for missing vehicle %d / soldier %d" % [vehicle_id, soldier_id])

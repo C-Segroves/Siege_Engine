@@ -17,6 +17,10 @@ static func make(state: OperatorState, id: String, title: String, detail: String
 	return r
 
 
+func stack_id() -> String:
+	return _id
+
+
 func _gui_input(event: InputEvent) -> void:
 	if is_secondary(event) or _is_menu_key(event):
 		accept_event()

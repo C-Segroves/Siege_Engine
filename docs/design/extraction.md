@@ -230,6 +230,14 @@ Host-authoritative like every LAN battle (up to `Net.MAX_PLAYERS` 24 players plu
 - equipment changes re-equip the soldier on every peer; rounds and kit travel in the soldier snapshots as before;
 - exfil states go to everybody four times a second; the extraction / death result goes to the owner, who updates
   and saves his own profile. **[MVP]** (LAN e2e: two processes, both loot, the client extracts.)
+- **Dedicated server: a persistent raid** (`"mode": "extraction"` in server.json; docs/SERVER_DEPLOY.md section 12). One map per server;
+  the world opens when the first pilot is Ready, pilots and parties **join at any time** (`RaidServer`: the client builds the battle it is
+  sent, the host sends the living units, seats, caches, zones, relations and exfil calls - `RaidReplay` - and drops the pilot in by transport;
+  a party on one team and one transport), each pilot's raid ends on its own (extract or die: banner, then `RaidResultExit` leaves the server and
+  opens the results screen) while **the world goes on**, and it resets when empty for `raid_empty_seconds` or on a schedule (`raid_reset_minutes`;
+  new drop-ins pause, the last raiders get `raid_reset_grace_seconds`). Kits are client-held as in a LAN raid. **[MVP]** Tests:
+  `tests/dedicated_extraction_check.tscn`, `tests/party_check.tscn`. [later] Replaying destroyed base structures to late joiners; server-side
+  profiles.
 
 ## 8. Controls and UI
 
@@ -253,6 +261,7 @@ new `ItemRow`); lists are paged so the focus chain stays short for keyboard and 
 | `extraction_factions.gd`, `extraction_squads.gd`, `engine/team_relations.gd` | factions, squads, relations |
 | `extraction_map.gd`, `extraction_transports.gd`, `transport_flight.gd` | layout, drop-in, exfil |
 | `extraction_director.gd` | the raid (child "Extraction" of the Battle), network messages |
+| `game/server/raid_server.gd`, `raid_teams.gd`, `raid_replay.gd`, `raid_result_exit.gd` | the dedicated server's persistent raid: admission, teams, the world sent to a late joiner, a pilot's exit |
 | `loot_container.gd`, `extraction_hud.gd`, `inventory_panel.gd` | world objects, HUD, panel |
 | `extraction_revive.gd`, `downed_state.gd`, `downed_pilot.gd`, `revive_hud.gd` | downed, bleed-out, revive |
 | `extraction_station.gd`, `station_shop_panel.gd`, `exit_safety.gd`, `raid_task_board.gd`, `raid_tasks.gd` | supply stations, safe drop, raid tasks |
