@@ -10,7 +10,11 @@ extends Node
 ##      follow the altitude, the tank's treads run;
 ##   6. a vehicle pad holds its vehicle, builds the next after its spawn time and sells it as a station;
 ##   7. a crewed vehicle follows the goals a script gives it (VehiclePatrol, VehicleMoveTo) through the shared AIOrder, and a script
-##      can spawn one (ActionSpawnRook).
+##      can spawn one (ActionSpawnRook);
+##   8. the tank's turret mesh turns with the gun's aim, the Rover's wheels and shocks follow the ground under them, a ground vehicle drives
+##      at the goal's DesiredSpeed;
+##   9. soldiers: ActionSpawnRook of a soldier class (body, team, health), a soldier's EnterVehicle goal (he walks to the vehicle and takes
+##      his seat for real; the vehicle is flown by his bot brain and follows its goals), ActionEnterVehicle, and the vehicle's ExpellOccupant.
 ## The facing (nose -Z) is vehicle_facing_check's. Needs Tribes: Vengeance and Tribes 2 (the soldier) imported; skips otherwise.
 ##   TV_TEST_ROOT=<data folder> godot --headless --audio-driver Dummy --path game res://tests/tv_vehicles_check.tscn
 ##   tv_vehicle_shots.tscn: the windowed renders of the same stage (TV_SHOT_DIR=<folder>)
@@ -81,6 +85,24 @@ const PATROL_REACH_M := 90.0
 const GROUND_MOVE_M := 120.0
 const GROUND_MOVE_SECONDS := 25.0
 const GOAL_STEP_SECONDS := 0.5
+const TURRET_YAW_RAD := 1.2
+const TURRET_TURN_SECONDS := 1.6
+const TURRET_TOLERANCE_RAD := 0.05
+const TURRET_PIVOT_TOLERANCE_M := 0.05
+const SUSPENSION_FLAT_M := 0.15
+const SUSPENSION_FRAMES := 40
+const BUMP_HEIGHT_M := 0.5
+const BUMP_SIZE_M := 1.4
+const BUMP_MIN_LIFT_M := 0.25
+const AIRBORNE_LIFT_M := 25.0
+const SPEED_SHARE := 0.25                  # the DesiredSpeed asked, as a share of the class's original TopSpeed
+const SPEED_WARMUP_S := 3.0
+const SPEED_SAMPLE_S := 5.0
+const SPEED_TOLERANCE := 0.3
+const BOARD_START_M := 14.0
+const BOARD_SECONDS := 30.0
+const ROOK_TEAM := "TeamInfoImperial1"
+const CAPTAIN_HEALTH := 4.0
 
 var _fails := 0
 var _battle: Battle
@@ -125,6 +147,10 @@ func _run() -> void:
 	await _check_riders(site)
 	await _check_pad(site)
 	await _check_goals(site)
+	await _check_turret(site)
+	await _check_suspension(site)
+	await _check_speed(site)
+	await _check_soldiers(site)
 	_battle.queue_free()
 	await get_tree().process_frame
 	print("tv_vehicles_check: %s (%d failures)" % ["OK" if _fails == 0 else "FAILED", _fails])
@@ -180,6 +206,14 @@ func _check_parts_catalog() -> void:
 	var ship := Packs.vehicle("%s:ASSAULT_SHIP" % PACK).get("parts", {}) as Dictionary
 	_expect(ship.has("gear") and ship.has("wings"), "the Assault Ship has landing gear and wings")
 	_expect((Packs.vehicle("%s:TANK" % PACK).get("parts", {}) as Dictionary).has("treads"), "the Tank has treads")
+	var turret := (Packs.vehicle("%s:TANK" % PACK).get("parts", {}) as Dictionary).get("turret", {}) as Dictionary
+	_expect(str(turret.get("node", "")) == "tankturret" and _has_node(Assets.shape(str(Packs.vehicle("%s:TANK" % PACK).shape)), "tankturret"),
+		"the Tank's turret mesh node is named in its parts")
+	var suspension := buggy.get("suspension", {}) as Dictionary
+	_expect((suspension.get("wheels", []) as Array).size() == WHEELS and float(suspension.get("compress_m", 0.0)) > 0.3,
+		"the Rover's suspension has a shock for each wheel and %.2f m of compression" % float(suspension.get("compress_m", 0.0)))
+	for key in IDS:
+		_expect(float(Packs.vehicle("%s:%s" % [PACK, key]).get("top_speed_mps", 0.0)) > 10.0, "%s keeps its class's original TopSpeed" % key)
 
 
 static func _has_node(shape: Dictionary, node_name: String) -> bool:
@@ -712,3 +746,260 @@ func _check_rook(rt: TVMissionRuntime, at: Vector3) -> void:
 	if v != null:
 		_expect(v.global_position.y > at.y + 20.0, "it appears at the script's air node (%.0f m up)" % (v.global_position.y - at.y))
 		_battle.remove_vehicle(v.net_id)
+
+
+# ------------------------------------------------------------------ 8. moving parts that follow the ground and the gun
+
+## The tank's turret mesh turns with its gun: the mesh node and the turret node the gun hangs on turn by the same yaw, the mesh about the
+## turret node's axis (it does not orbit it).
+func _check_turret(at: Vector3) -> void:
+	print("tank turret:")
+	var v := _spawn("TANK", at, true)
+	for _f in SETTLE_PHYSICS_FRAMES:
+		await get_tree().physics_frame
+	var mesh: int = v.parts.turret_node
+	var gun: int = v.torso.torso_node
+	_expect(mesh >= 0 and gun >= 0 and mesh != gun, "the tank has a turret mesh node (%d) and a turret node (%d)" % [mesh, gun])
+	var rest_mesh := v.shape.nodes[mesh].global_basis.orthonormalized()
+	var rest_gun := v.shape.nodes[gun].global_basis.orthonormalized()
+	var pivot_gap := _flat_gap(v.shape.nodes[mesh].global_position, v.shape.nodes[gun].global_position)
+	for target in [TURRET_YAW_RAD, -TURRET_YAW_RAD, 0.0]:
+		v.torso_target = target
+		await _wait(TURRET_TURN_SECONDS)
+		var mesh_yaw := _yaw_since(v.shape.nodes[mesh].global_basis, rest_mesh)
+		var gun_yaw := _yaw_since(v.shape.nodes[gun].global_basis, rest_gun)
+		_expect(absf(v.torso_yaw - target) < TURRET_TOLERANCE_RAD, "the gun aims %.2f rad (asked %.2f)" % [v.torso_yaw, target])
+		_expect(absf(gun_yaw - v.torso_yaw) < TURRET_TOLERANCE_RAD, "the turret node the gun hangs on turned %.2f rad" % gun_yaw)
+		_expect(absf(mesh_yaw - v.torso_yaw) < TURRET_TOLERANCE_RAD, "the turret mesh turned with it: %.2f rad" % mesh_yaw)
+		var gap := _flat_gap(v.shape.nodes[mesh].global_position, v.shape.nodes[gun].global_position)
+		_expect(absf(gap - pivot_gap) < TURRET_PIVOT_TOLERANCE_M, "it turns about the turret axis (%.3f m from it, %.3f at rest)" % [gap, pivot_gap])
+	_battle.remove_vehicle(v.net_id)
+
+
+func _flat_gap(a: Vector3, b: Vector3) -> float:
+	return Vector2(a.x - b.x, a.z - b.z).length()
+
+
+## The yaw (rad, + = left) a node's orientation has turned about the vertical since `rest`.
+static func _yaw_since(now: Basis, rest: Basis) -> float:
+	var f := (now.orthonormalized() * rest.inverse()) * Vector3.FORWARD
+	return atan2(-f.x, -f.z)
+
+
+## The Rover's wheels follow the ground: level on flat ground, the wheel over a bump rises, none on the ground hang down, and the shock struts follow.
+func _check_suspension(at: Vector3) -> void:
+	print("rover suspension:")
+	var v := _spawn("BUGGY", at, true)
+	for _f in SETTLE_PHYSICS_FRAMES:
+		await get_tree().physics_frame
+	v.set_physics_process(false)             # held still: the bump below must not push the hull about
+	var lifts := await _measure_lifts(v)
+	_expect(lifts.size() == WHEELS and lifts.all(func(l: float) -> bool: return absf(l) < SUSPENSION_FLAT_M), "on flat ground every wheel is at rest height %s" % [lifts])
+	var wheel: int = (v.parts.suspension_wheels[0] as Dictionary).wheel
+	var shock: int = (v.parts.suspension_wheels[0] as Dictionary).shock
+	var rest_shock := v.shape.nodes[shock].transform
+	var bump := _make_bump(v.shape.nodes[wheel].global_position)
+	lifts = await _measure_lifts(v)
+	_expect(lifts[0] > BUMP_MIN_LIFT_M and lifts[0] > lifts[1] + BUMP_MIN_LIFT_M, "a wheel over a bump rises (%.2f m, the others %s)" % [lifts[0], lifts.slice(1)])
+	_expect(not v.shape.nodes[shock].transform.is_equal_approx(rest_shock), "its shock strut moves with it")
+	bump.queue_free()
+	await get_tree().physics_frame
+	lifts = await _measure_lifts(v)
+	_expect(lifts.all(func(l: float) -> bool: return absf(l) < SUSPENSION_FLAT_M), "off the bump the wheels settle again %s" % [lifts])
+	v.global_position.y += AIRBORNE_LIFT_M
+	lifts = await _measure_lifts(v)
+	var droop: float = v.parts.parts.suspension.droop_m
+	_expect(lifts.all(func(l: float) -> bool: return absf(l + droop) < 0.001), "in the air every wheel hangs at full droop (%.2f m) %s" % [droop, lifts])
+	_battle.remove_vehicle(v.net_id)
+
+
+## The lift of each wheel after the suspension has had time to follow (the hull is held, the parts are posed by hand).
+func _measure_lifts(v: Herc) -> Array:
+	for _f in SUSPENSION_FRAMES:
+		await get_tree().physics_frame
+		v.parts.update(get_physics_process_delta_time())
+	return v.parts.suspension_wheels.map(func(w: Dictionary) -> float: return float(w.lift))
+
+
+## A block `BUMP_HEIGHT_M` high on the ground under `at` (its centre on the floor, so half of it is buried).
+func _make_bump(at: Vector3) -> StaticBody3D:
+	var body := StaticBody3D.new()
+	var col := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(BUMP_SIZE_M, BUMP_HEIGHT_M * 2.0, BUMP_SIZE_M)
+	col.shape = box
+	body.add_child(col)
+	_battle.add_child(body)
+	body.global_position = Vector3(at.x, _floor_y(at), at.z)
+	return body
+
+
+## A ground vehicle drives at the goal's DesiredSpeed (a share of its class's original TopSpeed), the same goal without one flat out.
+func _check_speed(at: Vector3) -> void:
+	print("DesiredSpeed:")
+	var rt := _battle.mission as TVMissionRuntime
+	var far := at + Vector3(0, 0, -LANE_LENGTH)
+	rt.script_data["actors"] = rt.script_data.get("actors", {})
+	rt.script_data.actors["speedFar"] = [far.x, far.y, far.z]
+	var tank := Packs.vehicle("%s:TANK" % PACK)
+	var asked: float = float(tank.top_speed_mps) * SPEED_SHARE
+	var expected: float = asked * float(tank.max_speed) / float(tank.top_speed_mps)
+	var slow := await _drive_goal(rt, at, {"kind": "vehicle_move", "name": "m", "priority": 60, "dest": "speedFar", "speed": asked})
+	var flat_out := await _drive_goal(rt, at, {"kind": "vehicle_move", "name": "m", "priority": 60, "dest": "speedFar"})
+	_expect(absf(slow - expected) <= expected * SPEED_TOLERANCE, "a DesiredSpeed of %.1f m/s (%.0f%% of the original top speed) drives the tank at %.1f m/s (expected %.1f)" % [asked, SPEED_SHARE * 100.0, slow, expected])
+	_expect(flat_out > slow * 2.0, "without one it drives flat out (%.1f m/s)" % flat_out)
+
+
+## The mean speed (m/s) of a crewed Tank over SPEED_SAMPLE_S seconds after SPEED_WARMUP_S, given the goal `goal`.
+func _drive_goal(rt: TVMissionRuntime, at: Vector3, goal: Dictionary) -> float:
+	var f := TVVehicleFleet.new(rt)
+	var rec := _goal_rec("TANK", "speed_tank", at)
+	rec["crewed"] = true
+	var e := f.add_entry(rec)
+	f.apply_goal("speed_tank", "add", "m", goal)
+	f.sync(at)
+	var v := e.vehicle as Herc
+	await _wait(SPEED_WARMUP_S)
+	var from := v.global_position
+	var t := 0.0
+	while t < SPEED_SAMPLE_S:
+		await _wait(GOAL_STEP_SECONDS)
+		t += GOAL_STEP_SECONDS
+		f.sync(at)
+	var speed := _flat_gap(v.global_position, from) / SPEED_SAMPLE_S
+	_battle.remove_vehicle(v.net_id)
+	return speed
+
+
+# ------------------------------------------------------------------ 9. soldiers and vehicles
+
+func _check_soldiers(at: Vector3) -> void:
+	print("soldiers and vehicles:")
+	var rt := _battle.mission as TVMissionRuntime
+	rt.script_data["actors"] = rt.script_data.get("actors", {})
+	_soldier().spawn_protection = 600.0
+	_soldier().apply_spawn_protection()
+	await _check_rooks(rt, at)
+	await _check_enter_goal(rt, at)
+	await _check_enter_action(rt, at)
+	await _check_enter_ai_crewed(rt, at)
+
+
+static func _rook(label: String, body: String, team: String, health := 1.0) -> Dictionary:
+	return {"class": "AIGrunt2Imperial", "label": label, "team": team, "body": body, "health": health}
+
+
+## Takes every placed soldier and vehicle of the runtime out of the battle.
+func _clear_placed(rt: TVMissionRuntime) -> void:
+	for entry in rt._npcs:
+		if entry.brain != null and is_instance_valid(entry.brain) and is_instance_valid(entry.brain.soldier):
+			_battle.remove_vehicle((entry.brain.soldier as Infantry).net_id)
+	for entry in rt.fleet.entries:
+		if entry.vehicle != null and is_instance_valid(entry.vehicle):
+			_battle.remove_vehicle((entry.vehicle as Herc).net_id)
+	rt._npcs.clear()
+	rt.fleet.entries.clear()
+
+
+## ActionSpawnRook of a soldier class: the class's body, team and health; a label spawned again replaces the dead one.
+func _check_rooks(rt: TVMissionRuntime, at: Vector3) -> void:
+	var p := at + Vector3(10.0, 0.0, -10.0)
+	var e := rt.apply_spawn_npc(_rook("rook_a", "tv_imperiallight", ROOK_TEAM), [p.x, p.y, p.z])
+	var s: Infantry = e.brain.soldier if not e.is_empty() and e.brain != null else null
+	_expect(s != null and s.body_shape == "%s:tv_imperiallight" % PACK and s.armor_id == "tribes2:LIGHT",
+		"a rook wears its class's body on the armour of that size (%s, %s)" % [s.body_shape if s else "?", s.armor_id if s else "?"])
+	_expect(s != null and s.team == TVMissionRuntime.ENEMY_TEAM, "a rook of another team's name is the enemy")
+	var ally := rt.apply_spawn_npc(_rook("rook_b", "tv_phoenixlight", rt.player_team), [p.x + 3.0, p.y, p.z])
+	_expect(not ally.is_empty() and ally.brain.soldier.team == TVMissionRuntime.PLAYER_TEAM, "a rook of the player's team is his ally")
+	var normal := rt.apply_spawn_npc(_rook("rook_c", "tv_bloodeaglemediumseti", ROOK_TEAM), [p.x + 6.0, p.y, p.z])
+	var captain := rt.apply_spawn_npc(_rook("rook_d", "tv_bloodeaglemediumseti", ROOK_TEAM, CAPTAIN_HEALTH), [p.x + 9.0, p.y, p.z])
+	var hp: float = normal.brain.soldier.components[0].max
+	_expect(absf(float(captain.brain.soldier.components[0].max) - hp * CAPTAIN_HEALTH) < 1.0,
+		"the class's healthModifier scales his hit points (%.0f x %.0f)" % [hp, CAPTAIN_HEALTH])
+	s.apply_environment_damage(1.0)
+	await get_tree().physics_frame
+	var again := rt.apply_spawn_npc(_rook("rook_a", "tv_imperiallight", ROOK_TEAM), [p.x, p.y, p.z])
+	var same_label := rt._npcs.filter(func(n: Dictionary) -> bool: return str(n.rec.label) == "rook_a")
+	_expect(not again.is_empty() and again.brain.soldier != s and same_label.size() == 1, "the label spawned again is a new soldier and the dead one is forgotten")
+	_expect(rt.apply_spawn_npc(_rook("rook_e", "", ROOK_TEAM), [p.x, p.y, p.z]).is_empty() and rt.apply_spawn_npc(_rook("rook_f", "tv_imperiallight", ROOK_TEAM), []).is_empty(),
+		"a rook with no body or no place is refused")
+	_clear_placed(rt)
+
+
+## The soldier's EnterVehicle goal: he walks to the parked Pod through the shared AIOrder, takes the pilot seat for real, the vehicle takes
+## his team and is flown by his brain, and the script's goals for the Pod steer it from then on.
+func _check_enter_goal(rt: TVMissionRuntime, at: Vector3) -> void:
+	var rec := _goal_rec("POD", "board_pod", at)
+	rec["team_name"] = rt.player_team
+	var e := rt.fleet.add_entry(rec)
+	rt.fleet.sync(at)
+	var pod := e.vehicle as Herc
+	var start := at + Vector3(BOARD_START_M, 0.0, 0.0)
+	var npc := rt.apply_spawn_npc(_rook("board_pilot", "tv_phoenixlight", rt.player_team), [start.x, start.y, start.z])
+	var s: Infantry = npc.brain.soldier
+	_expect(pod != null and VehicleOccupancy.of(pod).is_empty(), "the allied Pod stands parked and empty")
+	rt.apply_goal("board_pilot", "add", "Enter", {"kind": "enter_vehicle", "name": "Enter", "priority": 75, "vehicle": "board_pod", "seat": 0})
+	_expect(npc.brain.objective.has("point") and bool(npc.brain.objective.urgent) and npc.brain.objective.point.distance_to(pod.global_position) < 1.0,
+		"the goal makes him walk to the vehicle (an urgent objective at %s)" % [npc.brain.objective.get("point")])
+	var t := 0.0
+	while t < BOARD_SECONDS and not s.stowed:
+		await _wait(GOAL_STEP_SECONDS)
+		t += GOAL_STEP_SECONDS
+		rt._steer_npcs()
+	_expect(s.stowed and VehicleOccupancy.of(pod).pilot() == TVVehicleFleet.make_seat_id(s), "he walked to the Pod and took the pilot seat (%.1f s)" % t)
+	_expect((npc.goals as Dictionary).is_empty(), "the goal is done")
+	_expect(pod.team == s.team and pod.has_meta(InfantryBots.META_BRAIN), "the Pod is on his team and flown by his brain")
+	var far := at + Vector3(120.0, 0.0, -120.0)
+	rt.script_data.actors["boardFar"] = [far.x, far.y, far.z]
+	rt.fleet.apply_goal("board_pod", "add", "go", {"kind": "vehicle_move", "name": "go", "priority": 60, "dest": "boardFar"})
+	var best := INF
+	t = 0.0
+	while t < PATROL_SECONDS and best > TVVehicleGoals.REACHED_FLYER_M:
+		await _wait(GOAL_STEP_SECONDS)
+		t += GOAL_STEP_SECONDS
+		rt.fleet.sync(at)
+		best = minf(best, _flat_gap(pod.global_position, far))
+	_expect(best <= TVVehicleGoals.REACHED_FLYER_M * 1.5, "its VehicleMoveTo goal flies the soldier-piloted Pod to the node (%.0f m off after %.0f s)" % [best, t])
+	_clear_placed(rt)
+
+
+## ActionEnterVehicle puts pilot and gunner into a parked Tank for real; the vehicle's ExpellOccupant puts the pilot out.
+func _check_enter_action(rt: TVMissionRuntime, at: Vector3) -> void:
+	var rec := _goal_rec("TANK", "enter_tank", at)
+	rec["team_name"] = rt.player_team
+	var e := rt.fleet.add_entry(rec)
+	rt.fleet.sync(at)
+	var tank := e.vehicle as Herc
+	var pilot := rt.apply_spawn_npc(_rook("tk_pilot", "tv_phoenixlight", rt.player_team), [at.x + 8.0, at.y, at.z])
+	var gunner := rt.apply_spawn_npc(_rook("tk_gunner", "tv_phoenixmedium", rt.player_team), [at.x - 8.0, at.y, at.z])
+	rt.apply_enter_vehicle("tk_pilot", "enter_tank")
+	rt.apply_enter_vehicle("tk_gunner", "enter_tank")
+	var occ := VehicleOccupancy.of(tank)
+	var ps: Infantry = pilot.brain.soldier
+	var gs: Infantry = gunner.brain.soldier
+	_expect(ps.stowed and occ.pilot() == TVVehicleFleet.make_seat_id(ps) and gs.stowed and occ.seats[1] == TVVehicleFleet.make_seat_id(gs),
+		"ActionEnterVehicle seats the pilot in seat 0 and the gunner in seat 1 %s" % [occ.seats])
+	_expect(TurretCrew.of(tank).gunner == TVVehicleFleet.make_seat_id(gs), "the gunner works the turret")
+	rt.fleet.apply_goal("enter_tank", "add", "out", {"kind": "expel", "name": "out", "occupant": "tk_pilot"})
+	_expect(not ps.stowed and occ.pilot() == VehicleOccupancy.EMPTY and ps.alive, "the vehicle's ExpellOccupant puts the pilot out beside it")
+	_clear_placed(rt)
+
+
+## A Tank that its own AI pilot flies counts the first soldier put into it as that pilot (he is gone); the second takes the gunner's seat.
+func _check_enter_ai_crewed(rt: TVMissionRuntime, at: Vector3) -> void:
+	var rec := _goal_rec("TANK", "ai_tank", at)
+	rec["crewed"] = true
+	var e := rt.fleet.add_entry(rec)
+	rt.fleet.sync(at)
+	var tank := e.vehicle as Herc
+	var a := rt.apply_spawn_npc(_rook("ai_first", "tv_phoenixlight", rt.player_team), [at.x + 8.0, at.y, at.z])
+	var b := rt.apply_spawn_npc(_rook("ai_second", "tv_phoenixmedium", rt.player_team), [at.x - 8.0, at.y, at.z])
+	var first: Infantry = a.brain.soldier
+	var second: Infantry = b.brain.soldier
+	rt.apply_enter_vehicle("ai_first", "ai_tank")
+	rt.apply_enter_vehicle("ai_second", "ai_tank")
+	await get_tree().physics_frame
+	var occ := VehicleOccupancy.of(tank)
+	_expect(bool(a.dead) and (not is_instance_valid(first) or first.is_queued_for_deletion()), "the first soldier put into an AI-flown Tank is its pilot: he is gone")
+	_expect(occ.pilot() == VehicleOccupancy.AI_PILOT and second.stowed and occ.seats[1] == TVVehicleFleet.make_seat_id(second), "the second takes the gunner's seat %s" % [occ.seats])
+	_clear_placed(rt)

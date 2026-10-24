@@ -373,13 +373,24 @@ static func _add_polygon(st: SurfaceTool, poly: Dictionary, textured: bool) -> v
 		uvs.clear()
 		for t in poly.uv:
 			uvs.append(Vector2(float(t[0]), float(t[1])))
+	var lightmap_uvs := _make_lightmap_uvs(poly)
 	var flip := (pts[1] - pts[0]).cross(pts[2] - pts[0]).dot(n) > 0.0
 	for k in range(1, pts.size() - 1):
 		for idx in ([0, k + 1, k] if flip else [0, k, k + 1]):
 			st.set_normal(n)
 			if textured:
 				st.set_uv(uvs[idx] if idx < uvs.size() else Vector2.ZERO)
+			if not lightmap_uvs.is_empty():
+				st.set_uv2(lightmap_uvs[idx] if idx < lightmap_uvs.size() else Vector2.ZERO)
 			st.add_vertex(pts[idx])
+
+
+## The lightmap coordinates of a polygon ("uv2": Tribes: Vengeance BSP surfaces), empty when it has none.
+static func _make_lightmap_uvs(poly: Dictionary) -> Array[Vector2]:
+	var out: Array[Vector2] = []
+	for t in poly.get("uv2", []):
+		out.append(Vector2(float(t[0]), float(t[1])))
+	return out
 
 
 ## Collision-only faces of the built LOD (a piece's "collision_polys": Torque interiors' null surfaces, never drawn)

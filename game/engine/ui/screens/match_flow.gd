@@ -61,8 +61,8 @@ const CAMPAIGN_DESCRIPTIONS := {
 ## Opens a lobby of `kind` (GameOptionsModel.KIND_*) with its default settings at once; the host edits them in Game
 ## Options (docs/design/lobby_loadout_economy.md section 5.6). `solo` makes an offline session (skirmish, a single player
 ## campaign or raid): the roster holds this pilot alone. A LAN co-op campaign starts a new Earthsiege career, a single
-## player campaign uses the one that is running.
-static func open_lobby_session(kind: String, solo := false) -> Error:
+## player campaign uses the one that is running. `online` also lists the hosted game on the master server of the Online settings.
+static func open_lobby_session(kind: String, solo := false, online := false) -> Error:
 	Net.password = ""
 	if solo:
 		Net.host_offline()
@@ -73,6 +73,8 @@ static func open_lobby_session(kind: String, solo := false) -> Error:
 			return err
 		if kind == GameOptionsModel.KIND_CAMPAIGN:
 			Session.start_campaign(0, true)
+		if online and OnlineSettings.has_master():
+			Net.start_online_listing(OnlineSettings.master())
 	Net.set_settings(GameOptionsModel.make_default_settings(kind, solo))
 	Net.set_my_info("team", Net.make_join_team())
 	Net.set_my_info("vehicle", DEFAULT_VEHICLE)

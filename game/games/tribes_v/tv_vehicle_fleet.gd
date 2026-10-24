@@ -8,7 +8,8 @@ extends RefCounted
 ## boards by touching it, BoardingRules). A pad holds its own vehicle (the script calls it by the pad's label + "vehicle") and builds a new
 ## one when it is gone, after the pad's spawnDuration. A vehicle is crewed by the vehicle's own AI pilot (the shared Flyer / AIPilot brains the
 ## other games use) when the actor is the enemy's and has AI goals, when a script spawns it (a rook), when a script gives it a goal or when
-## a script puts a soldier into it (ActionEnterVehicle). The goals the script adds (TVVehicleGoals: patrol, move, attack, guard) steer it
+## a script puts a soldier into it (ActionEnterVehicle, or the soldier's own EnterVehicle goal: he walks to it and takes his seat for real).
+## The goals the script adds (TVVehicleGoals: patrol, move, attack, guard) steer it
 ## through the shared AIOrder (VehicleOrders); with none it flies a patrol loop around its start, or drives to and fro, and attacks what it meets.
 ## The script's label names the vehicle: ActionEnable / ActionDestroy and MessageDeath address it as they address a soldier, and the driver
 ## and gunner seats raise MessageDriverEnter / DriverLeave / GunnerEnter / GunnerLeave.
@@ -49,7 +50,7 @@ func build(records: Array, pads := []) -> void:
 ## A new entry for the vehicle `rec` (a pad's vehicle has the pad as `pad`).
 func add_entry(rec: Dictionary, pad := {}) -> Dictionary:
 	var e := {"rec": rec.duplicate(), "enabled": true, "spawned": false, "dead": false, "vehicle": null, "goals": {}, "applied": "",
-		"order": null, "pad": pad, "respawn_at": 0, "abandoned_at": 0, "pilot": 0, "gunner": 0}
+		"order": null, "pad": pad, "respawn_at": 0, "abandoned_at": 0, "pilot": 0, "gunner": 0, "pilot_named": false}
 	entries.append(e)
 	return e
 
@@ -249,6 +250,7 @@ func apply_respawns() -> void:
 			e.spawned = false
 			e.vehicle = null
 			e.respawn_at = 0
+			e.pilot_named = false
 			e.goals.clear()
 
 
@@ -286,15 +288,21 @@ func apply_goal(label: String, mode: String, name: String, goal: Dictionary) -> 
 	return not found.is_empty()
 
 
-## AI_VehicleExpellOccupantGoal: the pilot gets out where the vehicle stands and it is parked and empty (stealable); the soldier `occupant`
-## (who boarded by ActionEnterVehicle) is in the world again beside it.
+## AI_VehicleExpellOccupantGoal: the occupant gets out where the vehicle stands and it is parked and empty (stealable). A placed soldier who
+## climbed in for real steps out beside the hull; the vehicle's own AI pilot is put out by building the vehicle again, empty, and the soldier
+## `occupant` (who boarded by ActionEnterVehicle without a seat) is in the world again beside it.
 func _apply_uncrewed(e: Dictionary, occupant: String) -> void:
 	e.goals.clear()
 	e.applied = ""
 	e.rec["crewed"] = false
-	var at := _position_of(e.rec)
 	var h = e.vehicle
-	if bool(e.spawned) and h != null and is_instance_valid(h) and (h as Herc).alive:
+	var alive: bool = bool(e.spawned) and h != null and is_instance_valid(h) and (h as Herc).alive
+	var rider := _find_rider(h, occupant) if alive else null
+	if rider != null:
+		_runtime.battle.occupancy.apply_exit(make_seat_id(rider), h)
+		return
+	var at := _position_of(e.rec)
+	if alive:
 		at = (h as Herc).global_position
 		var yaw := (h as Herc).rotation.y
 		e.rec["pos"] = [at.x, at.y, at.z]
@@ -306,6 +314,12 @@ func _apply_uncrewed(e: Dictionary, occupant: String) -> void:
 		_runtime.apply_expelled(occupant, at)
 
 
+## The placed soldier `label` when he sits in `h`, else null.
+func _find_rider(h: Herc, label: String) -> Infantry:
+	var s := _runtime.find_soldier(label) as Infantry if label != "" else null
+	return s if s != null and VehicleOccupancy.of(h).seat_of(make_seat_id(s)) >= 0 else null
+
+
 func _apply_crewed(e: Dictionary) -> void:
 	if bool(e.rec.get("crewed", false)):
 		return
@@ -314,6 +328,61 @@ func _apply_crewed(e: Dictionary) -> void:
 	if bool(e.spawned) and h != null and is_instance_valid(h) and (h as Herc).alive and VehicleOccupancy.of(h).is_empty():
 		_runtime.battle.remove_vehicle((h as Herc).net_id)
 		apply_spawn(e)
+
+
+# ------------------------------------------------------------------ soldiers aboard
+
+## The vehicle called `label`, spawned and alive (null when it is none of those).
+func find_herc(label: String) -> Herc:
+	for e in _named(label):
+		var h = e.vehicle
+		if bool(e.spawned) and not bool(e.dead) and h != null and is_instance_valid(h) and (h as Herc).alive:
+			return h as Herc
+	return null
+
+
+## A placed soldier takes a seat of the vehicle `label` for real (the shared boarding: the vehicle takes his team, a pilot is flown for by the
+## bot brain, a gunner works the turret). `seat` -1 = the first seat he may take (ActionEnterVehicle has none), but never one behind an unfilled
+## pilot's seat. A vehicle that is flown by its own AI already counts its first soldier -1 asked for as that pilot: he gets no seat. Returns false
+## when he took none; the caller then takes him out of the world (the vehicle is crewed without him).
+func apply_board(label: String, soldier: Infantry, seat: int) -> bool:
+	var h := find_herc(label)
+	if h == null or not soldier.alive or soldier.stowed:
+		return false
+	if seat < 0 and _take_ai_pilot(label, h):
+		return false
+	var chosen := make_seat(soldier, h, seat)
+	if chosen < 0:
+		return false
+	_runtime.battle.occupancy.apply_board(make_seat_id(soldier), h, chosen)
+	return true
+
+
+## The first soldier put into a vehicle that its own AI flies is that pilot (once per vehicle); true when this call is that one.
+func _take_ai_pilot(label: String, h: Herc) -> bool:
+	if VehicleOccupancy.of(h).pilot() != VehicleOccupancy.AI_PILOT:
+		return false
+	for e in _named(label):
+		if e.vehicle == h and not bool(e.pilot_named):
+			e.pilot_named = true
+			return true
+	return false
+
+
+## The id a placed soldier holds a seat under: his bot id (a soldier who pilots or guns gives up his owner_peer, OccupancyDirector).
+static func make_seat_id(soldier: Infantry) -> int:
+	return int(soldier.get_meta("bot_id", soldier.owner_peer))
+
+
+## The seat `soldier` takes in `h`: the one asked for if it is free and his armour may sit in it, else (-1 asked) the first such seat, but
+## never a seat behind an unfilled pilot's. -1 when there is none.
+static func make_seat(soldier: Infantry, h: Herc, asked: int) -> int:
+	var occ := VehicleOccupancy.of(h)
+	for seat in occ.seats.size():
+		if (asked >= 0 and seat != asked) or not occ.is_seat_free(seat) or not BoardingRules.is_seat_allowed(soldier, h, seat):
+			continue
+		return seat if seat == VehicleOccupancy.PILOT_SEAT or occ.has_pilot() else -1
+	return -1
 
 
 # ------------------------------------------------------------------ goals
@@ -343,9 +412,15 @@ func apply_goals() -> void:
 		var h = e.vehicle
 		if not bool(e.spawned) or bool(e.dead) or h == null or not is_instance_valid(h) or not (h as Herc).alive:
 			continue
-		if not VehicleOccupancy.of(h).is_ai_piloted():
+		if not is_flown_by_ai(h as Herc):
 			continue
 		_steer(e, h as Herc, ctx)
+
+
+## True when the vehicle's pilot is its own AI or a bot soldier (a placed soldier who climbed in), so a goal can steer it.
+static func is_flown_by_ai(h: Herc) -> bool:
+	var pilot := VehicleOccupancy.of(h).pilot()
+	return pilot == VehicleOccupancy.AI_PILOT or InfantryBots.is_bot(pilot)
 
 
 func _steer(e: Dictionary, h: Herc, ctx: Dictionary) -> void:
@@ -364,7 +439,6 @@ func _steer(e: Dictionary, h: Herc, ctx: Dictionary) -> void:
 		return
 	e.order = order
 	e.applied = str(g.key)
-	TVVehicleGoals.apply_speed(g, h)
 	VehicleOrders.apply(h, order)
 
 

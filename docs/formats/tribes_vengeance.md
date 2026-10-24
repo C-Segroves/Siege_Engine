@@ -3,12 +3,12 @@
 Status: campaign imported (pack `tribes_v`): 16 chapters, 33 maps in story order, objective text, player and NPC
 spawns, terrain (19 maps), textured static meshes and brush shells, **sounds and speech, skeletal armour/character bodies with
 animations (offered as infantry bodies, worn by the mission's soldiers), vehicle and base-object shapes, and the mission scripts
-(objectives, speech, triggers, spawns, mission end) run by the game**, and the lighting (sun, zone ambient, distance fog, placed point lights; no lightmaps).
+(objectives, speech, triggers, spawns, mission end) run by the game**, and the lighting (sun, zone ambient, distance fog, placed point lights, and the **baked BSP lightmaps** on the compiled level geometry).
 Code: `tools/tv_unpack.py`, `tools/ue2_package.py`, `tools/ue2_texture.py`, `tools/ue2_skeletal.py`, `tools/tv_assets.py`,
-`tools/tv_terrain.py`, `tools/tv_statics.py`, `tools/tv_bsp.py`, `tools/tv_audio.py`, `tools/tv_skeletal.py`, `tools/tv_script.py`,
+`tools/tv_terrain.py`, `tools/tv_statics.py`, `tools/tv_bsp.py`, `tools/tv_bsp_model.py`, `tools/tv_bsp_render.py`, `tools/tv_audio.py`, `tools/tv_skeletal.py`, `tools/tv_script.py`,
 `tools/tv_import.py`, `tools/siege_games/tribes_vengeance.py` (generic importer: supported).
 Game side: `game/games/tribes_v/` (provider, `TVMissionRuntime` on top of the Aerial Assault runtime, `TVScriptHost` (on `MissionTask`) the script
-interpreter), `InfantryCatalog.make_tv_bodies`; checks `res://tests/tv_campaign_check.tscn`, `tv_script_check.tscn`,
+interpreter), `InfantryCatalog.make_tv_bodies`; checks `res://tests/tv_campaign_check.tscn`, `tv_lightmap_check.tscn` (lit BSP), `tv_script_check.tscn`,
 `tv_soldier_check.tscn` (bodies; shots with `TV_SHOT_DIR`), `tv_npc_shots.tscn` (`TV_TEST_ROOT` = scratch data folder).
 
 ## Container (verified)
@@ -95,7 +95,8 @@ nearest of them). Verified facts:
 - The sun: the brightest `Sunlight` (the engine has one sun; Coliseum has a second, fainter blue one and Palace up to five); its
   `Rotation` (pitch, yaw, roll, 65536 per turn) points along the light. Maps without a Sunlight get a black sun.
 - Light types: 1 steady, 2 pulse, 3 blink, 4 flicker, 5 strobe, 7 subtle pulse (animated by `MapLights.energy_scale`).
-- No lightmaps, so the map's ambient never falls below `AMBIENT_FLOOR` (0.25): rooms whose zones have ambient 0 rely on the baked lightmaps, which are not decoded.
+- BSP surfaces take their light from the decoded lightmaps (section "BSP lightmaps") and none from the scene. Everything else (terrain, static meshes, soldiers,
+  vehicles) has no baked light yet, so the map's ambient never falls below `AMBIENT_FLOOR` (0.25): rooms whose zones have ambient 0 relied on the baked lightmaps.
   A map without a sun (interiors) is lifted to the mean colour of its placed lights x 0.9, at most 0.5 (`tv_lights.interior_ambient`), so the
   rooms read between the lamps; the engine has one ambient per map, not one per zone.
 - `DynLightHanging` / `DynLightStrip` are physics props (a mesh with no light), not lights.
@@ -115,18 +116,40 @@ Vehicle goals (`TVVehicleGoals`, host side): the same ops with the vehicle's lab
 `DesiredSpeed`), `AI_VehicleAttackGoal` -> `vehicle_attack` (`targetName`), `AI_VehicleGuardGoal` -> `vehicle_guard` (holds where the vehicle
 stands), `AI_EnterVehicleGoal` -> `enter_vehicle` (`vehicleOrTurretName`, `VehiclePosition`), `AI_VehicleExpellOccupantGoal` -> `expel`
 (`occupantName`). The goal of highest Priority steers: it becomes an `AIOrder` (patrol = PATROL route, or TRAVEL when done once; move = MOVE
-plan; attack = ATTACK on the target; guard = hold) that `VehicleOrders` gives the vehicle's FlyerAI (its `patrol` path and `target`, a flyer
-flies the goal's DesiredSpeed as its cruise) or AIPilot (route, objective); an achieved goal (node reached, target dead, a once-patrol's last
+plan; attack = ATTACK on the target; guard = hold) that `VehicleOrders` gives the vehicle's FlyerAI (its `patrol` path and `target`) or AIPilot
+(route, objective); the goal's `DesiredSpeed` is the order's `speed` (`AIOrder.speed`, m/s): a flyer flies it as its cruise, an AIPilot drives its
+route and objective at that pace (`AIPilot.cruise_mps`). The remake's cars are slower than the original (the Rover's TopSpeed is scaled to the
+Wildcat's), so the speed is kept as the same share of the vehicle's top speed: `max_speed / top_speed_mps` (the catalog keeps the class's own
+`TopSpeed` in m/s: Pod 62.9, Tank 71.4, Assault Ship 30.0, Rover 189.3). An achieved goal (node reached, target dead, a once-patrol's last
 node) is dropped and the next one takes over, then the vehicle holds where it stopped (a flyer circles). At equal Priority the goal done once
 (move, attack) comes before the one that repeats (patrol, guard). A vehicle that is given a goal is crewed even when it is the player's side's
-(the Mercy-Escape supply rover drives itself until the script has its pilot expelled). `ActionEnterVehicle` (a soldier takes the pilot's seat:
-he leaves the world, the vehicle is crewed) and `ActionSpawnRook` with a `Vehicle*` SpawnClass (a crewed vehicle appears at the
-`locationByActor` node, in the air for an air node, as `rookLabel`, of the team named by `teamLabel`; Mercy-Escape's two fighters) are the
-script ops `enter_vehicle` and `spawn_vehicle`. Verified on the 11 SP maps that use them: 47 VehiclePatrol, 37 VehicleMoveTo, 7 VehicleAttack,
-2 VehicleGuard, 4 EnterVehicle, 2 ExpellOccupant goal objects. Not decoded: `EnterVehicle` / `ExpellOccupant` goals of soldiers (the soldier
-brain has no seat of its own), the speed of a ground vehicle's goal.
+(the Mercy-Escape supply rover drives itself until the script has its pilot expelled). A vehicle is steered when its pilot is its own AI or a
+bot soldier (a placed soldier who climbed in): the shared boarding hands a bot pilot's vehicle to the same FlyerAI / AIPilot.
+Soldiers and vehicles. `ActionEnterVehicle` puts the soldier `targetCharacter` into `targetVehicle` for real when both are in the world:
+the first free seat his armour may sit in (`TVVehicleFleet.apply_board` -> `OccupancyDirector.apply_board`; the vehicle takes his team, a
+pilot is flown for by the bot brain, a gunner works the turret through `TurretCrew`, he is thrown out unhurt when the vehicle is
+destroyed). A vehicle that its own AI flies already (it was placed crewed, or given a goal first) counts the first soldier put into it as
+that pilot (he leaves the world, no death message), later ones take the gunner and passenger seats; a soldier that is not spawned or a
+vehicle that is not in the world yet is the same: the soldier is gone and the vehicle is crewed. `AI_EnterVehicleGoal` is the soldier's own
+goal (`vehicle`, `seat` = VehiclePosition): he walks to the hull as a MOVE `AIOrder` (`TVNpcGoals.make_enter_order`, urgent, the hull
+radius + 2.5 m), then climbs into that seat; a seat he may not take (a heavy armour as pilot, a taken seat) makes him vanish like
+ActionEnterVehicle's absorbed pilot. `AI_VehicleExpellOccupantGoal` on the vehicle puts the occupant out beside the hull (a soldier who
+climbed in for real steps out; the vehicle's own AI pilot is replaced by the vehicle again, parked and empty, and the named soldier is
+spawned beside it) and leaves the vehicle empty and stealable. `ActionSpawnRook` with an `AI*` SpawnClass is op `spawn_npc`
+(`rookLabel`, `teamLabel`, `locationByActor`; `body` = the class's `Mesh` as a pack body, `health` = `healthModifier`, `armor` = `armorClass`,
+all read from the UnrealScript class defaults, `tools/tv_script.make_npc_info`): `TVMissionRuntime.apply_spawn_npc` stands a soldier of
+that body (on the armour of its size, with the armour's default loadout like the placed soldiers; the class's `AILoadout` and
+`AllowedWeapons` are not decoded), facing the player, raising `MessageAISpawned`; a label spawned again replaces its dead predecessor
+(Prison-Interior and -Junkyard spawn their waves that way). `ColiseumCaptain` (Mesh BloodEagleMediumSeti, healthModifier 4) is the one
+non-`AI*` soldier class; `BallTrials` is not a soldier and stays a no-op. `ActionSpawnRook` with a `Vehicle*` SpawnClass (a crewed
+vehicle appears at the `locationByActor` node, in the air for an air node, as `rookLabel`, of the team named by `teamLabel`;
+Mercy-Escape's two fighters) is `spawn_vehicle`. Verified on the 11 SP maps that use them: 47 VehiclePatrol, 37 VehicleMoveTo, 7
+VehicleAttack, 2 VehicleGuard, 4 EnterVehicle, 2 ExpellOccupant goal objects; 57 soldier rooks in 7 maps. Open: the `body` of the *placed*
+soldiers (`npc_spawns`) is still guessed from the class name by `tv_skeletal.npc_body` and differs from the class's `Mesh` for 853 of the
+1467 placed soldiers (Grunt2 is light, not medium; Grenadiers and Ninjas are the female bodies); fixing it changes the soldiers' armour
+size and with it the trace goldens.
 
-## Editor brushes (approximation, `tools/tv_bsp.py`)
+## Editor brushes (approximation, `tools/tv_bsp.py`; since the lightmap work the brush shell is only the collision of the level, `drawn: false`)
 The compiled BSP (`Model` exports of 4 to 20 MB) is not decoded. Instead every `Brush` actor with CsgOper add/subtract is read
 through its Model's `Polys` export (polygon lists in brush space; trailer 13 bytes) and written as one shape per map
 (`shapes/bsp_<map>.json`): additive faces point outward, subtractive ones inward, so rooms show their shells. No CSG
@@ -136,6 +159,48 @@ whose material is an editor placeholder (engine `DefaultTexture`, `ConsoleBK`, b
 which removes the big white volume boxes (the skip must look the name up per material ref: a stale name from the previous
 material let those faces through and made SP-Captured a white sheet). Collision is the trimesh of the shell. `python tools/tv_bsp.py <game root> <pack>`
 rebuilds the shells without the full import.
+
+## BSP lightmaps (done, `tools/tv_bsp_model.py`, `tools/tv_bsp_render.py`, `game/engine/shaders/unified_lit_lightmap.gdshader`)
+The level's compiled BSP is the largest `Model` export of a map (4 to 20 MB). Its layout is written down in the docstring of
+`tv_bsp_model.py`; the parts the renderer needs, all verified on the 32 campaign maps that have it:
+- Every array and struct list starts with a 12-byte header of three u32 ((3,0,5) vectors, (3,2,2) per node, (3,1,1) per surface, (3,0,2) and
+  (3,0,1) in the render sections). Nodes: plane, zone mask, 7 compact indices (`iSurf` is the second), a sphere and a 40-byte tail holding
+  `NumVertices` (u8), the **section number** and the **first vertex** of the node's polygon inside that section. Surfaces: Material, PolyFlags,
+  five compact indices, Actor, plane and `LightMapScale` (always 32 uu per texel).
+- The **render sections** (one per material and lightmap page) hold the final, CSG-cut polygons: `count x 40` bytes = position, texture uv (in
+  texture repeats), lightmap uv, normal; then the Material, the page number (`0xffffffff` = none; flag 256 = not lightmapped; the portal /
+  invisible sections have surface flags 0x4000109 and no colours), and an 8-byte per-vertex colour (an FColor such as (21, 34, 33, 165), the zone
+  ambient, plus a packed normal; not used). Each node is one convex polygon, a fan over its vertices (T-junction vertices are included, so
+  the first three vertices may be collinear). Check: for all 65 sections of SP-FirstBlood-Interior (and every other map) the nodes of a section
+  add up to its polygon count and its vertex count.
+- The **lightmap pages** follow the sections and the per-surface descriptors (coverage bitmasks and the lightmap axes; not needed): for each
+  page and mip level `u32 (a colour), compact byte size, data`. Pages are 512 x 512 **DXT3** (262144 bytes; the alpha is texel coverage) with
+  one more level of 256 x 256, found by a compact size that is followed, after the data and a u32, by a quarter of it. The page count is
+  `max(section page) + 1`: 2 (Coliseum) to 37 (Trials-Nexus) pages per map, 21 in FirstBlood-Interior. SP-War-Ski references pages
+  but stores none (the map was never lit with BSP lightmaps): it keeps its brush shell as the drawn level.
+- Evidence the pages belong to the sections and the orientation is right: every vertex's lightmap uv of every section lands on an opaque texel
+  of its own page (100%), while with v flipped only 61 to 98% do; the decoded pages show the baked light pools (disks under lamps, ambient
+  rectangles of 8 to 72 texels per surface) and the windowed renders show them on the floors and walls.
+- Texture uv: the brush shells use `(u, -v)` in repeats; comparing the compiled vertices to the shells' coplanar polygons (400 sampled nodes of
+  SP-Prison-Interior) gives a median ratio of +1.000 for u and -1.000 for v, so the lit shape stores `(u, -v)` too. Lightmap uv is used as is
+  (v from the top of the page).
+- Output: `shapes/bspl_<map>.json` (polygons with `uv2`; materials with `lightmap` = `textures/tv/lm_<map>_<page>.png`, the page as RGB with the
+  uncovered texels filled from their covered neighbours), and `map.json` statics gain the lit shape (`collide: false`, `visual_only: true`) while the
+  brush shell gets `drawn: false` (the builder keeps its collision and drops its meshes, so every collision-dependent behaviour (spawns, bounds,
+  vehicles) is unchanged and the server never builds the lit shape). `python tools/tv_bsp_render.py <game root> <pack folder> [map id ...]` adds it to
+  an imported pack without a full import; `tv_import.py` writes it as part of the import.
+- Shading (`unified_lit_lightmap.gdshader`, used by `UnifiedMaterial.from_lightmapped`): `texture x lightmap x 2` in gamma space (the Direct3D 8
+  fixed-function overbright, the Unreal default; **the factor 2 is an assumption**, not measured against the original: the page luminance has
+  median 31, 90th percentile 118, 99th 180, maximum 255 of 255, so with 2 the lit pools reach white and the unlit corners stay dark), shown
+  as emission: the lightmap already holds every placed light, the zone ambient and the sun, so a BSP surface takes no ambient, sun or point light
+  from the scene (no double lighting; needs `render_unified`, on by default). The check is `tests/tv_lightmap_check.tscn` (lit entries of every map, uv2 and page sizes of four maps,
+  the builder's collision-only shell and lightmap-material twin of SP-Prison-Interior).
+- Not decoded: the per-surface descriptors between the sections and the pages, the terrain's baked light, the static meshes' vertex lighting
+  (`StaticMeshInstance` colour streams: 1440 BGRA vertex colours in the example mesh), zone ambient per zone (FirstBlood-Interior has 43 BSP zones
+  but only 2 `ZoneInfo` actors, so a per-zone ambient would add nothing there).
+- Windowed before / after renders (`tests/tv_shots`, checked by eye) of SP-FirstBlood-Interior, SP-Prison-Interior, SP-Revenge-UnderCity and
+  an outdoor map: the brush shells showed stray floating plates, missing floors (Prison-Interior's red carpet) and one flat ambient; the lit
+  BSP shows the real floors and walls with warm lamp pools falling off into dark corridors.
 
 ## Audio (done, `tools/tv_audio.py`)
 `Content/Sounds/*.pkg`: every `Sound` export holds a complete RIFF/WAVE (PCM 16-bit, 22.05 or 44.1 kHz mono) after the tagged
@@ -221,9 +286,14 @@ rest pose and `VehicleParts` stacks them by weight: wheels (the Rover's four, ra
 front pair steers (SteeringMaxAngle 6500 = 35.7 degrees, by the heading change); the ship's gear folds as it climbs from half its
 gearTraceLength (4.3 m, where it hovers) to the whole (8.6 m), its wings are folded while it stands and open in flight and bank with the turn;
 the tank's tracks run by each side's speed (one tooth pitch per cycle); the pod's engines idle and tilt with throttle, climb and strafe. The
-motion is read from the replicated position and heading, so every peer shows the same. Not done: the tank's turret mesh does not turn with its
-gun (the `tankturret` part stays on the hull), the Rover's shocks do not compress, the mirrored back legs of the ship share one bone (a pitch
-about the lateral axis folds both alike).
+motion is read from the replicated position and heading, so every peer shows the same. The tank's turret mesh (`parts.turret.node` =
+`tankturret`) yaws with the gun's aim (`Herc.torso_yaw`) about the turret node the gun hangs on (VehicleParts rotates the part about that
+node's vertical axis; the torso rig's own nodes are no longer overwritten by the parts pose). The Rover's suspension (`parts.suspension`:
+SuspensionTravel 125 uu = 1.79 m, split into 0.89 m of compression and 0.89 m of droop about the rest height; each wheel's shock is the
+node `...Shock` of the same name) follows the ground: a ray from above each hub down to a wheel radius plus the droop; a wheel's lift is the
+ground's height above its rest contact less the mean of the wheels that touch, a wheel with no ground hangs at full droop, and the shock
+strut stretches with the wheel (VehicleParts, visual only, skipped on a dedicated server). Not done: the mirrored back legs of the ship
+share one bone (a pitch about the lateral axis folds both alike).
 Seats: the `positions` struct array of each vehicle class (read with the class's own name table: the Rover's is in `Buggy`) says who is drawn:
 `hideOccupant` false only for the Pod's pilot (`occupantConnection` Character, `occupantAnimation` Pod_Stand), the Rover's driver (Character,
 Buggy_Stand) and the Assault Ship's two gunners (gunnerleft / gunnerright, AShipGunner_Stand); the Tank's crew, the ship's pilot, the Rover's
@@ -246,8 +316,9 @@ and SP-Prison-Exterior do): it appears like a placed vehicle, a new one is built
 (`make_station_vehicles`, `find_own_pad`: the same menu and the same clear-pad rule as the Tribes 2 vehicle stations; one vehicle on the
 pad at a time). Vengeance has no vehicle-pad cloak (its pack has no timed cloak profile), so no flash.
 Tests: `tests/tv_vehicles_check` (catalog, maps, boarding, driving, firing, destruction, AI crews, riders, wheels / gear / wings / treads,
-pad, pad station, abandonment, VehiclePatrol, VehicleMoveTo, script-spawned vehicle), windowed `tests/tv_vehicle_shots` (`TV_SHOT_DIR`: riders
-and pads too), the facing is `vehicle_facing_check`'s.
+pad, pad station, abandonment, VehiclePatrol, VehicleMoveTo, script-spawned vehicle, the tank's turret mesh, the Rover's suspension,
+DesiredSpeed, soldier rooks, EnterVehicle goal and action, ExpellOccupant), `tests/tv_script_check` (the soldier ops of every map),
+windowed `tests/tv_vehicle_shots` (`TV_SHOT_DIR`: riders and pads too) and `tests/tv_ai_shots` (turret, suspension, soldiers boarding), the facing is `vehicle_facing_check`'s.
 
 ## Mission scripts (done, `tools/tv_script.py`, `game/games/tribes_v/tv_script_run.gd`)
 A map's logic is its `Script` actors. Each has a Label (the name `targetScript` uses), a MessageClass (the event) with TriggeredBy
@@ -281,7 +352,7 @@ Run time is roughly 15 to 25 minutes (inflating 3 GB, innoextract, 33 maps).
 - Terrain layers/detail/holes, `TerrainSector` visibility; decoration layers (grass, trees) (M).
 - Weapon first-person skeletal meshes and the vehicle wheel / wing / track animations (L); the unplayed speech (about half of the 6353 files, MP quick chat).
 - AI goals, cinematics and the remaining script messages (M); the class defaults (real meshes, sounds, weapons per character) (M).
-- Baked lightmaps (BSP, terrain) and vertex lighting, water, sky boxes (`Content/Art/SkyBoxes`), particle emitters.
+- Baked lightmaps of the terrain, the vertex lighting of static meshes (`StaticMeshInstance` colour streams), the per-surface lightmap descriptors, water, sky boxes (`Content/Art/SkyBoxes`), particle emitters.
 
 ## Legal
 Code and format notes only; no game data in the repo; everything is read from the user's own copy. innoextract is a

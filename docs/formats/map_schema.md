@@ -65,6 +65,8 @@ engine frame (or a 3x3 basis "basis": [[...],[...],[...]] in engine frame when n
   ],
   "statics": [                        // props, rocks, trees, towers (shapes)
     {"shape": "tribes:rock1", "pos": [...], "yaw": 0, "scale": 1, "collide": true}
+    // optional: "drawn": false = collision only (the meshes are dropped after the collision is built; a brush shell whose lit
+    // twin is drawn), "visual_only": true = never built by the server profile (a drawn-only twin such as tribes_v bspl_<map>)
   ],
   "spawns": [
     // kind: "herc" (Herc start), "infantry" (soldier respawn), "vehicle_pad" (vehicle station /

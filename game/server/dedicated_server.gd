@@ -3,7 +3,7 @@ extends Node
 ## The dedicated server (`--server`): hosts a match over ENet (UDP, the default) or WebSocket (web clients) with no local pilot and runs it
 ## forever: lobby -> match -> results pause -> next match. The server is the authority for the whole simulation.
 ##   godot --headless --audio-driver Dummy --path game res://server/dedicated_server.tscn -- --server
-##         [--config=<file.json>] [--port= --transport=ws|enet --mode=vs|coop --map= --bots= --password= ...]
+##         [--config=<file.json>] [--port= --transport=ws|enet --mode=vs|coop --map= --bots= --password= --master=http://host:47710 ...]
 ## Settings: ServerConfig. Game data: the server loads the operator's own installed packs; it never serves them.
 ## Prints "SERVER ..." lines; quits with 1 when it cannot listen.
 
@@ -18,6 +18,7 @@ var _state := LOBBY
 var _waited := 0.0
 var _idle := 0.0
 var _list: MatchListServer
+var _presence: MasterPresence
 
 
 func _ready() -> void:
@@ -49,6 +50,9 @@ func start() -> void:
 	add_child(_list)
 	if int(cfg.list_port) > 0 and _list.start(int(cfg.list_port), str(cfg.bind)) != OK:
 		push_warning("server: match list port %d busy" % int(cfg.list_port))
+	if str(cfg.master) != "":   # listed on a master server (docs/SERVER_DEPLOY.md "Run a master server")
+		_presence = MasterPresence.begin(self, str(cfg.master), str(cfg.master_token), int(cfg.list_port))
+		print("SERVER listing on master %s" % _presence.master)
 	Net.game_starting.connect(_on_game_starting)
 	Net.game_ended.connect(_on_game_ended)
 	print("SERVER READY %s port=%d transport=%s mode=%s" % [cfg.name, int(cfg.port), cfg.transport, cfg.mode])

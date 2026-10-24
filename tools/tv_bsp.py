@@ -6,6 +6,7 @@ shows its inside. Polys layout (version 130): u32 3, u32 0, u32 1, u8 0, u32 cou
 count, Base, Normal, TextureU, TextureV (f32 x3 each), vertices (f32 x3), a 13-byte trailer (u32 flags, compact actor,
 compact material ref, ...). world = Location + Rotation x (PostScale x MainScale x (point - PrePivot)).
 Output (engine metres, x = Unreal y, y = z, z = -x): shapes/bsp_<map>.json with all faces in one piece.
+The shell is the collision of the level; what is drawn is the compiled, lightmapped BSP of tv_bsp_render.py.
 """
 import json
 import math
@@ -105,11 +106,46 @@ def _brush_scale(pkg, props, key):
     return np.ones(3)
 
 
+class MaterialBank:
+    """The textures of a map's materials: writes textures/tv/<name>.png once and numbers the materials of a shape."""
+
+    def __init__(self, idx, pkg, out_dir):
+        self.idx, self.pkg = idx, pkg
+        self.tex_dir = os.path.join(out_dir, 'textures', 'tv')
+        self.slots, self.names, self.sizes = {}, [], {}
+
+    def slot(self, ref):
+        """Index into `names` of a material reference (writing its texture); the name is '' for editor placeholders."""
+        if ref not in self.slots:
+            rgba, name = S.material_texture(self.idx, self.pkg, ref) if ref else (None, '')
+            name = ''.join(ch if ch.isalnum() or ch in '-_' else '_' for ch in name).lower() if rgba is not None else ''
+            if rgba is not None:
+                self._write(rgba, name)
+                self.sizes[ref] = (rgba.shape[1], rgba.shape[0])
+            self.slots[ref] = len(self.names)
+            self.names.append(name)
+        return self.slots[ref]
+
+    def name_of(self, ref):
+        return self.names[self.slot(ref)]
+
+    def size_of(self, ref):
+        return self.sizes.get(ref, (256, 256))
+
+    def _write(self, rgba, name):
+        path = os.path.join(self.tex_dir, name + '.png')
+        if os.path.isfile(path):
+            return
+        os.makedirs(self.tex_dir, exist_ok=True)
+        img = Image.fromarray(rgba)
+        if max(img.size) > MAX_TEXTURE:
+            img = img.resize((min(img.width, MAX_TEXTURE), min(img.height, MAX_TEXTURE)), Image.LANCZOS)
+        img.save(path)
+
+
 def export_bsp(idx, pkg, out_dir, map_id, mpu):
     """Writes shapes/bsp_<map>.json (and textures); returns the statics entry for it or None."""
-    texture_slots, slot_names, polys_out = {}, [], []
-    tex_dir = os.path.join(out_dir, 'textures', 'tv')
-    sizes = {}
+    bank, polys_out = MaterialBank(idx, pkg, out_dir), []
     for e in pkg.find('Brush'):
         props = U.object_properties(pkg, e)
         csg = props.get('CsgOper', 0)
@@ -133,31 +169,17 @@ def export_bsp(idx, pkg, out_dir, map_id, mpu):
             if csg == CSG_SUBTRACT:
                 nrm = -nrm
             ref = poly['material']
-            if ref not in texture_slots:
-                rgba, name = S.material_texture(idx, pkg, ref) if ref else (None, '')
-                name = ''.join(ch if ch.isalnum() or ch in '-_' else '_' for ch in name).lower() if rgba is not None else ''
-                if rgba is not None:
-                    path = os.path.join(tex_dir, name + '.png')
-                    if not os.path.isfile(path):
-                        os.makedirs(tex_dir, exist_ok=True)
-                        img = Image.fromarray(rgba)
-                        if max(img.size) > MAX_TEXTURE:
-                            img = img.resize((min(img.width, MAX_TEXTURE), min(img.height, MAX_TEXTURE)), Image.LANCZOS)
-                        img.save(path)
-                    sizes[ref] = (rgba.shape[1], rgba.shape[0])
-                texture_slots[ref] = len(slot_names)
-                slot_names.append(name)
-            name = slot_names[texture_slots[ref]]
-            if not name:
+            slot = bank.slot(ref)
+            if not bank.names[slot]:
                 continue                                       # editor placeholders (DefaultTexture, ConsoleBK, no material)
-            w, h = sizes.get(ref, (256, 256))
+            w, h = bank.size_of(ref)
             rel = poly['verts'].astype(float) - np.array(poly['base'])
             uv = np.stack([rel @ np.array(poly['u']) / w, -(rel @ np.array(poly['v'])) / h], axis=1)
             uv = uv - np.floor(uv.min(axis=0))                 # small offsets keep float precision; textures repeat
-            polys_out.append((world, nrm, uv, texture_slots[ref]))
+            polys_out.append((world, nrm, uv, slot))
     if not polys_out:
         return None
-    shape = _shape_json(polys_out, slot_names, mpu, 'bsp_' + map_id)
+    shape = _shape_json(polys_out, bank.names, mpu, 'bsp_' + map_id)
     os.makedirs(os.path.join(out_dir, 'shapes'), exist_ok=True)
     with open(os.path.join(out_dir, 'shapes', 'bsp_%s.json' % map_id), 'w', encoding='utf-8') as f:
         json.dump(shape, f, separators=(',', ':'))
@@ -165,13 +187,12 @@ def export_bsp(idx, pkg, out_dir, map_id, mpu):
 
 
 def _shape_json(polys, slot_names, mpu, name):
+    """Shape JSON of brush polygons [(world vertices, normal, uv, slot)]: triangles (a fan per polygon)."""
     out = []
-    allv = []
     for world, nrm, uv, slot in polys:
         v = np.stack([world[:, 1], world[:, 0], world[:, 2]], axis=1) * mpu       # shape frame: x right, y forward, z up (the engine converts)
         n = np.array([nrm[1], nrm[0], nrm[2]])
         n = n / (np.linalg.norm(n) or 1.0)
-        allv.append(v)
         for k in range(1, len(v) - 1):
             tri = [0, k, k + 1]
             p0, p1, p2 = v[tri[0]], v[tri[1]], v[tri[2]]
@@ -180,15 +201,21 @@ def _shape_json(polys, slot_names, mpu, name):
             out.append({'v': [[round(float(x), 4) for x in v[i]] for i in tri], 'n': [round(float(x), 4) for x in n], 't': 'tri',
                         'm': {'kind': 'rgba', 'index': slot},
                         'uv': [[round(float(uv[i][0]), 4), round(float(uv[i][1]), 4)] for i in tri]})
-    cat = np.concatenate(allv)
+    materials = [{'name': n, 'flags': 0, 'texture': 'textures/tv/%s.png' % n if n else '', 'w': 0, 'h': 0} for n in slot_names]
+    return make_shape_json(out, materials, mpu, name)
+
+
+def make_shape_json(polys, materials, mpu, name):
+    """Engine shape JSON (one piece, one LOD) of finished poly dicts (shape frame) and material entries."""
+    cat = np.concatenate([np.array(p['v'], dtype=float) for p in polys])
     lo, hi = cat.min(axis=0), cat.max(axis=0)
     return {'name': name, 'texset': None, 'source': 'unreal_brushes', 'units': 'metres',
             'lods': [{'radius': round(float(np.linalg.norm(hi - lo) / 2), 3), 'center': [round(float(c), 3) for c in (lo + hi) / 2],
                       'size': 128.0, 'name': 'Detail128',
-                      'pieces': [{'node': 0, 'id': 1000, 'name': name, 'cell': -1, 'state': 0, 'polys': out}], 'cells': []}],
+                      'pieces': [{'node': 0, 'id': 1000, 'name': name, 'cell': -1, 'state': 0, 'polys': polys}], 'cells': []}],
             'nodes': [{'parent': -1, 'default': 0, 'name': 'Shape'}], 'transforms': [[0, 0, 0, 0, 0, 0, 1]], 'ds_sequences': [],
             'bounds': {'header': [lo.tolist(), hi.tolist()]},
-            'materials': [{'name': n, 'flags': 0, 'texture': 'textures/tv/%s.png' % n if n else '', 'w': 0, 'h': 0} for n in slot_names]}
+            'materials': materials}
 
 
 def rebuild(game_root, pack_dir, log=print):

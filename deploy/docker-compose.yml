@@ -57,5 +57,24 @@ services:
       - ./Caddyfile.public:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
 
+  # ---------------------------------------------------------------- master server
+  # Lists game servers (they register and send heartbeats; players ask for the list). No game data, no game traffic.
+  #   docker compose --profile master up -d --build        (can run next to either profile above)
+  master:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    profiles: [master]
+    restart: unless-stopped
+    entrypoint: ["godot", "--headless", "--audio-driver", "Dummy", "--path", "/app/game", "res://server/master_server.tscn", "--"]
+    command: ["--port=47710", "--auth_token=${SIEGE_MASTER_TOKEN:-}"]
+    ports:
+      - "${SIEGE_MASTER_PORT:-47710}:47710"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/47710 && printf 'GET /health HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q ok <&3"]
+      interval: 30s
+      timeout: 3s
+      start_period: 40s
+
 volumes:
   caddy-data:

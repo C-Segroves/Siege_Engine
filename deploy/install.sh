@@ -228,7 +228,7 @@ write_brotli_snippet() {
 render() {
 	sed -e "s|@HTTP_PORT@|$HTTP_PORT|g" -e "s|@SITE_DIR@|$SITE_DIR|g" -e "s|@SNIPPET_DIR@|$NGINX_SNIPPETS|g" \
 		-e "s|@SERVICE_USER@|$SERVICE_USER|g" -e "s|@SIEGE_CONF@|$SIEGE_CONF|g" -e "s|@REPO_DIR@|$REPO_DIR|g" \
-		-e "s|@UPDATE_INTERVAL@|$UPDATE_INTERVAL|g" -e "s|@GODOT_BIN@|$GODOT_BIN|g" -e "s|@INSTALL_DIR@|$INSTALL_DIR|g" 		-e "s|@DATA_DIR@|$DATA_DIR|g" -e "s|@GAME_SERVER_CONFIG@|$GAME_SERVER_CONFIG|g" 		-e "s|@GAME_SERVER_PORT@|$GAME_SERVER_PORT|g" -e "s|@GAME_SERVER_LIST_PORT@|$GAME_SERVER_LIST_PORT|g" "$1" > "$2"
+		-e "s|@UPDATE_INTERVAL@|$UPDATE_INTERVAL|g" -e "s|@GODOT_BIN@|$GODOT_BIN|g" -e "s|@INSTALL_DIR@|$INSTALL_DIR|g" 		-e "s|@DATA_DIR@|$DATA_DIR|g" -e "s|@GAME_SERVER_CONFIG@|$GAME_SERVER_CONFIG|g" 		-e "s|@GAME_SERVER_PORT@|$GAME_SERVER_PORT|g" -e "s|@GAME_SERVER_LIST_PORT@|$GAME_SERVER_LIST_PORT|g" 		-e "s|@MASTER_CONFIG@|$MASTER_CONFIG|g" "$1" > "$2"
 }
 
 setup_nginx() {
@@ -273,6 +273,33 @@ setup_game_server() {
 	systemctl reload nginx
 }
 
+# ------------------------------------------------------------------ master server (optional)
+
+# MASTER_SERVER=yes: the master server (server/master_server.tscn) as a systemd service. It listens on MASTER_PORT (in the config).
+setup_master_server() {
+	if [[ "$MASTER_SERVER" != yes ]]; then
+		systemctl disable --now siege-master.service >/dev/null 2>&1 || true
+		return 0
+	fi
+	log "configuring the master server (port $MASTER_PORT)"
+	if [[ ! -f "$MASTER_CONFIG" ]]; then
+		install -d -m 755 "$(dirname "$MASTER_CONFIG")"
+		printf '{
+  "port": %s,
+  "bind": "*",
+  "auth_token": ""
+}
+' "$MASTER_PORT" > "$MASTER_CONFIG"
+		chgrp "$SERVICE_USER" "$MASTER_CONFIG"
+		chmod 640 "$MASTER_CONFIG"
+		log "created $MASTER_CONFIG - set auth_token so only your own servers can register"
+	fi
+	render "$REPO_DIR/deploy/systemd/siege-master.service.template" /etc/systemd/system/siege-master.service
+	systemctl daemon-reload
+	systemctl enable siege-master.service >/dev/null
+	systemctl restart siege-master.service
+}
+
 # ------------------------------------------------------------------ updates
 
 setup_systemd() {
@@ -296,6 +323,7 @@ print_summary() {
 	log "  disc images:  $ISO_DIR"
 	log "  build now:    sudo siege-update --force      (log: $LOG_DIR/update.log)"
 	log "  then open:    http://${ip:-<this machine>}:$HTTP_PORT/"
+	[[ "$MASTER_SERVER" == yes ]] && log "  master server: http://${ip:-<this machine>}:$MASTER_PORT/servers   (open $MASTER_PORT/tcp; settings: $MASTER_CONFIG)"
 	[[ "$GAME_SERVER" == yes ]] && log "  game server:  ws://${ip:-<this machine>}:$HTTP_PORT/ws   (list: /matches; settings: $GAME_SERVER_CONFIG)"
 	return 0
 }
@@ -314,6 +342,7 @@ main() {
 	install_godot
 	setup_nginx
 	setup_game_server
+	setup_master_server
 	setup_systemd
 	print_summary
 	if (( BUILD_NOW )); then

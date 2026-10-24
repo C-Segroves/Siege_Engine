@@ -403,6 +403,8 @@ def _borrowed_death(art):
 NAMED = {'olivia': 'tv_olivia', 'daniel': 'tv_phoenixmediumdaniel', 'julia': 'tv_imperiallightjulia', 'victoria': 'tv_princessvictoria',
          'mercury': 'tv_mercury', 'jericho': 'tv_phoenixheavyjericho', 'esther': 'tv_phoenixmediumesther', 'seti': 'tv_bloodeaglemediumseti',
          'albrecht': 'tv_imperiallightalbrecht', 'gaius': 'tv_gaius', 'tiberius': 'tv_tiberius'}
+# classes that are not called AI<type><faction> (ColiseumCaptain: Mesh BloodEagleMediumSeti, healthModifier 4)
+NAMED_CLASSES = {'coliseumcaptain': 'tv_bloodeaglemediumseti'}
 LIGHT_TYPES = ('grunt1', 'ninja', 'scout', 'sniper1', 'pilot')
 HEAVY_TYPES = ('grunt3', 'grenadier2', 'spammer', 'rocket', 'boss', 'protector')
 
@@ -410,6 +412,8 @@ HEAVY_TYPES = ('grunt3', 'grenadier2', 'spammer', 'rocket', 'boss', 'protector')
 def npc_body(cls):
     """Body shape id ('tv_...') for an AI character class name (AIGrunt2Phoenix, AICustomOlivia, AIGlorax1st ...), '' if unknown."""
     low = cls.lower()
+    if low in NAMED_CLASSES:
+        return NAMED_CLASSES[low]
     if low in ('aisquad', 'aitalkinghead', 'aispawnpoint') or not low.startswith('ai') or low.startswith('ai_'):
         return ''
     low = low[2:]

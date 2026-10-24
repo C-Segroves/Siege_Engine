@@ -66,6 +66,9 @@ var _pending_info := {}
 var _push_wait_s := 0.0
 var _push_pending := false
 var game_port := GAME_PORT
+## "Host online": the hosted game is listed on a master server (MasterPresence) and answers the match list (MatchListServer).
+var _presence: MasterPresence
+var _list: MatchListServer
 
 
 func _ready() -> void:
@@ -205,6 +208,7 @@ func leave() -> void:
 
 
 func _reset() -> void:
+	stop_online_listing()
 	_push_wait_s = 0.0
 	_push_pending = false
 	dedicated = false
@@ -221,6 +225,35 @@ func _reset() -> void:
 
 func _new_entry(n: String) -> Dictionary:
 	return {"name": n, "vehicle": "es1:RAPTOR", "team": 0, "ready": false, "loadout": []}
+
+
+## Lists the hosted game on the master server `master` and answers its match list on `list_port` (0 = no list), until the
+## session ends. Only the listing leaves the machine; pilots connect straight to this host.
+func start_online_listing(master: String, token := "", list_port := MatchListServer.DEFAULT_PORT) -> void:
+	stop_online_listing()
+	if list_port > 0:
+		_list = MatchListServer.new()
+		add_child(_list)
+		if _list.start(list_port) != OK:
+			push_warning("online hosting: match list port %d busy" % list_port)
+			_list.queue_free()
+			_list = null
+			list_port = 0
+	_presence = MasterPresence.begin(self, master, token, list_port)
+
+
+func stop_online_listing() -> void:
+	if is_instance_valid(_presence):
+		_presence.stop()
+	_presence = null
+	if is_instance_valid(_list):
+		_list.stop()
+		_list.queue_free()
+	_list = null
+
+
+func is_listed_online() -> bool:
+	return is_instance_valid(_presence)
 
 
 # ------------------------------------------------------------------ discovery

@@ -76,3 +76,12 @@ GAME_SERVER_CONFIG="/etc/siege-engine/server.json"
 # Local ports of the game (WebSocket) and of the match list; nginx forwards to them. Not opened to the network.
 GAME_SERVER_PORT="47700"
 GAME_SERVER_LIST_PORT="47702"
+
+# ------------------------------------------------------------------ master server (optional)
+# "yes" runs a master server on this machine (systemd service siege-master): game servers register with it and players
+# list them (docs/SERVER_DEPLOY.md "Run a master server"). It lists games only, never relays game traffic. Open
+# MASTER_PORT (tcp) to the players and the game servers; there is no nginx in front of it.
+MASTER_SERVER="no"
+# Settings file (port, auth_token to let only your own servers register, ttl, rate_limit). Created on the first run.
+MASTER_CONFIG="/etc/siege-engine/master.json"
+MASTER_PORT="47710"

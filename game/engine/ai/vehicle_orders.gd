@@ -7,6 +7,8 @@ extends RefCounted
 ## A flyer told to hold a place circles it: this many points on this radius (m).
 const HOLD_POINTS := 4
 const HOLD_RADIUS := 60.0
+## The slowest cruise an order may ask a flyer for (m/s): below it the aircraft stalls.
+const MIN_CRUISE_MPS := 8.0
 
 
 ## Sets `order` on the AI of `h`. Returns false when `h` has no AI to take it.
@@ -37,6 +39,7 @@ static func make_hold_circle(at: Vector3) -> Array[Vector3]:
 
 
 static func _apply_to_pilot(p: AIPilot, order: AIOrder) -> void:
+	p.cruise_mps = order.speed
 	p.objective = order.to_objective()
 	if not AIOrder.is_command_kind(order.kind):
 		order.apply_to_pilot(p)
@@ -47,6 +50,8 @@ static func _apply_to_pilot(p: AIPilot, order: AIOrder) -> void:
 static func _apply_to_flyer(f: Flyer, order: AIOrder) -> bool:
 	if f.ai == null:
 		return false
+	if order.speed > 0.0:
+		f.cruise = clampf(order.speed, MIN_CRUISE_MPS, f.max_speed)
 	var route: Array[Vector3] = _make_flyer_route(order)
 	if not route.is_empty():
 		f.patrol.clear()

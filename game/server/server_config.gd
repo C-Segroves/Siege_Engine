@@ -27,12 +27,19 @@ const DEFAULTS := {
 	"tick_hz": 0,   # 0: the game's NetProfile tick rate (ServerClock.DEFAULT_HZ until a battle starts)
 	"max_catchup_steps": ServerClock.DEFAULT_MAX_CATCHUP_STEPS,
 	"stats_seconds": 60.0,
+	"master": "",         # a master server to list this server on (http://host:47710); empty = not listed
+	"master_token": "",   # the master's auth_token, when it requires one
 }
 
 
 ## Defaults + the JSON file named by `--config=` + the other arguments.
 static func load_from_args(args: PackedStringArray) -> Dictionary:
-	var cfg := DEFAULTS.duplicate()
+	return load_with(DEFAULTS, args)
+
+
+## The same layering for any service's `defaults` (the master server uses it too).
+static func load_with(defaults: Dictionary, args: PackedStringArray) -> Dictionary:
+	var cfg := defaults.duplicate()
 	var overrides := {}
 	for a in args:
 		if a.begins_with("--") and "=" in a:

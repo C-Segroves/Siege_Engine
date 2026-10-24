@@ -10,12 +10,14 @@ const SHADER_NEAREST_UNHAZED := preload("res://engine/shaders/unified_nearest_un
 const SHADER_LIT := preload("res://engine/shaders/unified_lit.gdshader")
 const SHADER_LIT_BLEND := preload("res://engine/shaders/unified_lit_blend.gdshader")
 const SHADER_LIT_ADD := preload("res://engine/shaders/unified_lit_add.gdshader")
+const SHADER_LIT_LIGHTMAP := preload("res://engine/shaders/unified_lit_lightmap.gdshader")
 const SHADE_LEVELS := 32
 const FLAG_TRANSLUCENT := 4
 const FLAG_ADDITIVE := 8
 const FLAG_SELF_ILLUMINATING := 32
 
 static var _cache := {}
+static var _lightmap_cache := {}   # lightmap file -> ImageTexture (a page is shared by the many materials of its sections)
 ## Folder holding a `unified/` directory of baked strips instead of the pack's own (verification of scratch bakes).
 static var bake_root := ""
 ## Texture memory of the baked arrays (RenderUnified memory check): {arrays, bytes}.
@@ -69,6 +71,8 @@ static func from_palette(palette_id: String, m: Dictionary, texset_key := "", te
 ## Material for a true-colour Torque material {name, texture, flags}: lit by the scene, or additive / alpha-blended
 ## (damage decals, hidden until a damage state shows them) per its flags.
 static func from_rgba(pack: String, md: Dictionary) -> Material:
+	if String(md.get("lightmap", "")) != "":
+		return from_lightmapped(pack, md)
 	var flags := int(md.get("flags", 0))
 	var decal := String(md.get("name", "")).contains("damage")
 	var key := "t|%s|%s|%d|%s" % [pack, md.get("texture", ""), flags, decal]
@@ -78,6 +82,35 @@ static func from_rgba(pack: String, md: Dictionary) -> Material:
 	if mat != null:
 		_cache[key] = mat
 	return mat
+
+
+## Material of a texture with a baked lightmap {texture, lightmap}: the surface shows texture x lightmap, takes no scene light.
+static func from_lightmapped(pack: String, md: Dictionary) -> Material:
+	var key := "m|%s|%s|%s" % [pack, md.get("texture", ""), md.get("lightmap", "")]
+	if _cache.has(key):
+		return _cache[key]
+	var img := Assets.load_image(String(md.get("texture", "")), pack)
+	var lightmap := _load_lightmap(pack, String(md.lightmap))
+	if img == null or lightmap == null:
+		return null
+	img.convert(Image.FORMAT_RGBA8)
+	img.generate_mipmaps()
+	var mat := _make(SHADER_LIT_LIGHTMAP, [img] as Array[Image], true)
+	mat.set_shader_parameter("lightmap", lightmap)
+	_cache[key] = mat
+	return mat
+
+
+static func _load_lightmap(pack: String, file: String) -> Texture2D:
+	var cache_key := "%s|%s" % [pack, file]
+	if not _lightmap_cache.has(cache_key):
+		var img := Assets.load_image(file, pack)
+		if img == null:
+			return null
+		img.convert(Image.FORMAT_RGB8)
+		img.generate_mipmaps()
+		_lightmap_cache[cache_key] = ImageTexture.create_from_image(img)
+	return _lightmap_cache[cache_key]
 
 
 ## Lit material of a plain texture file (skins: SkinCatalog texture overrides; Torque flags optional).

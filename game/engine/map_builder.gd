@@ -81,6 +81,8 @@ static func build(parent: Node3D, map_id: String) -> Dictionary:
 			var placed := _place(parent, o, pal, bool(o.get("collide", true)))
 			if placed and list_key == "interiors":
 				placed.add_to_group(INTERIOR_GROUP)
+			if placed and not bool(o.get("drawn", true)):
+				_drop_meshes(placed)
 	TerrainHoleSeal.apply(parent, INTERIOR_GROUP)   # hole parts no base lies under
 	var stations := _build_stations(parent, m, pal)
 	var spawns := _make_spawns(parent, m)
@@ -271,8 +273,16 @@ static func _xf(o: Dictionary) -> Transform3D:
 	return Transform3D(b.scaled(Vector3.ONE * s), Vector3(float(p[0]), float(p[1]), float(p[2])))
 
 
+## Keeps only the collision of a placed static: a brush shell ("drawn": false) whose lit twin is what the map draws.
+static func _drop_meshes(body: Node3D) -> void:
+	for mi in body.find_children("*", "MeshInstance3D", true, false):
+		mi.queue_free()
+
+
 static func _place(parent: Node3D, o: Dictionary, pal: String, collide: bool) -> Node3D:
 	var sid := String(o.get("shape", ""))
+	if bool(o.get("visual_only", false)) and ServerProfile.is_collision_only():
+		return null   # drawn only: the server has no use for it
 	if sid == "" or (sid.contains(":") and not Assets.has_pack(Assets.split_id(sid)[0])):
 		return null   # a borrowed shape (the Starsiege maps' Tribes stations) needs its game installed
 	if MapPlaceholder.is_unconverted(sid):

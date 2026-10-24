@@ -40,6 +40,8 @@ var path: Array[Vector3] = []
 var loop := true
 var sets_loop := false
 var anchored := false
+## The speed the order asks for (m/s; 0 = the brain's own pace): a flyer's cruise, a ground vehicle's speed on its route.
+var speed := 0.0
 ## The game's own name for the order's target (a script tag) and its source record, for the game's completion rule.
 var tag := ""
 var source: Variant = null
@@ -93,6 +95,12 @@ static func make_hold_at(p_point: Vector3) -> AIOrder:
 	o.point = p_point
 	o.anchored = true
 	return o
+
+
+## This order at `p_speed` m/s (0 = the brain's own pace); returns the order.
+func with_speed(p_speed: float) -> AIOrder:
+	speed = maxf(p_speed, 0.0)
+	return self
 
 
 static func is_command_kind(p_kind: String) -> bool:

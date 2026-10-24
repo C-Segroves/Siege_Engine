@@ -45,6 +45,8 @@ var _detour_t := 0.0
 var _detour_side := 1.0
 ## The game mode's goal ({} none): {point: Vector3, urgent: bool, radius: float, hold: bool, target: Node3D}.
 var objective := {}
+## The speed an order asks for (m/s, AIOrder.speed): the pilot drives at this pace on its route and to its objective; 0 = the order kinds' own.
+var cruise_mps := 0.0
 
 ## Aim point height above the target's origin (m).
 const TARGET_AIM_HEIGHT := 4.0
@@ -59,6 +61,8 @@ const MID_SEARCH_EVERY := 4
 const REPOSITION_AHEAD := 60.0
 const REPOSITION_SIDE := 40.0
 const REPOSITION_SPEED := 0.9
+## The slowest pace an order may ask for (share of top speed): below it a vehicle barely moves.
+const MIN_PACE_FRACTION := 0.05
 ## Unsticking (remake rule: the originals' units are not traced to collide with buildings): a Herc driving with at
 ## least BLOCKED_THROTTLE that moves slower than BLOCKED_SPEED for BLOCKED_SECONDS turns DETOUR_ANGLE aside for
 ## DETOUR_SECONDS (alternating sides), then heads for its goal again.
@@ -194,8 +198,15 @@ func _steer_to(point: Vector3, speed_frac: float) -> float:
 	fwd.y = 0
 	var ang := fwd.signed_angle_to(heading, Vector3.UP)
 	herc.turn = clampf(-ang * 2.0, -1.0, 1.0)
-	herc.throttle = speed_frac * clampf(1.0 - absf(ang) / PI, 0.2, 1.0)
+	herc.throttle = make_pace_fraction(speed_frac) * clampf(1.0 - absf(ang) / PI, 0.2, 1.0)
 	return to.length()
+
+
+## The share of top speed to drive at: the order's own pace (cruise_mps) when it has one, else `speed_frac`.
+func make_pace_fraction(speed_frac: float) -> float:
+	if cruise_mps <= 0.0:
+		return speed_frac
+	return clampf(cruise_mps / maxf(herc.max_speed, 0.1), MIN_PACE_FRACTION, 1.0)
 
 
 ## The heading to steer along toward `to` (horizontal): `to` itself, or turned aside while a detour runs around

@@ -6,6 +6,7 @@ extends RefCounted
 ## (an announcer; speak tells the script how long the radio stays busy), the objectives (states 0 added, 1 done, 2 failed,
 ## 3 removed) and the countdown. What reaches the placed soldiers, triggers and the player is the game's, called as:
 ##   apply_enable(label, on)  apply_destroy(label)  apply_spawn_point(label, on)  apply_teleport(label, to_label)
+##   apply_spawn_npc(rook, at)  apply_spawn_vehicle(class, label, team, at)  apply_enter_vehicle(character, vehicle)  apply_goal(...)
 ##   apply_damage(label, amount)  apply_end(success)  has_overlay()  make_speaker_name(label)  nav_points, nav_index
 ## Messages come in through tasks.fire(): "MessageLevelStart", "MessagePlayerStart", "MessageTriggerEnter" / "...Exit" (label of
 ## the trigger), "MessageDeath" (label of the dead), "MessageSquadDeath", "MessageAISpawned", "MessageCountDownExpired".
@@ -119,6 +120,8 @@ func _register_ops() -> void:
 	tasks.register_op("destroy", func(_t: MissionTask.Task, a: Dictionary) -> void: game.apply_destroy(str(a.target)))
 	tasks.register_op("spawn_vehicle", func(_t: MissionTask.Task, a: Dictionary) -> void:
 		game.apply_spawn_vehicle(str(a.get("class", "")), str(a.get("label", "")), str(a.get("team", "")), _actors.get(str(a.get("at", "")), [])))
+	tasks.register_op("spawn_npc", func(_t: MissionTask.Task, a: Dictionary) -> void:
+		game.apply_spawn_npc(a, _actors.get(str(a.get("at", "")), [])))
 	tasks.register_op("enter_vehicle", func(_t: MissionTask.Task, a: Dictionary) -> void:
 		game.apply_enter_vehicle(str(a.get("character", "")), str(a.get("vehicle", ""))))
 	tasks.register_op("goal", func(_t: MissionTask.Task, a: Dictionary) -> void:

@@ -9,7 +9,8 @@ so this step re-exports the four vehicles with every vertex on its own bone and 
   * a node `seat<i>` for each seat whose occupant the original draws: the animation's Character / CharacterLeft / CharacterRight bone is
     where the rider's body stands (`positions` of the vehicle class: occupantConnection, occupantAnimation, hideOccupant);
   * `parts` of the catalog record (gameplay/hercs.json): the wheel nodes with their radius and steering, the sequences the landing gear,
-    the wings and the treads play, read by the engine's VehicleParts.
+    the wings and the treads play, the tank's turret mesh node (it yaws with the gun) and the Rover's suspension (the shock beside each
+    wheel and the wheel class's SuspensionTravel), read by the engine's VehicleParts.
 
 and patches the seat poses (Pod_Stand, Buggy_Stand, AShipGunner_Stand ...) into the soldier bodies that have them.
 
@@ -46,6 +47,9 @@ RIDER_POSES = ('pod_stand', 'buggy_stand', 'ashipgunner_stand', 'aship_stand')
 WHEEL_RADIUS_CLASSES = {'BUGGY': ('BuggyFrontLeftWheel', 'BuggyBackLeftWheel')}
 WHEEL_NODES = {'BUGGY': [('BuggyFrontLeftWheel', True), ('BuggyFrontRightWheel', True), ('BuggyBackLeftWheel', False),
                          ('BuggyBackRightWheel', False)]}
+TURRET_PART_NODES = {'TANK': 'tankturret'}      # the mesh part that carries the gun's housing: it turns with the gun's aim
+SUSPENSION_FIELD = 'SuspensionTravel'     # uu: the whole travel of a wheel from full droop to full compression (HavokCarWheel)
+SUSPENSION_REST_SHARE = 0.5               # a wheel rests half way along its travel: it can droop and compress by the same distance
 HOVER_SHARE = 0.5                         # a flyer hovers at half its gear trace length (tv_vehicles.HOVER_FRACTION_OF_GEAR_TRACE)
 STEER_FIELD = 'SteeringMaxAngle'          # uu-rotation units: 6500 = 35.7 degrees (VehicleBuggy)
 TURN = 2.0 * np.pi / 65536.0
@@ -232,6 +236,30 @@ def tread_stride(anim):
     return round(best * METRES_PER_UU * frames / (frames - 1), 3)
 
 
+def has_node(js, name):
+    return any(nd['name'].lower() == name.lower() for nd in js['nodes'])
+
+
+def turret_parts(key, js):
+    """The mesh node that yaws with the vehicle's turret ({} when the vehicle has none)."""
+    node = TURRET_PART_NODES.get(key)
+    return {'node': node} if node and has_node(js, node) else {}
+
+
+def suspension_parts(key, classes, js):
+    """The Rover's suspension: the wheel class's SuspensionTravel (m) split into compression and droop about the rest position, and the
+    shock node of each wheel (the wheel's name with Shock for Wheel; the class's SupportBoneName)."""
+    wheels = []
+    for node, _steer in WHEEL_NODES.get(key, []):
+        shock = node.replace('Wheel', 'Shock')
+        if has_node(js, node) and has_node(js, shock):
+            wheels.append({'wheel': node, 'shock': shock})
+    if not wheels:
+        return {}
+    travel = TW.uu(classes.defaults(WHEEL_RADIUS_CLASSES[key][0]).get(SUSPENSION_FIELD, 0.0))
+    return {'compress_m': round(travel * SUSPENSION_REST_SHARE, 3), 'droop_m': round(travel * (1.0 - SUSPENSION_REST_SHARE), 3), 'wheels': wheels}
+
+
 def make_parts(key, classes, cls, js, anim):
     """The `parts` block of the catalog record (the engine's VehicleParts): wheels, steering angle, landing gear, wings, treads."""
     seqs = sequence_names(anim)
@@ -249,6 +277,10 @@ def make_parts(key, classes, cls, js, anim):
         parts['treads'] = {'left': {'forward': 'leftforward', 'backward': 'leftbackward'},
                            'right': {'forward': 'rightforward', 'backward': 'rightbackward'}, 'stride_m': tread_stride(anim),
                            'left_node': 'LeftTrack', 'right_node': 'RightTrack'}
+    if turret_parts(key, js):
+        parts['turret'] = turret_parts(key, js)
+    if suspension_parts(key, classes, js):
+        parts['suspension'] = suspension_parts(key, classes, js)
     if 'idle' in seqs:
         parts['idle'] = 'idle'
     if 'thrust' in seqs and 'dive' in seqs:
@@ -335,3 +367,30 @@ def add_rider_poses(idx, pkg, body, shape_path, log):
             json.dump(js, f, separators=(',', ':'))
         log('  body %-26s + %s' % (body['id'], added))
     return added
+
+
+# ------------------------------------------------------------------------------------------------ catalog patch
+def retrofit_catalog(game_root, pack_dir, log=print):
+    """Gives the installed catalog records (gameplay/hercs.json) the turret and suspension parts and the class's original TopSpeed
+    (m/s: what a script's DesiredSpeed is a share of) without exporting the vehicles again; returns the number of records patched."""
+    classes = UC.ClassIndex(game_root)
+    path = os.path.join(pack_dir, 'gameplay', 'hercs.json')
+    with open(path, encoding='utf-8') as f:
+        doc = json.load(f)
+    patched = 0
+    for key, (mesh_name, cls) in BODIES.items():
+        shape_path = os.path.join(pack_dir, 'shapes', 'tv_prop_%s.json' % mesh_name.lower())
+        if key not in doc or not os.path.isfile(shape_path):
+            continue
+        with open(shape_path, encoding='utf-8') as f:
+            js = json.load(f)
+        rec = doc[key]
+        for name, block in (('turret', turret_parts(key, js)), ('suspension', suspension_parts(key, classes, js))):
+            if block:
+                rec['parts'][name] = block
+        rec['top_speed_mps'] = round(TW.uu(classes.defaults(cls).get('TopSpeed', 0.0)), 2)
+        patched += 1
+        log('  %-14s parts %s  original top speed %.1f m/s' % (key, sorted(rec['parts']), rec['top_speed_mps']))
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(doc, f, indent=1)
+    return patched

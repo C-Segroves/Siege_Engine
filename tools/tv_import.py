@@ -5,7 +5,7 @@
 The game root is the unpacked installer's "app/Tribes Vengeance" folder (tools/tv_unpack.py makes it; a zip is
 unpacked into a short scratch folder first and the scratch is deleted afterwards).
 
-Also terrain, static meshes and editor brushes (tv_terrain, tv_statics, tv_bsp; --only=<map> converts one map) and the drivable
+Also terrain, static meshes and editor brushes (tv_terrain, tv_statics, tv_bsp, tv_bsp_render; --only=<map> converts one map) and the drivable
 vehicles (tv_vehicles: hercs.json, weapons_engine.json, vehicle_seats.json and the maps' "vehicles" lists).
 Writes: campaign/campaign.json (16 chapters, 29 maps in play order: names, objective text, a dialogue excerpt for
 the briefing), maps/<Id>/map.json (player and NPC spawns, objective markers as waypoints, placeholder flat ground,
@@ -22,11 +22,13 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ue2_package as U  # noqa: E402
+import ue2_classes  # noqa: E402
 import fx_default  # noqa: E402
 import tv_weapons  # noqa: E402
 import tv_assets  # noqa: E402
 import tv_audio  # noqa: E402
 import tv_bsp  # noqa: E402
+import tv_bsp_render  # noqa: E402
 import tv_lights  # noqa: E402
 import tv_script  # noqa: E402
 import tv_skeletal  # noqa: E402
@@ -287,6 +289,7 @@ def import_campaign(game_root, pack_dir, log=print, only=None):
     log('vehicles: %d drivable' % tv_vehicles.export(game_root, pack_dir, log=log))      # after the props (their shapes) and the weapon sounds
     chapters, chapter_texts, prompts = load_texts(game_root)
     pad_table = tv_vehicles.make_pad_table(game_root)
+    npc_info = tv_script.make_npc_info(ue2_classes.ClassIndex(game_root), pack_dir)
     voice_files = tv_audio.find_voice_files(game_root)
     shape_cache = {}
     content = os.path.join(game_root, 'Content')
@@ -313,13 +316,11 @@ def import_campaign(game_root, pack_dir, log=print, only=None):
             m['statics'].extend(m.pop('_props'))
             if failed:
                 log('  %d static meshes not converted' % failed)
-            bsp = tv_bsp.export_bsp(idx, pkg, pack_dir, m['id'].lower(), METRES_PER_UU)
-            if bsp:
-                m['statics'].insert(0, bsp)
+            m['statics'][0:0] = tv_bsp_render.export_bsp_entries(idx, pkg, pack_dir, m['id'].lower(), METRES_PER_UU)
             m['environment'], m['point_lights'] = tv_lights.export_lighting(pkg, to_world, METRES_PER_UU)
             m['sounds'], m['voice'] = map_sounds(pkg, voice_files, pack_dir)
             texts = make_map_texts(chapter_texts, prompts, ch['number'])
-            script = tv_script.compile_map(pkg, to_world, texts, METRES_PER_UU)
+            script = tv_script.compile_map(pkg, to_world, texts, METRES_PER_UU, npc_info)
             m['player_team'] = next((sp.get('team_name', '') for sp in m['spawns'] if sp.get('team_name')), '')
             keys = [q['key'] for q in m['objectives'] if q['key'] in objective_text]
             lines = [objective_text[q] for q in keys]

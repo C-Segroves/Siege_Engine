@@ -233,23 +233,47 @@ func _spawn_npc(e: Dictionary) -> bool:
 	if brain == null:
 		return false
 	e.brain = brain
+	_apply_health_modifier(brain.soldier, float(rec.get("health", 1.0)))
 	_steer(e)
 	_npc_of[int(brain.soldier.net_id)] = e
 	script_run.fire("MessageAISpawned", str(rec.get("label", "")))
 	return true
 
 
+## The class's healthModifier scales the soldier's hit points (the Coliseum captain's 4).
+static func _apply_health_modifier(soldier: Infantry, modifier: float) -> void:
+	if is_equal_approx(modifier, 1.0) or soldier.components.is_empty():
+		return
+	soldier.components[0].hp = float(soldier.components[0].hp) * modifier
+	soldier.components[0].max = float(soldier.components[0].max) * modifier
+
+
 ## Writes the goals of entry `e` onto its brain (TVNpcGoals).
 func _steer(e: Dictionary) -> void:
 	var p: Herc = battle.player
 	var at: Vector3 = p.global_position if p != null and is_instance_valid(p) else Vector3.ZERO
-	TVNpcGoals.steer(e, script_data.get("actors", {}), at, _vec(e.rec.pos))
+	TVNpcGoals.steer(e, script_data.get("actors", {}), at, _vec(e.rec.pos), fleet.find_herc)
 
 
 func _steer_npcs() -> void:
 	for e in _npcs:
 		if bool(e.spawned) and not bool(e.dead) and e.brain != null:
 			_steer(e)
+			_apply_boarding(e)
+
+
+## A soldier whose enter-vehicle goal has brought him to the hull climbs in (into the goal's seat); one that cannot sit there gives the goal up.
+func _apply_boarding(e: Dictionary) -> void:
+	var g := TVNpcGoals.make_boarding_goal(e, fleet.find_herc)
+	if g.is_empty():
+		return
+	(e.goals as Dictionary).erase(g.key)
+	var soldier := e.brain.soldier as Infantry
+	if soldier.stowed:
+		return
+	if not fleet.apply_board(str(g.vehicle), soldier, int(g.get("seat", 0))):
+		_apply_absorbed(e)
+		fleet.apply_crew(str(g.vehicle))
 
 
 ## The placed soldiers a goal op addresses: the actor by label, its spawn point, or every member of the squad of that label.
@@ -362,18 +386,52 @@ func apply_spawn_vehicle(vehicle_class: String, label: String, team_name: String
 	fleet.apply_spawn_vehicle(vehicle_class, label, team_name, at)
 
 
-## ActionEnterVehicle: the soldier `character` takes the pilot's seat of `vehicle`: he is gone from the world (no death message) and the
-## vehicle is crewed by its own pilot.
+## ActionSpawnRook of a soldier class: a soldier of that class (`body` and health modifier from the class defaults, tools/tv_script.py) of
+## the team named `team_name` stands at the script's actor `at` facing the player, called `label`. A rook of an earlier spawn of the same
+## label that is gone is forgotten (the wave scripts spawn a label again and again). Returns the entry ({} when there is no position).
+func apply_spawn_npc(rook: Dictionary, at: Array) -> Dictionary:
+	if at.size() < 3 or str(rook.get("body", "")) == "":
+		return {}
+	var label := str(rook.get("label", ""))
+	_npcs = _npcs.filter(func(n: Dictionary) -> bool: return not (bool(n.dead) and str(n.rec.get("label", "")) == label))
+	var rec := {"kind": "npc", "pos": at, "yaw": make_yaw_toward_player(_vec(at)), "label": label, "class": str(rook.get("class", "")),
+		"body": str(rook.body), "team": str(rook.get("team", "")), "health": float(rook.get("health", 1.0)), "enabled": true, "spawn_point": false}
+	var e := {"rec": rec, "enabled": true, "spawned": false, "dead": false, "brain": null, "goals": {}}
+	_npcs.append(e)
+	_spawn_npc(e)
+	return e
+
+
+## The yaw (degrees, as the placed soldiers' records have) that turns a soldier at `at` toward the player.
+func make_yaw_toward_player(at: Vector3) -> float:
+	var p: Herc = battle.player
+	if p == null or not is_instance_valid(p):
+		return 0.0
+	var to := p.global_position - at
+	return rad_to_deg(atan2(-to.x, -to.z))
+
+
+## ActionEnterVehicle: the soldier `character` takes a seat of `vehicle` (he climbs in for real, TVVehicleFleet.apply_board). When he cannot
+## (the vehicle is not in the world yet, or it is flown by its own AI pilot and he is its pilot) he is gone from the world without a death
+## message and the vehicle is crewed by its own pilot.
 func apply_enter_vehicle(character: String, vehicle: String) -> void:
 	if not fleet.has_label(vehicle):
 		return
 	for e in _entries_named(character):
-		e.enabled = false
-		e.dead = true
 		var b = e.brain
-		if b != null and is_instance_valid(b) and is_instance_valid(b.soldier) and b.soldier.alive:
-			b.soldier.apply_environment_damage(1.0)
+		var alive: bool = b != null and is_instance_valid(b) and is_instance_valid(b.soldier) and b.soldier.alive
+		if not (alive and fleet.apply_board(vehicle, b.soldier as Infantry, -1)):
+			_apply_absorbed(e)
 	fleet.apply_crew(vehicle)
+
+
+## The soldier of entry `e` is gone from the world, without a death message: the vehicle's own AI crew stands for him.
+func _apply_absorbed(e: Dictionary) -> void:
+	e.enabled = false
+	e.dead = true
+	var b = e.brain
+	if b != null and is_instance_valid(b) and is_instance_valid(b.soldier) and b.soldier.alive:
+		battle.remove_vehicle((b.soldier as Infantry).net_id)
 
 
 ## The soldier `character`, put into a vehicle by ActionEnterVehicle, gets out beside it at `at` (AI_VehicleExpellOccupantGoal).

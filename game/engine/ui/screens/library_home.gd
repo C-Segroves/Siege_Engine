@@ -2,9 +2,10 @@ class_name LibraryHome
 extends RoutedScreen
 ## Library home, in three tabs (TabPages). Play: the campaigns (Continue / New campaign / Load game open the launcher's
 ## campaign pages), Host LAN game (the standard lobby: the host picks co-op, the campaign, skirmish, training, extraction or
-## any versus game mode there; alone it is a solo game against bots) and Join. Your library: import discs, switch each
-## game's content on/off, and soundtracks. Options & tools: Play intro, the shape viewer, Options (with the pilot name),
-## Tested game versions. Leaving a match returns here on the Play tab (Session.front_end_tab). The tab last
+## any versus game mode there; alone it is a solo game against bots), Host online game (the same, also listed on the master
+## server) and Join. Your library: import discs, switch each
+## game's content on/off, and soundtracks. Options & tools: Play intro, the shape viewer, Run dedicated server (a headless
+## server on this PC), Options (the pilot name, the master server address), Tested game versions. Leaving a match returns here on the Play tab (Session.front_end_tab). The tab last
 ## shown is kept while the app runs; with nothing imported the library tab opens first.
 
 const SHAPE_VIEWER := "res://tools/shape_viewer.tscn"
@@ -16,6 +17,9 @@ const TAB_PLAY := "play"
 const TAB_LIBRARY := "library"
 const TAB_TOOLS := "tools"
 const HOST_TEXT := "Host LAN game"
+const JOIN_TEXT := "Join LAN game"
+const HOST_ONLINE_TEXT := "Host online game"
+const NO_MASTER_TEXT := "Set the master server address first: Options & tools > Options > Online."
 
 static var _last_tab := ""
 
@@ -64,7 +68,9 @@ func _library() -> Library:
 
 
 func _ask_quit() -> void:
-	ConfirmDialog.ask(self, "Quit Siege Engine?", func() -> void: get_tree().quit(), "Quit", Widgets.DANGER)
+	ConfirmDialog.ask(self, "Quit Siege Engine?", func() -> void:
+		LocalServer.stop()
+		get_tree().quit(), "Quit", Widgets.DANGER)
 
 
 # ------------------------------------------------------------------ import
@@ -213,11 +219,15 @@ func _add_play_section(page: VBoxContainer, can_play: bool) -> void:
 	var host := Widgets.button(HOST_TEXT, func() -> void: _library().open_launcher("host"))
 	host.disabled = not can_play
 	page.add_child(host)
-	var join := Widgets.button("Join online game" if WebPlatform.is_active() else "Join LAN game", func() -> void: _library().open_launcher(Launcher.JOIN_START_MODE))
+	var host_online := Widgets.button(HOST_ONLINE_TEXT, func() -> void: _library().open_launcher("host_online"))
+	host_online.disabled = not can_play or not OnlineSettings.has_master()
+	host_online.tooltip_text = "Host a game and list it on your master server so others can find it." if OnlineSettings.has_master() else NO_MASTER_TEXT
+	page.add_child(host_online)
+	var join := Widgets.button("Join online game" if WebPlatform.is_active() else JOIN_TEXT, func() -> void: _library().open_launcher(Launcher.JOIN_START_MODE))
 	join.disabled = not can_play
 	page.add_child(join)
 	if WebPlatform.is_active():
-		_disable_lan_buttons(page, [host])
+		_disable_lan_buttons(page, [host, host_online])
 
 
 func _add_tools_section(page: VBoxContainer) -> void:
@@ -228,6 +238,10 @@ func _add_tools_section(page: VBoxContainer) -> void:
 	var viewer := Widgets.button("Shape viewer", func() -> void: get_tree().change_scene_to_file(SHAPE_VIEWER))
 	viewer.disabled = Packs.packs.is_empty()
 	page.add_child(viewer)
+	var server := Widgets.button("Run dedicated server...", func() -> void: ServerSheet.open(self))
+	server.disabled = Packs.pilotable().is_empty() or WebPlatform.is_active()
+	server.tooltip_text = "Starts a headless server on this PC that others can join by IP; stop it from the same sheet."
+	page.add_child(server)
 	page.add_child(Widgets.button("Options", func() -> void: router.go("options", {"home": "home"})))
 	page.add_child(Widgets.button("Tested game versions", func() -> void: router.go("versions")))
 

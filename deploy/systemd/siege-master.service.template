@@ -1,0 +1,18 @@
+# Rendered by deploy/install.sh into /etc/systemd/system/siege-master.service (MASTER_SERVER=yes).
+# The master server only lists games (register / heartbeat / list); it never relays game traffic and holds no game data.
+[Unit]
+Description=Siege Engine master server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=@SERVICE_USER@
+Environment=HOME=@INSTALL_DIR@
+ExecStart=@GODOT_BIN@ --headless --audio-driver Dummy --path @REPO_DIR@/game res://server/master_server.tscn -- --config=@MASTER_CONFIG@
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

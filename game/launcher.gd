@@ -20,6 +20,7 @@ const CAMPAIGN_START_MODES := ["continue", "new_campaign", "load"]
 ## is an offline session.
 const LOBBY_START_KINDS := {
 	"host": {"kind": GameOptionsModel.KIND_VERSUS, "solo": false},
+	"host_online": {"kind": GameOptionsModel.KIND_VERSUS, "solo": false, "online": true},   # also listed on the master server
 }
 ## Library entry that opens the LAN browser (meta "start_mode").
 const JOIN_START_MODE := "join"
@@ -120,9 +121,9 @@ func show_started_campaign() -> void:
 
 ## Opens a new lobby of `kind` (GameOptionsModel.KIND_*) with the default settings: hosted over LAN, or with `solo` an
 ## offline session. An offline session that is still open from an earlier game is closed first.
-func open_lobby(kind: String, solo := false) -> RoutedScreen:
+func open_lobby(kind: String, solo := false, online := false) -> RoutedScreen:
 	end_offline_session()
-	return go("lobby", {"kind": kind, "solo": solo})
+	return go("lobby", {"kind": kind, "solo": solo, "online": online})
 
 
 ## Closes an offline session left open after a game (the lobby it returned to was not used again).
@@ -209,7 +210,7 @@ func _open_page_after_battle() -> void:
 	elif start_mode == JOIN_START_MODE:
 		go("browser")
 	elif LOBBY_START_KINDS.has(start_mode):
-		open_lobby(LOBBY_START_KINDS[start_mode].kind, LOBBY_START_KINDS[start_mode].solo)
+		open_lobby(LOBBY_START_KINDS[start_mode].kind, LOBBY_START_KINDS[start_mode].solo, LOBBY_START_KINDS[start_mode].get("online", false))
 	elif multiplayer_only:
 		go("browser")
 	elif not LauncherAutomation.is_pending():

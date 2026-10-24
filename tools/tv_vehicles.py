@@ -283,6 +283,7 @@ class Builder:
                                           'tribes_max_damage': health}]},
                'source': 'UE2 class defaults %s (Health %g, TopSpeed %g uu/s)' % (spec['cls'], health, float(d.get('TopSpeed', 0)))}
         mass = float(hk.get('hkMass', 0.0)) if flyer else float(d.get('ChassisMass', 3000.0))
+        rec['top_speed_mps'] = round(top_mps, 2)                    # the class's own TopSpeed: a script's DesiredSpeed is a share of it
         rec['mass'] = mass
         rec['weight'] = make_weight(mass)
         rec['size_class'] = {'light': 0, 'medium': 1, 'heavy': 2}[rec['weight']]
@@ -472,11 +473,13 @@ def make_pad_stations(pads):
 
 
 def retrofit_scripts(game_root, pack_dir, log=print):
-    """Compiles the mission scripts of the installed maps again (the goal and vehicle ops) from the original map packages."""
+    """Compiles the mission scripts of the installed maps again (the goal, vehicle and soldier-spawn ops) from the original map packages."""
     import tv_import as T
     import tv_script
+    import ue2_classes
     chapters, chapter_texts, prompts = T.load_texts(game_root)
     maps_dir = os.path.join(game_root, 'Content', 'Maps')
+    npc_info = tv_script.make_npc_info(ue2_classes.ClassIndex(game_root), pack_dir)
     count = 0
     for ch in chapters:
         texts = T.make_map_texts(chapter_texts, prompts, ch['number'])
@@ -487,7 +490,7 @@ def retrofit_scripts(game_root, pack_dir, log=print):
                 continue
             pkg = U.load(src)
             pkg.stem = entry['map'].lower()
-            script = tv_script.compile_map(pkg, T.to_world, texts, METRES_PER_UU)
+            script = tv_script.compile_map(pkg, T.to_world, texts, METRES_PER_UU, npc_info)
             with open(target, 'w', encoding='utf-8') as f:
                 json.dump(script, f, separators=(',', ':'), ensure_ascii=False)
             count += 1

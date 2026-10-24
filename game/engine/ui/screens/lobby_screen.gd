@@ -53,7 +53,7 @@ func open(args: Dictionary) -> void:
 	set_page_title("lobby")
 	set_back("Leave", _leave)
 	if args.has("kind") and Net.roster.is_empty():
-		var err := MatchFlow.open_lobby_session(str(args.kind), bool(args.get("solo", false)))
+		var err := MatchFlow.open_lobby_session(str(args.kind), bool(args.get("solo", false)), bool(args.get("online", false)))
 		if err != OK:
 			set_status("Could not open port %d (error %d)" % [Net.GAME_PORT, err])
 	LobbyChatHub.ensure(get_tree())

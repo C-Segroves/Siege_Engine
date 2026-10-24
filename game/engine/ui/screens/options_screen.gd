@@ -29,6 +29,7 @@ func open(args: Dictionary) -> void:
 	set_page_title("options")
 	set_back("Back", router.back)
 	_add_player_section()
+	_add_online_section()
 	_add_audio_section()
 	_add_display_section()
 	content.add_child(ChatOptions.new())
@@ -49,6 +50,19 @@ func _open_operator_setup() -> void:
 	var profile := OperatorProfile.load_for(Net.player_name)
 	var ctx := LoadoutContext.make_for(GameOptionsModel.make_default_settings(GameOptionsModel.KIND_VERSUS), LoadoutContext.ROLE_PLAYER, profile.unlocks)
 	OperatorSetup.open(self, ctx, profile.active_slot, profile)
+
+
+# ------------------------------------------------------------------ online
+
+## The master server address (empty: LAN play only), saved as it is typed. See docs/SERVER_DEPLOY.md "Run a master server".
+func _add_online_section() -> void:
+	content.add_child(Widgets.section("Online"))
+	var edit := Widgets.line_edit(OnlineSettings.master(), "empty = LAN only, e.g. 192.168.1.5:47710")
+	edit.text_changed.connect(OnlineSettings.apply_master)
+	edit.text_submitted.connect(func(_t: String) -> void: edit.release_focus())
+	content.add_child(OptionRow.new("Master server address", edit))
+	content.add_child(Widgets.paragraph("The master server only lists games; the game traffic goes straight between players. "
+		+ "Leave it empty to play on the LAN without one.", "DimLabel"))
 
 
 # ------------------------------------------------------------------ audio

@@ -7,7 +7,10 @@ extends RefCounted
 ##   gear     {down, up, start_alt_m, full_alt_m} landing gear retracts as the flyer climbs from full_alt_m to start_alt_m;
 ##   wings    {open, closed, left, right}        the wings close while the gear is down and bank with the turn;
 ##   treads   {left, right: {forward, backward}, stride_m, left_node, right_node}  each track's cycle runs by its own speed;
-##   idle     a looping sequence played all the time; thrust {forward, back, thrust, dive, strafe_left, strafe_right}  engine poses.
+##   idle     a looping sequence played all the time; thrust {forward, back, thrust, dive, strafe_left, strafe_right}  engine poses;
+##   turret   {node}  the mesh part that carries the gun's housing: it yaws with the gun's aim about the turret node's axis;
+##   suspension  {compress_m, droop_m, wheels: [{wheel, shock}]}  each wheel rises and falls with the ground under it (a ray down from
+##            the hub), its shock strut stretching or shortening with it.
 ## Every sequence is a pose relative to the shape's rest pose (Vengeance's single-frame GearDown / WingsOpen are the rest pose itself),
 ## so layers are blended by weight and stacked on the rest pose node by node.
 
@@ -17,6 +20,10 @@ const STEER_FOLLOW := 8.0
 const FULL_STEER_YAW_RATE := 1.5
 const FULL_BANK_YAW_RATE := 1.0
 const NO_NODE := -1
+## Rate (per second) a wheel follows the ground under it.
+const SUSPENSION_FOLLOW := 14.0
+## A wheel's ray starts this far above the hub (m, more than the compression) so a bump over the hub is still found.
+const SUSPENSION_PROBE_LEAD_M := 0.3
 
 var herc: Herc
 var shape: ShapeInstance
@@ -40,6 +47,12 @@ var _have_last := false
 var _left_track := NO_NODE
 var _right_track := NO_NODE
 var _half_track := 0.0
+## The mesh node that yaws with the gun (-1 = none).
+var turret_node := NO_NODE
+## The wheels that have a suspension: [{wheel, shock (node indexes), up, hub, lift}].
+var suspension_wheels: Array = []
+## Suspension: wheel node index -> the metres it is pushed up (+) or hangs down (-) from its rest height, as posed last frame.
+var wheel_lift := {}
 ## Weight of each layer applied last frame: sequence name -> weight (for the checks).
 var layers := {}
 
@@ -57,6 +70,8 @@ static func make(p_herc: Herc) -> VehicleParts:
 	p._read_sequences()
 	p._read_wheels()
 	p._read_treads()
+	p._read_turret()
+	p._read_suspension()
 	return p
 
 
@@ -115,6 +130,25 @@ func _read_treads() -> void:
 		_half_track = absf(_make_root_transform(_left_track).origin.x - _make_root_transform(_right_track).origin.x) * 0.5
 
 
+func _read_turret() -> void:
+	var spec: Dictionary = parts.get("turret", {})
+	turret_node = _index_of_node(str(spec.get("node", "")))
+
+
+## The shock of each wheel is a strut whose far end sits at the chassis: its node frame's y axis runs along it.
+func _read_suspension() -> void:
+	var spec: Dictionary = parts.get("suspension", {})
+	for w in spec.get("wheels", []):
+		var wheel := _index_of_node(str(w.wheel))
+		var shock := _index_of_node(str(w.shock))
+		if wheel == NO_NODE or shock == NO_NODE:
+			continue
+		var parent: int = int(shape.shape.nodes[wheel].parent)
+		var parent_root := _make_root_transform(parent) if parent >= 0 else Transform3D.IDENTITY
+		suspension_wheels.append({"wheel": wheel, "shock": shock, "up": parent_root.basis.inverse() * Vector3.UP,
+			"hub": _make_root_transform(wheel).origin, "lift": 0.0})
+
+
 ## One frame: pose the parts for what the vehicle did in `delta` seconds.
 func update(delta: float) -> void:
 	if delta <= 0.0 or not herc.alive:
@@ -127,8 +161,11 @@ func update(delta: float) -> void:
 	_apply_wheels(move, delta)
 	_stack_layers(pose, _make_layers(move, delta))
 	_pose_wheels(pose)
+	_pose_turret(pose)
+	_pose_suspension(pose, delta)
 	for i in pose:
-		shape.nodes[i].transform = pose[i]
+		if i != herc.torso.torso_node and i != herc.torso.pitch_node:       # the torso rig poses its own nodes
+			shape.nodes[i].transform = pose[i]
 
 
 ## Forward speed (m/s, signed), sideways speed (m/s, + right), climb rate (m/s) and heading change rate (rad/s, + left).
@@ -253,3 +290,77 @@ func _pose_wheels(pose: Dictionary) -> void:
 		if bool(w.steer):
 			spun.basis = Basis(w.up, steer) * spun.basis
 		pose[ni] = spun
+
+
+## The turret mesh turns about the vertical through the turret node (where the gun hangs) by the gun's yaw.
+func _pose_turret(pose: Dictionary) -> void:
+	if turret_node == NO_NODE or herc.torso.torso_node == NO_NODE:
+		return
+	var axis_at := _make_root_transform(herc.torso.torso_node).origin
+	var turn := Transform3D(Basis(Vector3.UP, herc.torso_yaw), axis_at - Basis(Vector3.UP, herc.torso_yaw) * axis_at)
+	var parent: int = int(shape.shape.nodes[turret_node].parent)
+	var parent_root := _make_root_transform(parent) if parent >= 0 else Transform3D.IDENTITY
+	pose[turret_node] = parent_root.affine_inverse() * turn * parent_root * (pose[turret_node] as Transform3D)
+
+
+## Each wheel rises with the ground under it and hangs down where there is none (the hull itself is one rigid body): the lift is
+## the wheel's height of ground above its rest contact, less the average of the wheels that touch (the body rides at the mean).
+func _pose_suspension(pose: Dictionary, delta: float) -> void:
+	if suspension_wheels.is_empty() or ServerProfile.is_collision_only():
+		return
+	var targets := _measure_wheel_lifts()
+	for i in suspension_wheels.size():
+		var w: Dictionary = suspension_wheels[i]
+		w.lift = lerpf(float(w.lift), float(targets[i]), clampf(SUSPENSION_FOLLOW * delta, 0.0, 1.0))
+		wheel_lift[int(w.wheel)] = w.lift
+		var wheel_pose: Transform3D = pose[int(w.wheel)]
+		wheel_pose.origin += (w.up as Vector3) * float(w.lift) / shape.scale.x          # node transforms are in the shape's own units
+		pose[int(w.wheel)] = wheel_pose
+		_pose_shock(pose, w)
+
+
+## The lift each wheel is pulled to: ground contact by a ray from above the hub down to a wheel radius plus the droop below it.
+func _measure_wheel_lifts() -> Array:
+	var spec: Dictionary = parts.suspension
+	var radius := float(parts.wheels.get("radius_m", 0.0))
+	var compress := float(spec.compress_m)
+	var droop := float(spec.droop_m)
+	var up := herc.global_basis.y
+	var raw := []
+	var touching := 0.0
+	var sum := 0.0
+	for w in suspension_wheels:
+		var hub: Vector3 = shape.global_transform * (w.hub as Vector3)
+		var reach := _measure_ground_distance(hub + up * SUSPENSION_PROBE_LEAD_M, up, SUSPENSION_PROBE_LEAD_M + radius + droop)
+		var lift := NAN if reach < 0.0 else clampf(radius - (reach - SUSPENSION_PROBE_LEAD_M), -droop, compress)
+		raw.append(lift)
+		if not is_nan(lift):
+			touching += 1.0
+			sum += lift
+	var ride := sum / touching if touching > 0.0 else 0.0
+	return raw.map(func(l: float) -> float: return -droop if is_nan(l) else clampf(l - ride, -droop, compress))
+
+
+## Metres from `from` straight down (against `up`) to the ground, -1 when there is none within `reach`; vehicles and soldiers are not ground.
+func _measure_ground_distance(from: Vector3, up: Vector3, reach: float) -> float:
+	if not herc.is_inside_tree():
+		return -1.0
+	var q := PhysicsRayQueryParameters3D.create(from, from - up * reach)
+	q.exclude = [herc.get_rid()]
+	var space := herc.get_world_3d().direct_space_state
+	for _i in 4:
+		var hit := space.intersect_ray(q)
+		if hit.is_empty():
+			return -1.0
+		if not (hit.collider is CharacterBody3D):
+			return from.distance_to(hit.position)
+		q.exclude.append((hit.collider as CollisionObject3D).get_rid())
+	return -1.0
+
+
+## The shock strut follows its wheel: its far end stays at the chassis, so the strut is stretched along its own axis by the lift.
+func _pose_shock(pose: Dictionary, w: Dictionary) -> void:
+	var shock: Transform3D = pose[int(w.shock)]
+	var length := maxf(float(parts.suspension.get("shock_length_m", 1.0)), 0.1)
+	shock.basis = shock.basis * Basis.from_scale(Vector3(1.0, maxf(1.0 + float(w.lift) / length, 0.1), 1.0))
+	pose[int(w.shock)] = shock

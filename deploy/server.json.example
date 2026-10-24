@@ -21,5 +21,7 @@
   "idle_abort_seconds": 60,
   "tick_hz": 0,
   "max_catchup_steps": 2,
-  "stats_seconds": 60
+  "stats_seconds": 60,
+  "master": "",
+  "master_token": ""
 }

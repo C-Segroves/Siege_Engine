@@ -5,6 +5,10 @@ extends Node
 ## target's death.
 ##   TV_TEST_ROOT=<data folder with tribes_v/> godot --headless --audio-driver Dummy --path game res://tests/tv_script_check.tscn
 const PACK := "tribes_v"
+const SOLDIER_OP_TICKS := 1800
+const MIN_SOLDIER_ROOKS := 50
+## Places two rooks name that the original maps do not have (SP-Prison-Interior, SP-Truth-Hunt): the original has nowhere to put them either.
+const MISSING_ROOK_PLACES := ["NoteConsolSpawnPoint2", "NoteAmbush3Spawn"]
 var _fails := 0
 var _speech := AudioStreamPlayer.new()
 
@@ -38,6 +42,12 @@ class Host:
 		events.append(["damage", label, amount])
 	func apply_goal(label: String, mode: String, name: String, goal: Dictionary) -> void:
 		events.append(["goal", label, mode, name, goal])
+	func apply_spawn_npc(rook: Dictionary, at: Array) -> void:
+		events.append(["spawn_npc", rook, at])
+	func apply_spawn_vehicle(vehicle_class: String, label: String, team: String, at: Array) -> void:
+		events.append(["spawn_vehicle", vehicle_class, label, team, at])
+	func apply_enter_vehicle(character: String, vehicle: String) -> void:
+		events.append(["enter_vehicle", character, vehicle])
 	func apply_end(success: bool) -> void:
 		ended = 1 if success else 0
 
@@ -156,6 +166,28 @@ func _check_goals() -> void:
 	TVNpcGoals.apply(e, "add", "", {"kind": "attack", "name": "A", "priority": 52, "target": "Player"})
 	TVNpcGoals.steer(e, actors, player, spawn)
 	_expect(brain.guard_radius == 0.0, "an attack goal hunts the enemy across the map")
+	_check_enter_goal(brain)
+	_check_goal_orders()
+
+
+## The enter-vehicle goal walks the soldier to the vehicle (the vehicle's script position when it is not in the world) through an AIOrder.
+func _check_enter_goal(brain: FakeBrain) -> void:
+	var e := {"brain": brain, "goals": {}}
+	var actors := {"Pod1": [30.0, 0.0, 40.0]}
+	TVNpcGoals.apply(e, "add", "", {"kind": "enter_vehicle", "name": "Enter", "priority": 75, "vehicle": "Pod1", "seat": 0})
+	TVNpcGoals.steer(e, actors, Vector3.ZERO, Vector3.ZERO)
+	_expect(brain.objective.get("point") == Vector3(30, 0, 40) and bool(brain.objective.urgent) and brain.objective.radius == TVNpcGoals.BOARD_POINT_RADIUS_M,
+		"an enter-vehicle goal walks, urgently, to the vehicle's place %s" % [brain.objective])
+	TVNpcGoals.steer(e, {}, Vector3.ZERO, Vector3.ZERO)
+	_expect(brain.objective.is_empty(), "a vehicle the script knows nothing of gives no order")
+	_expect(TVNpcGoals.make_boarding_goal(e, func(_label: String) -> Herc: return null).is_empty(), "he does not board a vehicle that is not there")
+
+
+## The goals that walk become AIOrders of the shared kind and objective.
+func _check_goal_orders() -> void:
+	var order := TVNpcGoals.make_move_order({"dest": "NodeA", "priority": 100}, {"NodeA": [1.0, 2.0, 3.0]}, Vector3.ZERO)
+	_expect(order != null and order.kind == AIOrder.MOVE and order.urgent and order.to_objective().point == Vector3(1, 2, 3), "a move goal is a MOVE AIOrder")
+	_expect(TVNpcGoals.make_move_order({"dest": "Nowhere"}, {}, Vector3.ZERO) == null, "an unknown node gives no order")
 
 
 func _check_maps() -> void:
@@ -189,6 +221,7 @@ func _check_maps() -> void:
 		if ends:
 			with_end += 1
 	_expect(goal_ops > 0, "%d AI goal ops reached the host in the first minutes" % goal_ops)
+	_check_soldier_ops(idx)
 	_expect(scripted >= 29, "%d maps carry scripts" % scripted)
 	_expect(with_end == scripted, "every scripted map has a mission end (%d of %d)" % [with_end, scripted])
 	_expect(with_objectives >= scripted / 3, "%d maps add an objective in their first minute" % with_objectives)
@@ -205,3 +238,51 @@ func _check_maps() -> void:
 		for _i in 50:
 			run.tick(0.1)
 		_expect(h.ended == 1, "Revenge-Ascent: Daniel's death wins the mission")
+
+
+## The soldier ActionSpawnRook ops of the maps: a body of the pack, a team, a place; the host receives them when the script runs.
+func _check_soldier_ops(idx: Array) -> void:
+	var bodies := {}
+	for b in InfantryCatalog.make_tv_all_bodies():
+		bodies[str(b.id)] = true
+	var found := 0
+	var bad := 0
+	var reached := 0
+	for e in idx:
+		var path := Assets.path("maps/%s/script.json" % e.id, PACK)
+		var data = JSON.parse_string(FileAccess.get_file_as_string(path)) if FileAccess.file_exists(path) else null
+		if not (data is Dictionary):
+			continue
+		var ops := _collect_ops(data.scripts, "spawn_npc")
+		for op in ops:
+			found += 1
+			var placed: bool = (data.get("actors", {}) as Dictionary).has(str(op.get("at", ""))) or MISSING_ROOK_PLACES.has(str(op.get("at", "")))
+			if not bodies.has(str(op.get("body", ""))) or str(op.get("team", "")) == "" or not placed or float(op.get("health", 0.0)) <= 0.0:
+				bad += 1
+		if ops.is_empty():
+			continue
+		var h := Host.new(data.scripts, _speech, data.get("actors", {}))
+		var run := h.host.tasks
+		run.fire("MessageLevelStart", "all")
+		run.fire("MessagePlayerStart", "all")
+		for _i in SOLDIER_OP_TICKS:
+			run.tick(0.1)
+		reached += h.events.filter(func(ev: Array) -> bool: return ev[0] == "spawn_npc").size()
+	_expect(found >= MIN_SOLDIER_ROOKS and bad == 0, "%d soldier rooks in the scripts, each with a pack body, a team, a place and a health (%d bad)" % [found, bad])
+	_expect(reached > 0, "%d of them reached the host when the first minutes of the scripts ran" % reached)
+
+
+## Every action of `op` in the action trees `actions`.
+static func _collect_ops(actions: Variant, op: String) -> Array:
+	var out := []
+	if actions is Array:
+		for a in actions:
+			out.append_array(_collect_ops(a, op))
+	elif actions is Dictionary:
+		if str(actions.get("op", "")) == op:
+			out.append(actions)
+		for key in ["actions", "then", "else"]:
+			out.append_array(_collect_ops(actions.get(key, []), op))
+		if actions.has("scripts"):
+			out.append_array(_collect_ops(actions.scripts, op))
+	return out

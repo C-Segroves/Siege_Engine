@@ -33,9 +33,9 @@ co-op campaign, extraction, Tribes training) is picked in the host lobby's Game 
 
 | Screen | Buttons | Back / Esc / pad B |
 |---|---|---|
-| Home, Play tab | Continue campaign → Lobby (campaign), New campaign → New campaign, Load game → Saves, Host LAN game → Lobby, Join LAN game → Browser; primary: Host LAN game | "Quit" asks first |
+| Home, Play tab | Continue campaign → Lobby (campaign), New campaign → New campaign, Load game → Saves, Host LAN game → Lobby, Host online game → Lobby (also listed on the master server; disabled until a master address is set), Join LAN game → Browser; primary: Host LAN game | "Quit" asks first |
 | Home, Your library | Import disc, Remove pack, content toggles, Add soundtrack folder, soundtrack → Jukebox | same |
-| Home, Options & tools | Play intro, Shape viewer, Options (pilot name, Operator Setup), Tested game versions → Versions | same |
+| Home, Options & tools | Play intro, Shape viewer, **Run dedicated server...** → the Run dedicated server sheet (start / stop a headless server on this PC; Close keeps it running), Options (pilot name, Operator Setup, **Online**: master server address), Tested game versions → Versions | same |
 | Jukebox | Stop / play tracks | Home |
 | Options | settings, Operator Setup (the active character slot) | Home |
 | Versions | each installed game's detected release (tested / untested), the tested-versions table; also from Options (Tested game versions) | the page it came from |
@@ -50,7 +50,7 @@ LAN or, for skirmish, the single player campaign and the solo raid, as an offlin
 
 | Screen | Buttons (→ target) | Back / Esc / pad B |
 |---|---|---|
-| Browser | a server → Lobby; primary: Join address → Lobby; under the original shell's MULTIPLAYER entry also Host LAN game → Lobby | the page it came from (the library home, or the original shell) |
+| Browser | sections LAN games (broadcast, auto-discovered), Online games (the master server's list, with Refresh and ping), Server matches (a server's page address), Join by address (IP, IP:port, host name, ws:// or https://; Check shows the server's name, players and ping; recent addresses); a server → Lobby; primary: Join address → Lobby; under the original shell's MULTIPLAYER entry also Host LAN game and Host online game → Lobby | the page it came from (the library home, or the original shell) |
 | Lobby | Game Options (the host edits: one **Game mode** picker lists every versus mode, co-op, co-op campaign, extraction raid and the training pages, with unavailable modes disabled and the reason shown; the Map list shows only the maps that mode can be played on; Save game and Hangar in a campaign), Operator Setup, the squad cards, chat, goals or the campaign briefing; primary: host Start match / Start mission (disabled until everyone is ready and on a team), client Ready / Not ready | "Leave" ends the session and returns to the page it came from (Browser / library home). A single player campaign lobby saves and goes to the main menu. After a battle the lobby is the first page, so Leave goes to the main menu |
 | Training | mission list; primary: Start training → battle | the page it came from |
 | New campaign | pilot name, campaign choice; primary: Start campaign → Lobby (campaign) | the page it came from |

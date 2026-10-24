@@ -20,15 +20,21 @@ Output (all positions metres in the engine frame):
                      export (kind, destination / target / patrol-point names, Priority, movement area); goalName names the goal for
                      removal ("DefaultGuardGoal" is every soldier's guard-the-spawn goal)
 Ops: goal speak wait obj_add obj_status obj_remove exec exit_script if loop exit_loop for var enable disable destroy spawn_on spawn_off
-teleport damage prompt sound next fail countdown spawn_vehicle enter_vehicle noop(class)
+teleport damage prompt sound next fail countdown spawn_vehicle spawn_npc enter_vehicle noop(class)
   ActionSpawnRook with a Vehicle* SpawnClass  {op spawn_vehicle, class, label (rookLabel), team (teamLabel), at (locationByActor label)}
+  ActionSpawnRook with an AI* SpawnClass  {op spawn_npc, class, label (rookLabel), team (teamLabel), at (locationByActor label), body (the
+                     class's Mesh as a pack body), health (healthModifier), armor (armorClass)}
   ActionEnterVehicle  {op enter_vehicle, character, vehicle}   vehicle goals (AI_VehiclePatrolGoal ...): kinds vehicle_patrol (points, once,
                      target, speed), vehicle_move (dest, speed), vehicle_attack (target), vehicle_guard, enter_vehicle (vehicle, seat), expel (occupant)
 """
 import re
 
+import json
+import os
+
 import ue2_package as U
 import tv_audio
+import tv_skeletal
 
 # The goals the engine acts on: the ground soldiers' and the crewed vehicles' (the turret, animation and ski goals are not converted).
 GOAL_KINDS = {'AI_MoveToGoal': 'move', 'AI_SquadMoveToGoal': 'move', 'AI_GuardGoal': 'guard', 'AI_SquadGuardGoal': 'guard',
@@ -78,9 +84,31 @@ def var_name(s):
     return s[len('global.'):] if s.startswith('global.') else s
 
 
+SOLDIER_PREFIXES = ('AI', 'ColiseumCaptain')
+BODIES_FILE = os.path.join('gameplay', 'bodies.json')
+
+
+def make_npc_info(classes, pack_dir):
+    """The `npc_info` of compile_map: class name -> {body, health, armor} read from the UnrealScript class defaults (Mesh is the body the
+    soldier wears, healthModifier scales his health, armorClass names his armour); None for a class the game does not have. `classes` is a
+    ue2_classes.ClassIndex, `pack_dir` the pack that holds gameplay/bodies.json."""
+    with open(os.path.join(pack_dir, BODIES_FILE), encoding='utf-8') as f:
+        bodies = {b['id'] for b in json.load(f)['bodies']}
+
+    def info(cls):
+        if not classes.has(cls):
+            return None
+        d = classes.defaults(cls)
+        body = 'tv_' + str(d.get('Mesh', '')).lower()
+        return {'body': body if body in bodies else tv_skeletal.npc_body(cls), 'health': float(d.get('healthModifier', 1.0)),
+                'armor': str(d.get('armorClass', ''))}
+    return info
+
+
 class Compiler:
-    def __init__(self, pkg, to_world, texts, mpu):
+    def __init__(self, pkg, to_world, texts, mpu, npc_info=None):
         self.pkg, self.to_world, self.texts, self.mpu = pkg, to_world, texts, mpu
+        self.npc_info = npc_info
         self.labels = set()
         self.classes = {}
         self.depth = 0
@@ -146,6 +174,13 @@ class Compiler:
             out['points'] = [self.label(n) for n in self.name_list(g('patrolPointNames'))]
             out['once'] = bool(g('bExecuteOnce', False))
         return out
+
+    def spawn_npc(self, g):
+        """ActionSpawnRook of a soldier class: the class's body, health modifier and armour (npc_info), else the body guessed from the name."""
+        klass = str(g('SpawnClass', ''))
+        info = (self.npc_info(klass) if self.npc_info else None) or {'body': tv_skeletal.npc_body(klass), 'health': 1.0, 'armor': ''}
+        return {'op': 'spawn_npc', 'class': klass, 'label': str(g('rookLabel', '')), 'team': self.team_name(g('teamLabel', '')),
+                'at': self.label(g('locationByActor', '')), 'body': info['body'], 'health': info['health'], 'armor': info['armor']}
 
     def test(self, e):
         p = self.props(e)
@@ -228,6 +263,8 @@ class Compiler:
         if cls == 'ActionSpawnRook' and str(g('SpawnClass', '')).startswith('Vehicle'):
             return {'op': 'spawn_vehicle', 'class': str(g('SpawnClass', '')), 'label': str(g('rookLabel', '')),
                     'team': self.team_name(g('teamLabel', '')), 'at': self.label(g('locationByActor', ''))}
+        if cls == 'ActionSpawnRook' and str(g('SpawnClass', '')).startswith(SOLDIER_PREFIXES):
+            return self.spawn_npc(g)
         if cls == 'ActionEnterVehicle':
             return {'op': 'enter_vehicle', 'character': self.label(g('targetCharacter', '')), 'vehicle': self.label(g('targetVehicle', ''))}
         if cls == 'ActionNextCampaignMission':
@@ -246,9 +283,9 @@ def _position(props, to_world):
     return to_world(loc) if loc is not None else None
 
 
-def compile_map(pkg, to_world, texts, mpu):
-    """The script.json dictionary of one map package."""
-    c = Compiler(pkg, to_world, texts, mpu)
+def compile_map(pkg, to_world, texts, mpu, npc_info=None):
+    """The script.json dictionary of one map package (`npc_info`: make_npc_info)."""
+    c = Compiler(pkg, to_world, texts, mpu, npc_info)
     scripts, triggers = [], []
     for e in pkg.find('Script'):
         p = c.props(e)
